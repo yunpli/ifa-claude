@@ -1,0 +1,47 @@
+[project]
+name = "ifa-claude"
+version = "0.0.1"
+description = "iFA China Market Report System — P0 Macro morning/evening report engine"
+requires-python = ">=3.12,<3.14"
+readme = "README.md"
+
+dependencies = [
+    "openai>=1.54",            # OpenAI-compatible client; supports custom base_url for relays
+    "httpx>=0.27",
+    "tushare>=1.4.0",
+    "pandas>=2.2",             # tushare returns DataFrames
+    "psycopg[binary]>=3.2",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "jinja2>=3.1",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.5",
+    "python-dotenv>=1.0",
+    "typer>=0.12",
+    "rich>=13.7",
+    "structlog>=24.4",
+    "tenacity>=9.0",
+    "tzdata>=2024.1",
+]
+
+[project.scripts]
+ifa = "ifa.cli.__main__:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ifa"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"

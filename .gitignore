@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.python-version-local
+
+# uv
+uv.lock.local
+
+# Secrets & local env (NEVER commit)
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Local runtime artifacts (generated reports, logs, snapshots)
+out/
+logs/
+*.log
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+.ipynb_checkpoints/
+
+# Test caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
