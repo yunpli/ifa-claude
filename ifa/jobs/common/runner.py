@@ -28,6 +28,7 @@ import structlog
 from sqlalchemy.engine import Engine
 
 from ifa.config import RunMode
+from ifa.core.report.timezones import BJT
 from ifa.core.llm import LLMClient
 from ifa.core.tushare import TuShareClient
 from ifa.jobs.common.llm_batch import (
@@ -229,7 +230,15 @@ def _filter_to_candidates(df: pd.DataFrame, specs: list[KeywordSpec]) -> list[Ca
         if not matched:
             continue
         pt = row.get("publish_time")
-        pt_iso = pt.isoformat() if isinstance(pt, (pd.Timestamp, dt.datetime)) and not pd.isna(pt) else ""
+        pt_iso = ""
+        if isinstance(pt, (pd.Timestamp, dt.datetime)) and not pd.isna(pt):
+            # TuShare news/major_news/npr return Beijing wall-clock timestamps as
+            # naive datetimes. Tag them as BJT so the downstream UTC conversion
+            # is correct (otherwise everything ends up shifted by +8h).
+            py_pt = pt.to_pydatetime() if isinstance(pt, pd.Timestamp) else pt
+            if py_pt.tzinfo is None:
+                py_pt = py_pt.replace(tzinfo=BJT)
+            pt_iso = py_pt.isoformat()
         out.append(CandidateInput(
             candidate_index=len(out),
             title=str(row.get("title", "")),

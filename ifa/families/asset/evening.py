@@ -375,9 +375,17 @@ def _build_e7_news(ctx: AssetEveningCtx) -> dict:
             "type": "news_list",
             "content_json": {"events": [], "fallback_text": "今日窗口未捕获显著的商品/期货相关新闻。"},
         }
+    from ifa.core.report.timezones import BJT
     candidates = []
     for _, row in ctx.news_df.head(20).iterrows():
         dt_v = row.get("datetime")
+        if hasattr(dt_v, "tz_localize") and dt_v.tzinfo is None:
+            try:
+                dt_v = dt_v.tz_localize(BJT)
+            except Exception:
+                pass
+        elif hasattr(dt_v, "replace") and getattr(dt_v, "tzinfo", None) is None:
+            dt_v = dt_v.replace(tzinfo=BJT)
         candidates.append({
             "title": row.get("title"),
             "source_name": row.get("src_label") or row.get("src"),

@@ -524,9 +524,19 @@ def _build_s7_news(ctx: AssetCtx) -> dict:
             "type": "news_list",
             "content_json": {"events": [], "fallback_text": "近 36 小时未捕获显著的商品/能源/金属/农产品相关新闻。"},
         }
+    from ifa.core.report.timezones import BJT
     candidates = []
     for _, row in ctx.news_df.head(20).iterrows():
         dt_v = row.get("datetime")
+        # TuShare returns naive Beijing wall-clock; tag with BJT so the LLM
+        # receives an unambiguous tz-aware timestamp.
+        if hasattr(dt_v, "tz_localize") and dt_v.tzinfo is None:
+            try:
+                dt_v = dt_v.tz_localize(BJT)
+            except Exception:
+                pass
+        elif hasattr(dt_v, "replace") and getattr(dt_v, "tzinfo", None) is None:
+            dt_v = dt_v.replace(tzinfo=BJT)
         candidates.append({
             "title": row.get("title"),
             "source_name": row.get("src_label") or row.get("src"),

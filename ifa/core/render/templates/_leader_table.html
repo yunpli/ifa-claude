@@ -1,0 +1,36 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.leaders %}
+  <table class="ifa-matrix">
+    <thead>
+      <tr>
+        <th style="width:13%">股票</th>
+        <th style="width:9%">所在层</th>
+        <th style="width:11%">龙头类型</th>
+        <th>今日观察</th>
+        <th style="width:18%">风险 / 失效</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.leaders %}
+      <tr>
+        <td>
+          <div class="ifa-matrix__dim">{{ r.stock_name }}</div>
+          <div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);">{{ r.stock_code }}</div>
+        </td>
+        <td><span class="ifa-tone__pill" style="font-size:10px; padding:1px 6px;">{{ (r.layer_id or '—') | upper }}</span></td>
+        <td><span class="ifa-matrix__signal" data-signal="升温">{{ r.role or '—' }}</span></td>
+        <td>{{ r.today_observation or '—' }}</td>
+        <td>
+          <div style="font-size:12px; color:var(--ink-2);">{{ r.risk_note or '—' }}</div>
+          {% if r.failure_condition %}<div style="font-size:11.5px; color:var(--down); font-style:italic; margin-top:3px;">失效 · {{ r.failure_condition }}</div>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '今日科技板块暂无显著龙头线索。' }}</div>
+  {% endif %}
+</section>

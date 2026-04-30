@@ -1,0 +1,59 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.rows %}
+  <div class="ifa-focus-grid">
+    {% for r in c.rows %}
+    <div class="ifa-focus-card">
+      <div class="ifa-focus-card__head">
+        <div>
+          <span class="ifa-focus-card__name">{{ r.stock_name }}</span>
+          <span class="ifa-focus-card__code">{{ r.stock_code }}</span>
+        </div>
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <span class="ifa-tone__pill" style="font-size:9.5px; padding:2px 6px;">{{ (r.layer_id or '—') | upper }}</span>
+          {% if r.status %}<span class="ifa-tone__pill" data-tone="{{ '积极' if r.status == '强势' else ('谨慎' if r.status in ['退潮观察','分歧'] else '中性') }}" style="font-size:9.5px; padding:2px 6px;">{{ r.status }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="ifa-focus-card__sub">{{ r.sub_theme }} · 收盘 {{ r.close_display or '—' }} · {{ r.pct_display or '—' }} · 主力 {{ r.mf_display or '—' }}</div>
+      {% if r.spark_svg %}<div class="ifa-focus-card__spark">{{ r.spark_svg | safe }}</div>{% endif %}
+      <div class="ifa-focus-card__obs">{{ r.today_observation or '—' }}</div>
+      {% if r.scenario_plans %}
+      <div class="ifa-focus-card__scenarios">
+        {% for sp in r.scenario_plans %}
+        <div class="ifa-focus-card__scenario" data-label="{{ sp.label }}">
+          <span class="ifa-focus-card__scenario-lbl">{{ sp.label | upper }}</span>
+          <span class="ifa-focus-card__scenario-cond">{{ sp.condition }}</span>
+          <span class="ifa-focus-card__scenario-out">→ {{ sp.outlook }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if r.risk_note %}<div class="ifa-focus-card__risk">{{ r.risk_note }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '今日重点关注池中无可深度观察的科技标的。' }}</div>
+  {% endif %}
+</section>
+<style>
+.ifa-focus-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+.ifa-focus-card{border:1px solid var(--rule);border-left:3px solid var(--accent);background:var(--paper);padding:14px 16px;border-radius:2px;}
+.ifa-focus-card__head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px solid var(--rule);padding-bottom:6px;margin-bottom:6px;}
+.ifa-focus-card__name{font-family:var(--font-serif);font-size:15.5px;font-weight:600;color:var(--ink);}
+.ifa-focus-card__code{font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);margin-left:6px;}
+.ifa-focus-card__sub{font-size:11.5px;color:var(--ink-muted);margin-bottom:6px;font-variant-numeric:tabular-nums;}
+.ifa-focus-card__spark{margin:6px 0;}
+.ifa-focus-card__obs{font-size:13px;color:var(--ink-2);line-height:1.55;margin:6px 0;}
+.ifa-focus-card__scenarios{display:flex;flex-direction:column;gap:4px;padding-top:6px;border-top:1px dashed var(--rule);}
+.ifa-focus-card__scenario{display:grid;grid-template-columns:74px 1fr;gap:8px;font-size:11.5px;align-items:start;}
+.ifa-focus-card__scenario[data-label="bullish"] .ifa-focus-card__scenario-lbl{color:var(--up);}
+.ifa-focus-card__scenario[data-label="failure"] .ifa-focus-card__scenario-lbl{color:var(--down);}
+.ifa-focus-card__scenario[data-label="base"] .ifa-focus-card__scenario-lbl{color:var(--ink-muted);}
+.ifa-focus-card__scenario-lbl{font-size:9.5px;letter-spacing:0.1em;font-weight:700;}
+.ifa-focus-card__scenario-cond{color:var(--ink-2);}
+.ifa-focus-card__scenario-out{color:var(--ink-muted);font-style:italic;grid-column:2;font-size:11px;}
+.ifa-focus-card__risk{margin-top:8px;padding-top:6px;border-top:1px solid var(--rule);font-size:11.5px;color:var(--down);font-style:italic;}
+@media (max-width:720px){.ifa-focus-grid{grid-template-columns:1fr;}.ifa-focus-card__scenario{grid-template-columns:1fr;}.ifa-focus-card__scenario-out{grid-column:1;}}
+</style>

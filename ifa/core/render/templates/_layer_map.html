@@ -1,0 +1,66 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <p class="ifa-section__intro">参考 NVIDIA / Jensen 的 AI Five-Layer Cake 框架，将 A 股科技板块映射到产业链 5 层。</p>
+  <div class="ifa-layer-stack">
+    {% for L in c.layers %}
+    <div class="ifa-layer-row" data-layer="{{ L.layer_id }}">
+      <div class="ifa-layer-row__head">
+        <div>
+          <span class="ifa-layer-row__num">L{{ loop.index }}</span>
+          <span class="ifa-layer-row__name">{{ L.layer_name }}</span>
+          <span class="ifa-layer-row__name-en">· {{ L.layer_en }}</span>
+        </div>
+        <div class="ifa-layer-row__pills">
+          <span class="ifa-layer-row__pill" data-pill="{{ L.yesterday_strength or '—' }}">昨日 {{ L.yesterday_strength or '—' }}</span>
+          <span class="ifa-layer-row__pill" data-pill="{{ L.today_attention or '—' }}">今日关注 {{ L.today_attention or '—' }}</span>
+          {% if L.rotation_role %}<span class="ifa-layer-row__pill" data-pill-role="{{ L.rotation_role }}">{{ L.rotation_role }}</span>{% endif %}
+        </div>
+      </div>
+      <p class="ifa-layer-row__narrative">{{ L.narrative }}</p>
+      {% if L.boards %}
+      <div class="ifa-layer-row__boards">
+        {% for b in L.boards %}
+        <span class="ifa-layer-row__board {% if b.pct_dir == 'up' %}up{% elif b.pct_dir == 'down' %}down{% endif %}">
+          {{ b.name }} <em>{{ b.pct_display }}</em>
+        </span>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if L.key_observation %}
+      <div class="ifa-layer-row__obs">
+        <strong>今日观察</strong>{{ L.key_observation }}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+<style>
+.ifa-layer-stack{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
+.ifa-layer-row{border:1px solid var(--rule);border-left:4px solid var(--accent);background:var(--paper-tint);padding:14px 16px;border-radius:2px;}
+.ifa-layer-row[data-layer="energy"]{border-left-color:#c4892a;}
+.ifa-layer-row[data-layer="chips"]{border-left-color:#8a1c20;}
+.ifa-layer-row[data-layer="infra"]{border-left-color:#1a4f7a;}
+.ifa-layer-row[data-layer="models"]{border-left-color:#2a6f47;}
+.ifa-layer-row[data-layer="apps"]{border-left-color:#5a3784;}
+.ifa-layer-row__head{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:6px;margin-bottom:6px;}
+.ifa-layer-row__num{font-family:var(--font-serif);font-size:11px;font-weight:600;color:var(--accent);letter-spacing:0.1em;margin-right:8px;}
+.ifa-layer-row__name{font-family:var(--font-serif);font-size:15.5px;font-weight:600;color:var(--ink);}
+.ifa-layer-row__name-en{font-family:var(--font-serif);font-size:12px;color:var(--ink-soft);font-style:italic;margin-left:4px;}
+.ifa-layer-row__pills{display:flex;gap:6px;flex-wrap:wrap;}
+.ifa-layer-row__pill{font-size:10.5px;padding:2px 8px;background:var(--rule-soft);color:var(--ink-2);border-radius:2px;font-weight:600;letter-spacing:0.04em;}
+.ifa-layer-row__pill[data-pill="强"]{background:var(--up-soft);color:var(--up);}
+.ifa-layer-row__pill[data-pill="弱"]{background:var(--down-soft);color:var(--down);}
+.ifa-layer-row__pill[data-pill="高"]{background:var(--accent-soft);color:var(--accent);}
+.ifa-layer-row__pill[data-pill-role="主线"]{background:var(--accent-soft);color:var(--accent);}
+.ifa-layer-row__pill[data-pill-role="退潮"]{background:var(--down-soft);color:var(--down);}
+.ifa-layer-row__narrative{margin:4px 0 8px;font-size:12.5px;color:var(--ink-muted);line-height:1.5;}
+.ifa-layer-row__boards{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 8px;}
+.ifa-layer-row__board{font-size:11.5px;padding:3px 8px;background:var(--paper);border:1px solid var(--rule);border-radius:2px;color:var(--ink-2);font-variant-numeric:tabular-nums;}
+.ifa-layer-row__board.up{border-color:var(--up);color:var(--up);}
+.ifa-layer-row__board.down{border-color:var(--down);color:var(--down);}
+.ifa-layer-row__board em{font-family:var(--font-mono);font-style:normal;font-weight:600;margin-left:4px;}
+.ifa-layer-row__obs{font-size:13px;color:var(--ink-2);padding-top:8px;border-top:1px dashed var(--rule);line-height:1.55;}
+.ifa-layer-row__obs strong{display:inline-block;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);margin-right:8px;font-weight:700;}
+</style>

@@ -58,6 +58,45 @@ def macro(
     console.print(f"\n[bold green]Report saved:[/bold green] {path}")
 
 
+@app.command("tech")
+def tech(
+    slot: str = typer.Option(..., "--slot", help="morning | evening"),
+    report_date: str = typer.Option(..., "--report-date", help="YYYY-MM-DD (Beijing date)"),
+    user: str = typer.Option("default", "--user", help="user identifier; v1 only supports 'default'"),
+    cutoff_time: str | None = typer.Option(
+        None, "--cutoff-time",
+        help="HH:MM Beijing time. Default 09:10 for morning, 18:00 for evening."),
+    triggered_by: str | None = typer.Option(None, "--triggered-by"),
+    mode: str | None = typer.Option(None, "--mode", help="test|manual|production"),
+) -> None:
+    """Render a Tech (AI Five-Layer Cake) report and save HTML."""
+    _override_mode(mode)
+
+    rd = dt.datetime.strptime(report_date, "%Y-%m-%d").date()
+    if slot == "morning":
+        cutoff_str = cutoff_time or "09:10"
+        from ifa.families.tech.morning import run_tech_morning
+        cutoff_utc = parse_bjt_cutoff(report_date, cutoff_str)
+        path = run_tech_morning(
+            report_date=rd, data_cutoff_at=cutoff_utc, user=user,
+            triggered_by=triggered_by,
+            on_log=lambda m: console.print(f"  {m}"),
+        )
+    elif slot == "evening":
+        cutoff_str = cutoff_time or "18:00"
+        from ifa.families.tech.evening import run_tech_evening
+        cutoff_utc = parse_bjt_cutoff(report_date, cutoff_str)
+        path = run_tech_evening(
+            report_date=rd, data_cutoff_at=cutoff_utc, user=user,
+            triggered_by=triggered_by,
+            on_log=lambda m: console.print(f"  {m}"),
+        )
+    else:
+        raise typer.BadParameter(f"slot must be 'morning' or 'evening' (got {slot})")
+
+    console.print(f"\n[bold green]Report saved:[/bold green] {path}")
+
+
 @app.command("asset")
 def asset(
     slot: str = typer.Option(..., "--slot", help="morning | evening"),

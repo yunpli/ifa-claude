@@ -1,0 +1,41 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <p class="ifa-section__intro">蓄势待发候选——板块强势但个股尚未充分表现的观察对象。仅供盘中观察 / 验证假设使用，不构成买卖建议。</p>
+  {% if c.candidates %}
+  <div class="ifa-cand-grid">
+    {% for r in c.candidates %}
+    <div class="ifa-cand-card">
+      <div class="ifa-cand-card__head">
+        <div>
+          <span class="ifa-cand-card__name">{{ r.stock_name }}</span>
+          <span class="ifa-cand-card__code">{{ r.stock_code }}</span>
+        </div>
+        <span class="ifa-cand-card__layer">{{ (r.layer_id or '—') | upper }}</span>
+      </div>
+      <div class="ifa-cand-card__row"><span class="ifa-cand-card__lbl">蓄势逻辑</span><span>{{ r.setup_logic or '—' }}</span></div>
+      <div class="ifa-cand-card__row up"><span class="ifa-cand-card__lbl">触发条件</span><span>{{ r.trigger_condition or '—' }}</span></div>
+      <div class="ifa-cand-card__row down"><span class="ifa-cand-card__lbl">失效条件</span><span>{{ r.failure_condition or '—' }}</span></div>
+      <div class="ifa-cand-card__row"><span class="ifa-cand-card__lbl">风险</span><span>{{ r.risk_note or '—' }}</span></div>
+      <div class="ifa-cand-card__strength">信号强度 · {{ r.signal_strength or '—' }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '今日候选池暂未筛出符合标准的标的。' }}</div>
+  {% endif %}
+</section>
+<style>
+.ifa-cand-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.ifa-cand-card{border:1px solid var(--rule);border-left:3px solid var(--accent-2);background:var(--paper-tint);padding:14px 16px;border-radius:2px;}
+.ifa-cand-card__head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px dashed var(--rule);padding-bottom:6px;margin-bottom:8px;}
+.ifa-cand-card__name{font-family:var(--font-serif);font-size:15px;font-weight:600;color:var(--ink);}
+.ifa-cand-card__code{font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);margin-left:6px;}
+.ifa-cand-card__layer{font-size:10.5px;letter-spacing:0.08em;padding:2px 8px;background:var(--rule-soft);color:var(--ink-2);border-radius:2px;font-weight:600;}
+.ifa-cand-card__row{display:grid;grid-template-columns:74px 1fr;gap:10px;font-size:12.5px;color:var(--ink-2);padding:4px 0;}
+.ifa-cand-card__row.up .ifa-cand-card__lbl{color:var(--up);}
+.ifa-cand-card__row.down .ifa-cand-card__lbl{color:var(--down);}
+.ifa-cand-card__lbl{font-size:10.5px;color:var(--ink-muted);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding-top:1px;}
+.ifa-cand-card__strength{margin-top:8px;padding-top:6px;border-top:1px solid var(--rule);font-size:11px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;text-align:right;}
+@media (max-width:720px){.ifa-cand-grid{grid-template-columns:1fr;}}
+</style>

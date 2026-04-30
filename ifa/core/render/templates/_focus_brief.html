@@ -1,0 +1,37 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.rows %}
+  <table class="ifa-panel">
+    <thead>
+      <tr>
+        <th style="width:18%">股票</th>
+        <th style="width:10%">所在层</th>
+        <th style="width:11%">收盘</th>
+        <th style="width:9%; text-align:right">涨跌</th>
+        <th style="width:14%">趋势</th>
+        <th style="width:10%">状态</th>
+        <th>今日提示</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td>
+          <div class="ifa-panel__indicator">{{ r.stock_name }}</div>
+          <span class="ifa-panel__period">{{ r.stock_code }} · {{ r.sub_theme }}</span>
+        </td>
+        <td><span class="ifa-tone__pill" style="font-size:9.5px; padding:2px 6px;">{{ (r.layer_id or '—') | upper }}</span></td>
+        <td class="ifa-panel__value">{{ r.close_display or '—' }}</td>
+        <td class="ifa-panel__delta {% if r.pct_dir == 'up' %}ifa-panel__delta--up{% elif r.pct_dir == 'down' %}ifa-panel__delta--down{% else %}ifa-panel__delta--flat{% endif %}">{{ r.pct_display or '—' }}</td>
+        <td class="ifa-panel__chart">{{ r.spark_svg | safe }}</td>
+        <td><span class="ifa-matrix__signal" data-signal="{{ '升温' if r.state == '强势' else ('降温' if r.state in ['退潮','弱修复'] else '平稳') }}">{{ r.state or '—' }}</span></td>
+        <td class="ifa-panel__note">{{ r.today_hint or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '今日普通关注池中无可观察的科技标的。' }}</div>
+  {% endif %}
+</section>

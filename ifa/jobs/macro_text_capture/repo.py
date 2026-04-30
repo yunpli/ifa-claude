@@ -104,6 +104,8 @@ def _api_from_label(label: str | None) -> str | None:
 
 
 def _parse_dt(s: str | None) -> dt.datetime | None:
+    """Parse ISO datetime. Naive strings are assumed Beijing local time
+    (TuShare news APIs return Beijing wall-clock as naive datetimes)."""
     if not s:
         return None
     try:
@@ -111,5 +113,5 @@ def _parse_dt(s: str | None) -> dt.datetime | None:
     except ValueError:
         return None
     if d.tzinfo is None:
-        d = d.replace(tzinfo=dt.timezone.utc)
+        d = d.replace(tzinfo=dt.timezone(dt.timedelta(hours=8), name="Asia/Shanghai"))
     return d

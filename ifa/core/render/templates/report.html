@@ -68,6 +68,20 @@
       {% include "_chain_review.html" %}
     {% elif s.type == 'transmission_review' %}
       {% include "_transmission_review.html" %}
+    {% elif s.type == 'tech_tone' %}
+      {% include "_tech_tone.html" %}
+    {% elif s.type == 'layer_map' %}
+      {% include "_layer_map.html" %}
+    {% elif s.type == 'leader_table' %}
+      {% include "_leader_table.html" %}
+    {% elif s.type == 'candidate_pool' %}
+      {% include "_candidate_pool.html" %}
+    {% elif s.type == 'focus_deep' %}
+      {% include "_focus_deep.html" %}
+    {% elif s.type == 'focus_brief' %}
+      {% include "_focus_brief.html" %}
+    {% elif s.type == 'us_overnight' %}
+      {% include "_us_overnight.html" %}
     {% elif s.type == 'disclaimer' %}
       {% include "_disclaimer.html" %}
     {% endif %}
