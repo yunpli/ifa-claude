@@ -129,7 +129,39 @@ uv run ifa healthcheck
 ```
 Pings primary LLM, fallback LLM, TuShare, and the database.
 
-### 4. Generate a Macro report (once schema & sections are landed)
+### 4. Run the macro pre-jobs (text capture + policy memory)
+These two scaffold jobs feed the morning/evening reports with low-frequency
+macro signals that TuShare doesn't expose as structured data:
+
+```bash
+# Extract 新增人民币贷款 / 人民币贷款余额 from major_news / news / npr
+uv run ifa job text-capture --lookback-days 90 --mode test
+
+# Curate active policy events into the active-memory table
+uv run ifa job policy-memory --lookback-days 14 --mode test
+```
+
+Both are **incremental**: each run advances `news_scan_watermarks`, so the
+next call only scans rows newer than the high-water mark. The first run on
+a fresh DB will scan up to `--lookback-days` (capped at 90).
+
+Pipeline per source (chunked weekly):
+1. **Keyword filter (no LLM)** — narrow ten-thousand-row news dumps down to a
+   few candidates that mention the target indicator / policy dimension.
+2. **Batch LLM extraction (5 candidates / call)** — `gpt-5.4` returns strict
+   JSON; on parse failure we retry once at temperature 0 then drop the batch.
+3. **Idempotent upsert** — `macro_text_derived_indicators` (unique on
+   `(source_url, indicator_name, reported_period)`) and
+   `macro_policy_event_memory` (unique on `event_id` derived from URL/title/time).
+
+Audit script (read-only, no DB writes):
+```bash
+uv run python scripts/audit_macro_sources.py --lookback-days 30
+```
+Probes which TuShare structured macro endpoints are live, prints news keyword
+density per source, and shows the latest `npr` policy items.
+
+### 5. Generate a Macro report (once schema & sections are landed)
 ```bash
 uv run ifa generate macro \
   --slot morning \

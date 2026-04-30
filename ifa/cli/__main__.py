@@ -4,6 +4,7 @@ from __future__ import annotations
 import typer
 
 from ifa.cli.healthcheck import healthcheck_command
+from ifa.cli.jobs import app as jobs_app
 
 app = typer.Typer(no_args_is_help=True, add_completion=False, help="iFA China Market Report System")
 
@@ -14,6 +15,7 @@ def _root() -> None:
 
 
 app.command("healthcheck")(healthcheck_command)
+app.add_typer(jobs_app, name="job")
 
 
 if __name__ == "__main__":
