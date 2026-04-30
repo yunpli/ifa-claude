@@ -1,0 +1,37 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.rows %}
+  <table class="ifa-capture">
+    <thead>
+      <tr>
+        <th>指标</th>
+        <th>期间</th>
+        <th style="text-align:right">数值</th>
+        <th style="text-align:right">同比</th>
+        <th>来源</th>
+        <th>发布时间</th>
+        <th>原文证据</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td>{{ r.indicator_display }}</td>
+        <td>{{ r.reported_period or '—' }}</td>
+        <td class="ifa-capture__value" style="text-align:right">{{ r.value_display or '—' }}</td>
+        <td class="ifa-capture__value" style="text-align:right">{{ r.yoy_display or '—' }}</td>
+        <td>{{ r.source_name or '—' }}</td>
+        <td class="ifa-capture__value">{{ r.publish_time_display or '—' }}</td>
+        <td class="ifa-capture__evidence">{{ r.evidence_sentence or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p style="font-size:11.5px; color:var(--ink-muted); margin-top:10px; font-style:italic;">
+    新闻源抽取，待官方结构化源确认。M0/M1/M2、社融、CPI/PPI/PMI/GDP 已由 TuShare 结构化数据源提供，不在此表中。
+  </p>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '本报告窗口内未捕获新增"新增贷款 / 贷款余额"等低频金融数据。' }}</div>
+  {% endif %}
+</section>

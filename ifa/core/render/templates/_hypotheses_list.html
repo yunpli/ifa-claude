@@ -1,0 +1,18 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <ul class="ifa-hypo-list">
+    {% for h in c.hypotheses %}
+    <li class="ifa-hypo-list__item">
+      <div class="ifa-hypo-list__title">{{ h.hypothesis }}</div>
+      <div class="ifa-hypo-list__detail">
+        <span class="ifa-hypo-list__label">验证方式</span><span>{{ h.validation_method or '—' }}</span>
+        <span class="ifa-hypo-list__label">观察窗口</span><span>{{ h.observation_window or '—' }}</span>
+        <span class="ifa-hypo-list__label">关联板块</span><span>{{ (h.related_markets_or_sectors or []) | join('、') or '—' }}</span>
+        <span class="ifa-hypo-list__label">通过判定</span><span>{{ h.review_rule or '—' }}</span>
+        <span class="ifa-hypo-list__label">置信度</span><span>{{ h.confidence or '—' }}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>

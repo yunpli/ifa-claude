@@ -1,0 +1,17 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <ul class="ifa-hypo-list">
+    {% for w in c['items'] %}
+    <li class="ifa-hypo-list__item">
+      <div class="ifa-hypo-list__title">{{ w.event_or_indicator }}</div>
+      <div class="ifa-hypo-list__detail">
+        <span class="ifa-hypo-list__label">关注原因</span><span>{{ w.reason or '—' }}</span>
+        <span class="ifa-hypo-list__label">观察窗口</span><span>{{ w.window or '—' }}</span>
+        <span class="ifa-hypo-list__label">关联板块</span><span>{{ (w.related or []) | join('、') or '—' }}</span>
+        <span class="ifa-hypo-list__label">优先级</span><span>{{ w.priority or '—' }}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>

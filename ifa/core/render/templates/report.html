@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{ report.title }}</title>
+<style>{{ inline_css }}</style>
+</head>
+<body>
+<article class="ifa-page">
+
+  {# ── Banner / Header ────────────────────────────────────────────── #}
+  <header class="ifa-banner">
+    <div class="ifa-banner__brand">Lindenwood Management LLC · iFA China Market</div>
+    <h1 class="ifa-banner__title">{{ report.title }}</h1>
+    <div class="ifa-banner__subtitle">{{ report.subtitle_en }}</div>
+    <div class="ifa-banner__meta">
+      <span><strong>报告日期</strong> {{ report.report_date_bjt }}</span>
+      <span><strong>数据截止</strong> {{ report.data_cutoff_bjt }} 北京时间</span>
+      <span><strong>模板</strong> {{ report.template_version }}</span>
+      <span><strong>运行模式</strong> {{ report.run_mode }}</span>
+    </div>
+    <div class="ifa-banner__short-disclaimer">
+      由 Lindenwood Management LLC 编制。仅供信息汇总与研究参考，不构成投资建议。
+      <br>
+      Prepared by Lindenwood Management LLC for informational and research purposes only.
+      Not investment advice.
+    </div>
+  </header>
+
+  {# ── Sections ───────────────────────────────────────────────────── #}
+  {% for s in report.sections %}
+    {% if s.type == 'tone_card' %}
+      {% include "_tone_card.html" %}
+    {% elif s.type == 'data_panel' %}
+      {% include "_data_panel.html" %}
+    {% elif s.type == 'liquidity_grid' %}
+      {% include "_liquidity_grid.html" %}
+    {% elif s.type == 'news_list' %}
+      {% include "_news_list.html" %}
+    {% elif s.type == 'policy_matrix' %}
+      {% include "_policy_matrix.html" %}
+    {% elif s.type == 'cross_asset_grid' %}
+      {% include "_cross_asset.html" %}
+    {% elif s.type == 'mapping_table' %}
+      {% include "_mapping_table.html" %}
+    {% elif s.type == 'risk_list' %}
+      {% include "_risk_list.html" %}
+    {% elif s.type == 'hypotheses_list' %}
+      {% include "_hypotheses_list.html" %}
+    {% elif s.type == 'indicator_capture_table' %}
+      {% include "_capture_table.html" %}
+    {% elif s.type == 'review_table' %}
+      {% include "_review_table.html" %}
+    {% elif s.type == 'attribution' %}
+      {% include "_attribution.html" %}
+    {% elif s.type == 'watchlist' %}
+      {% include "_watchlist.html" %}
+    {% elif s.type == 'commentary' %}
+      {% include "_commentary.html" %}
+    {% elif s.type == 'disclaimer' %}
+      {% include "_disclaimer.html" %}
+    {% endif %}
+  {% endfor %}
+
+  {# ── Footer ─────────────────────────────────────────────────────── #}
+  <footer class="ifa-footer">
+    <strong>Lindenwood Management LLC</strong> ｜ For informational purposes only. Not investment advice. Investment involves risk.<br>
+    See full disclaimer at the end of this report. ｜ 完整免责声明见报告末尾。<br>
+    Generated {{ report.generated_at_bjt }} 北京时间 · Run-ID {{ report.report_run_id_short }} · {{ report.template_version }}
+  </footer>
+
+</article>
+</body>
+</html>

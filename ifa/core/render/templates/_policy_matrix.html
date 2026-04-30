@@ -1,0 +1,34 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <table class="ifa-matrix">
+    <thead>
+      <tr>
+        <th style="width:18%">政策维度</th>
+        <th style="width:11%">当前信号</th>
+        <th style="width:14%">来源依据</th>
+        <th style="width:25%">受影响方向</th>
+        <th>今日交易含义</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td><span class="ifa-matrix__dim">{{ r.policy_dimension }}</span></td>
+        <td><span class="ifa-matrix__signal" data-signal="{{ r.current_signal }}">{{ r.current_signal }}</span></td>
+        <td class="ifa-matrix__areas">{{ r.source_basis or '—' }}</td>
+        <td class="ifa-matrix__areas">
+          {% for a in r.affected_areas or [] %}<span>{{ a }}</span>{% endfor %}
+        </td>
+        <td>{{ r.trading_implication_today or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if c.summary %}
+  <div class="ifa-commentary">
+    <span class="ifa-commentary__label">政策综述</span>
+    <div>{{ c.summary }}</div>
+  </div>
+  {% endif %}
+</section>

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import typer
 
+from ifa.cli.generate import app as generate_app
 from ifa.cli.healthcheck import healthcheck_command
 from ifa.cli.jobs import app as jobs_app
 
@@ -16,6 +17,7 @@ def _root() -> None:
 
 app.command("healthcheck")(healthcheck_command)
 app.add_typer(jobs_app, name="job")
+app.add_typer(generate_app, name="generate")
 
 
 if __name__ == "__main__":

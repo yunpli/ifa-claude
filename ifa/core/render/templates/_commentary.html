@@ -1,0 +1,8 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <div class="ifa-commentary" style="border-left-color: var(--accent); background: linear-gradient(180deg, var(--paper-tint) 0%, var(--paper) 100%);">
+    {% if c.label %}<span class="ifa-commentary__label">{{ c.label }}</span>{% endif %}
+    <div>{{ c.text }}</div>
+  </div>
+</section>

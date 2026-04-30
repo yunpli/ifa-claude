@@ -1,0 +1,28 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.rows %}
+  <table class="ifa-matrix">
+    <thead>
+      <tr>
+        <th style="width:36%">早盘判断</th>
+        <th style="width:11%">复盘结果</th>
+        <th>市场证据</th>
+        <th style="width:18%">下一步</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td>{{ r.hypothesis }}</td>
+        <td><span class="ifa-matrix__signal" data-signal="{{ '升温' if r.review_result == 'validated' else ('降温' if r.review_result == 'failed' else '平稳') }}">{{ r.review_result_display or r.review_result }}</span></td>
+        <td>{{ r.evidence_text or '—' }}</td>
+        <td class="ifa-matrix__areas">{{ r.lesson or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '今日无早盘判断需要复盘。' }}</div>
+  {% endif %}
+</section>

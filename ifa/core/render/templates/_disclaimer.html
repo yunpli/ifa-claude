@@ -1,0 +1,12 @@
+{% set c = s.content_json %}
+<section class="ifa-disclaimer">
+  <h3 class="ifa-disclaimer__h">Disclaimer</h3>
+  {% for p in c.paragraphs_en %}
+  <p>{{ p }}</p>
+  {% endfor %}
+
+  <h3 class="ifa-disclaimer__h">免责声明</h3>
+  {% for p in c.paragraphs_zh %}
+  <p>{{ p }}</p>
+  {% endfor %}
+</section>

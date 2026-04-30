@@ -1,0 +1,8 @@
+{# Reusable section head: number + title + optional intro #}
+<header class="ifa-section__head">
+  <span class="ifa-section__num">§{{ "%02d"|format(s.order) }}</span>
+  <h2 class="ifa-section__title">{{ s.title }}</h2>
+</header>
+{% if s.content_json.intro %}
+<p class="ifa-section__intro">{{ s.content_json.intro }}</p>
+{% endif %}

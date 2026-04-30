@@ -1,0 +1,21 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <p class="ifa-section__intro">
+    今日整体风险等级：<strong>{{ c.risk_level or '—' }}</strong>
+    {% if c.summary %}· {{ c.summary }}{% endif %}
+  </p>
+  <ul class="ifa-risk-list">
+    {% for r in c.risks %}
+    <li class="ifa-risk-list__item ifa-risk-list__item--{{ r.confidence_class or 'med' }}">
+      <div class="ifa-risk-list__title">{{ r.risk }}</div>
+      <div class="ifa-risk-list__detail">
+        <span class="ifa-risk-list__label">触发条件</span><span>{{ r.trigger or '—' }}</span>
+        <span class="ifa-risk-list__label">可能影响</span><span>{{ r.possible_impact or '—' }}</span>
+        <span class="ifa-risk-list__label">观察指标</span><span>{{ r.watch_indicator or '—' }}</span>
+        <span class="ifa-risk-list__label">数据时点</span><span>{{ r.data_timing or '—' }}</span>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</section>

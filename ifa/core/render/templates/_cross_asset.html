@@ -1,0 +1,34 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <table class="ifa-panel">
+    <thead>
+      <tr>
+        <th style="width:20%">变量</th>
+        <th style="width:12%">数据时点</th>
+        <th style="width:14%; text-align:right">最新值</th>
+        <th style="width:12%; text-align:right">变化</th>
+        <th>对 A 股映射</th>
+        <th style="width:9%; text-align:center">重要性</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c['items'] %}
+      <tr>
+        <td><span class="ifa-panel__indicator">{{ r.variable }}</span></td>
+        <td class="ifa-panel__period">{{ r.data_timing or '—' }}</td>
+        <td class="ifa-panel__value">{{ r.latest_value or '—' }}</td>
+        <td class="ifa-panel__delta {% if r.change_dir == 'up' %}ifa-panel__delta--up{% elif r.change_dir == 'down' %}ifa-panel__delta--down{% else %}ifa-panel__delta--flat{% endif %}">{{ r.latest_change or '—' }}</td>
+        <td class="ifa-panel__note">{{ r.a_share_mapping or '—' }}</td>
+        <td style="text-align:center; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-muted)">{{ r.importance or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if c.summary %}
+  <div class="ifa-commentary">
+    <span class="ifa-commentary__label">跨资产传导 · {{ c.cross_asset_tone or '弱传导' }}</span>
+    <div>{{ c.summary }}</div>
+  </div>
+  {% endif %}
+</section>

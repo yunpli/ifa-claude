@@ -1,0 +1,28 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <table class="ifa-matrix">
+    <thead>
+      <tr>
+        <th style="width:18%">宏观变量</th>
+        <th style="width:11%">数据时点</th>
+        <th style="width:18%">可能受益方向</th>
+        <th style="width:18%">可能承压方向</th>
+        <th>今日观察点</th>
+        <th style="width:9%; text-align:center">信号强度</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td><span class="ifa-matrix__dim">{{ r.macro_variable }}</span></td>
+        <td class="ifa-matrix__areas">{{ r.data_timing or '—' }}</td>
+        <td class="ifa-matrix__areas">{% for a in r.beneficiaries or [] %}<span>{{ a }}</span>{% endfor %}</td>
+        <td class="ifa-matrix__areas">{% for a in r.pressured_areas or [] %}<span>{{ a }}</span>{% endfor %}</td>
+        <td>{{ r.watch_point_today or '—' }}</td>
+        <td style="text-align:center; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-muted)">{{ r.signal_strength or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

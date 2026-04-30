@@ -1,0 +1,20 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <div class="ifa-grid">
+    {% for cell in c.cells %}
+    <div class="ifa-grid__cell">
+      <div class="ifa-grid__label">{{ cell.label }}</div>
+      <div class="ifa-grid__value">{{ cell.value }}{% if cell.unit %} <span style="font-size:13px;color:var(--ink-soft);font-family:var(--font-sans);font-weight:400">{{ cell.unit }}</span>{% endif %}</div>
+      {% if cell.delta %}<div class="ifa-grid__delta {{ cell.delta_dir or 'flat' }}">{{ cell.delta }}</div>{% endif %}
+      {% if cell.note %}<div class="ifa-grid__note">{{ cell.note }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% if c.commentary %}
+  <div class="ifa-commentary">
+    <span class="ifa-commentary__label">A 股归因 · {{ c.driver or '—' }}</span>
+    <div>{{ c.commentary }}</div>
+  </div>
+  {% endif %}
+</section>
