@@ -56,3 +56,43 @@ def macro(
         raise typer.BadParameter(f"slot must be 'morning' or 'evening' (got {slot})")
 
     console.print(f"\n[bold green]Report saved:[/bold green] {path}")
+
+
+@app.command("asset")
+def asset(
+    slot: str = typer.Option(..., "--slot", help="morning | evening"),
+    report_date: str = typer.Option(..., "--report-date", help="YYYY-MM-DD (Beijing date)"),
+    cutoff_time: str | None = typer.Option(
+        None, "--cutoff-time",
+        help="HH:MM Beijing time. Default 08:50 for morning, 17:30 for evening."),
+    triggered_by: str | None = typer.Option(None, "--triggered-by"),
+    mode: str | None = typer.Option(None, "--mode", help="test|manual|production"),
+) -> None:
+    """Render an Asset (cross-asset transmission) report and save HTML."""
+    _override_mode(mode)
+
+    rd = dt.datetime.strptime(report_date, "%Y-%m-%d").date()
+    if slot == "morning":
+        cutoff_str = cutoff_time or "08:50"
+        from ifa.families.asset.morning import run_asset_morning
+        cutoff_utc = parse_bjt_cutoff(report_date, cutoff_str)
+        path = run_asset_morning(
+            report_date=rd,
+            data_cutoff_at=cutoff_utc,
+            triggered_by=triggered_by,
+            on_log=lambda m: console.print(f"  {m}"),
+        )
+    elif slot == "evening":
+        cutoff_str = cutoff_time or "17:30"
+        from ifa.families.asset.evening import run_asset_evening
+        cutoff_utc = parse_bjt_cutoff(report_date, cutoff_str)
+        path = run_asset_evening(
+            report_date=rd,
+            data_cutoff_at=cutoff_utc,
+            triggered_by=triggered_by,
+            on_log=lambda m: console.print(f"  {m}"),
+        )
+    else:
+        raise typer.BadParameter(f"slot must be 'morning' or 'evening' (got {slot})")
+
+    console.print(f"\n[bold green]Report saved:[/bold green] {path}")

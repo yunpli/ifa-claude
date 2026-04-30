@@ -545,6 +545,30 @@ html, body {
   margin-left: 6px;
 }
 
+/* ── Commodity dashboard category blocks ───────────────────────────── */
+.ifa-cat-block { margin-bottom: 22px; }
+.ifa-cat-block:last-child { margin-bottom: 0; }
+.ifa-cat-block__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  padding-bottom: 4px;
+}
+.ifa-cat-block__label {
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+.ifa-cat-block__meta {
+  font-size: 11px;
+  color: var(--ink-muted);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Mobile ────────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
   .ifa-page { padding: 24px 18px 20px; box-shadow: none; }

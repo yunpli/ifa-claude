@@ -1,0 +1,26 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <table class="ifa-matrix">
+    <thead>
+      <tr>
+        <th style="width:14%">商品链</th>
+        <th style="width:22%">商品端信号</th>
+        <th style="width:24%">A 股相关板块</th>
+        <th style="width:13%">传导结论</th>
+        <th>解读</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td><span class="ifa-matrix__dim">{{ r.chain_name }}</span></td>
+        <td class="ifa-matrix__areas">{{ r.commodity_signal or '—' }}</td>
+        <td class="ifa-matrix__areas">{{ r.a_share_signal or '—' }}</td>
+        <td><span class="ifa-matrix__signal" data-signal="{{ '升温' if r.verdict == '传导有效' else ('降温' if '弱' in (r.verdict or '') else '平稳') }}">{{ r.verdict or '—' }}</span></td>
+        <td>{{ r.note or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

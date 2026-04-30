@@ -1,0 +1,30 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <div class="ifa-chain-grid">
+    {% for ch in c.chains %}
+    <div class="ifa-chain-card">
+      <div class="ifa-chain-card__head">
+        <span class="ifa-chain-card__name">{{ ch.name }}</span>
+        <span class="ifa-chain-card__signal" data-signal="{{ ch.upstream_signal or '—' }}">上游 {{ ch.upstream_signal or '—' }}</span>
+      </div>
+      <div class="ifa-chain-card__row"><span class="ifa-chain-card__lbl">中游影响</span><span>{{ ch.midstream_impact or '—' }}</span></div>
+      <div class="ifa-chain-card__row"><span class="ifa-chain-card__lbl">下游 / A 股</span><span>{{ ch.downstream_a_share or '—' }}</span></div>
+      <div class="ifa-chain-card__takeaway">{{ ch.takeaway or '—' }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+<style>
+.ifa-chain-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.ifa-chain-card{border:1px solid var(--rule);border-left:3px solid var(--accent-2);background:var(--paper-tint);padding:14px 16px;border-radius:2px;}
+.ifa-chain-card__head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;border-bottom:1px dashed var(--rule);padding-bottom:6px;}
+.ifa-chain-card__name{font-family:var(--font-serif);font-size:15px;font-weight:600;color:var(--ink);}
+.ifa-chain-card__signal{font-size:10.5px;letter-spacing:0.06em;padding:2px 8px;background:var(--rule-soft);color:var(--ink-2);border-radius:2px;font-weight:600;}
+.ifa-chain-card__signal[data-signal="上行"]{background:var(--up-soft);color:var(--up);}
+.ifa-chain-card__signal[data-signal="回落"],.ifa-chain-card__signal[data-signal="下行"]{background:var(--down-soft);color:var(--down);}
+.ifa-chain-card__row{display:grid;grid-template-columns:74px 1fr;gap:10px;font-size:12.5px;color:var(--ink-2);padding:4px 0;}
+.ifa-chain-card__lbl{font-size:10.5px;color:var(--ink-muted);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding-top:1px;}
+.ifa-chain-card__takeaway{margin-top:10px;padding-top:8px;border-top:1px solid var(--rule);font-size:13px;color:var(--ink);font-style:italic;line-height:1.55;}
+@media (max-width:720px){.ifa-chain-grid{grid-template-columns:1fr;}}
+</style>

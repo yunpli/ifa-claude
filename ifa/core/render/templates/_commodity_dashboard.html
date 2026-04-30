@@ -1,0 +1,49 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% for cat in c.categories %}
+  <div class="ifa-cat-block">
+    <div class="ifa-cat-block__head">
+      <span class="ifa-cat-block__label">{{ cat.name }}</span>
+      <span class="ifa-cat-block__meta">{{ cat.n_with_data }}/{{ cat.n_components }} 有数据 · 平均 {{ cat.avg_label or '—' }}</span>
+    </div>
+    <table class="ifa-panel">
+      <thead>
+        <tr>
+          <th style="width:14%">品种</th>
+          <th style="width:13%">主力合约</th>
+          <th style="width:11%; text-align:right">收盘</th>
+          <th style="width:10%; text-align:right">涨跌</th>
+          <th style="width:11%; text-align:right">成交</th>
+          <th style="width:11%; text-align:right">持仓</th>
+          <th style="width:14%">趋势</th>
+          <th>解读</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in cat.rows %}
+        <tr>
+          <td>
+            <div class="ifa-panel__indicator">{{ r.display_name }}</div>
+            <span class="ifa-panel__period">{{ r.logical_symbol }}</span>
+          </td>
+          <td class="ifa-panel__period" style="font-family: var(--font-mono); font-size:11.5px">{{ r.actual_contract or '—' }}</td>
+          <td class="ifa-panel__value">{{ r.close_display or '—' }}</td>
+          <td class="ifa-panel__delta {% if r.pct_dir == 'up' %}ifa-panel__delta--up{% elif r.pct_dir == 'down' %}ifa-panel__delta--down{% else %}ifa-panel__delta--flat{% endif %}">{{ r.pct_display or '—' }}</td>
+          <td class="ifa-panel__value">{{ r.vol_display or '—' }}</td>
+          <td class="ifa-panel__value">{{ r.oi_display or '—' }}</td>
+          <td class="ifa-panel__chart">{{ r.spark_svg | safe }}</td>
+          <td class="ifa-panel__note">{{ r.commentary or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+  {% if c.commentary %}
+  <div class="ifa-commentary">
+    <span class="ifa-commentary__label">商品端综述</span>
+    <div>{{ c.commentary }}</div>
+  </div>
+  {% endif %}
+</section>

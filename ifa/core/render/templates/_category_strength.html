@@ -1,0 +1,36 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <table class="ifa-matrix">
+    <thead>
+      <tr>
+        <th style="width:6%">名次</th>
+        <th style="width:14%">大类</th>
+        <th style="width:11%">强度</th>
+        <th style="width:10%; text-align:right">平均涨跌</th>
+        <th style="width:10%; text-align:right">上涨占比</th>
+        <th style="width:18%">领涨/领跌</th>
+        <th>解读 + A 股关注</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td style="font-family:var(--font-serif); color:var(--accent); font-weight:600">#{{ loop.index }}</td>
+        <td><span class="ifa-matrix__dim">{{ r.category }}</span></td>
+        <td><span class="ifa-matrix__signal" data-signal="{{ '升温' if r.strength_label == '强' else ('降温' if r.strength_label == '弱' else '平稳') }}">{{ r.strength_label or '—' }}</span></td>
+        <td class="ifa-panel__delta {% if r.avg_dir == 'up' %}ifa-panel__delta--up{% elif r.avg_dir == 'down' %}ifa-panel__delta--down{% else %}ifa-panel__delta--flat{% endif %}">{{ r.avg_pct_display or '—' }}</td>
+        <td class="ifa-panel__value">{{ r.up_share_display or '—' }}</td>
+        <td class="ifa-matrix__areas">
+          {% if r.leader %}<span style="color:var(--up)">▲ {{ r.leader }} {{ r.leader_pct }}</span>{% endif %}
+          {% if r.laggard %}<span style="color:var(--down); margin-left:6px">▼ {{ r.laggard }} {{ r.laggard_pct }}</span>{% endif %}
+        </td>
+        <td>
+          <div style="font-size:13px; color:var(--ink-2); line-height:1.55;">{{ r.commentary or '—' }}</div>
+          {% if r.a_share_focus %}<div style="font-size:12px; color:var(--accent); font-style:italic; margin-top:4px;">A 股关注：{{ r.a_share_focus }}</div>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

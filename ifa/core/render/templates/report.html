@@ -58,6 +58,16 @@
       {% include "_watchlist.html" %}
     {% elif s.type == 'commentary' %}
       {% include "_commentary.html" %}
+    {% elif s.type == 'commodity_dashboard' %}
+      {% include "_commodity_dashboard.html" %}
+    {% elif s.type == 'category_strength' %}
+      {% include "_category_strength.html" %}
+    {% elif s.type == 'chain_transmission' %}
+      {% include "_chain_transmission.html" %}
+    {% elif s.type == 'chain_review' %}
+      {% include "_chain_review.html" %}
+    {% elif s.type == 'transmission_review' %}
+      {% include "_transmission_review.html" %}
     {% elif s.type == 'disclaimer' %}
       {% include "_disclaimer.html" %}
     {% endif %}

@@ -1,0 +1,16 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <div class="ifa-chain-grid">
+    {% for ch in c.chains %}
+    <div class="ifa-chain-card" style="border-left-color: var(--accent);">
+      <div class="ifa-chain-card__head">
+        <span class="ifa-chain-card__name">{{ ch.name }}</span>
+      </div>
+      <div class="ifa-chain-card__row"><span class="ifa-chain-card__lbl">商品端</span><span>{{ ch.commodity_recap or '—' }}</span></div>
+      <div class="ifa-chain-card__row"><span class="ifa-chain-card__lbl">A 股端</span><span>{{ ch.a_share_recap or '—' }}</span></div>
+      <div class="ifa-chain-card__takeaway">{{ ch.takeaway or '—' }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
