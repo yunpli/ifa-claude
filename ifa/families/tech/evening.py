@@ -174,18 +174,51 @@ def _build_e4_review(ctx: TechCtx, morning_hypotheses: list[dict]) -> dict:
                 "order": 4, "type": "review_table",
                 "content_json": {"rows": [],
                                   "fallback_text": "今日未找到当天 Tech 早报的假设；可能早报未生成或未成功。"}}
+
+    # Build per-layer board snapshots (the morning hypotheses reference layers/themes,
+    # so the LLM needs board-level pct_change to validate, not just SW industries).
+    from .universe import AI_LAYERS
+    layer_blob: list[str] = []
+    for L in AI_LAYERS:
+        boards = ctx.boards_by_layer.get(L.layer_id, [])
+        with_data = [b for b in boards if b.pct_change is not None]
+        if with_data:
+            avg = sum(b.pct_change for b in with_data) / len(with_data)
+            top = max(with_data, key=lambda b: b.pct_change)
+            bot = min(with_data, key=lambda b: b.pct_change)
+            board_pcts = "; ".join(f"{b.name} {b.pct_change:+.2f}%" for b in with_data)
+            layer_blob.append(
+                f"  {L.layer_id} ({L.layer_name}): 均 {avg:+.2f}%; "
+                f"领涨 {top.name} {top.pct_change:+.2f}%, 领跌 {bot.name} {bot.pct_change:+.2f}%; "
+                f"全部: {board_pcts}"
+            )
+        else:
+            layer_blob.append(f"  {L.layer_id}: 板块数据缺失")
+
+    # Top tech movers (ts_code + pct + amount)
+    top_movers_text = "; ".join(
+        f"{m.name or m.ts_code} {m.pct_change:+.2f}%"
+        for m in ctx.top_movers[:12] if m.pct_change is not None
+    ) or "无数据"
+
     sw_blob = "; ".join(f"{b.name} {b.pct_change:+.2f}%"
-                         for b in ctx.sw_sectors if b.pct_change is not None)
+                         for b in ctx.sw_sectors if b.pct_change is not None) or "无可用数据"
     candidates_text = "\n".join(
         f"[{i}] {h['hypothesis']}  · 验证规则: {h.get('review_rule') or '—'}  · 关联: {h.get('related') or '—'}"
         for i, h in enumerate(morning_hypotheses)
     )
     user = f"""
-=== 申万 TMT 行业当日表现 ===
-{sw_blob}
+=== 今日 5 层板块 (THS 概念，按层聚合) ===
+{chr(10).join(layer_blob)}
 
 === 涨停 tech 个股数 ===
-{len(ctx.limit_up)}
+{len(ctx.limit_up)}（个股: {", ".join(m.name or m.ts_code for m in ctx.limit_up[:10])}）
+
+=== 涨幅前列 tech 个股 ===
+{top_movers_text}
+
+=== 申万 TMT 行业当日表现 ===
+{sw_blob}
 
 === 早报 Tech 假设 ===
 {candidates_text}
@@ -477,7 +510,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
     out_root = settings.output_root / run.run_mode.value
     out_root.mkdir(parents=True, exist_ok=True)
     bjt_now = to_bjt(utc_now())
-    fname = f"CN_tech_evening_{user}_{run.report_date.strftime('%Y-%m-%d')}_{bjt_now.strftime('%H-%M')}.html"
+    fname = f"CN_tech_evening_{user}_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
     out_path = out_root / fname
     out_path.write_text(html, encoding="utf-8")
     return out_path

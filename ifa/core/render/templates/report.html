@@ -82,6 +82,20 @@
       {% include "_focus_brief.html" %}
     {% elif s.type == 'us_overnight' %}
       {% include "_us_overnight.html" %}
+    {% elif s.type == 'tech_board_recap' %}
+      {% include "_tech_board_recap.html" %}
+    {% elif s.type == 'directions_list' %}
+      {% include "_directions_list.html" %}
+    {% elif s.type == 'index_panel' %}
+      {% include "_index_panel.html" %}
+    {% elif s.type == 'three_aux_summary' %}
+      {% include "_three_aux_summary.html" %}
+    {% elif s.type == 'dragon_tiger' %}
+      {% include "_dragon_tiger.html" %}
+    {% elif s.type == 'sentiment_grid' %}
+      {% include "_sentiment_grid.html" %}
+    {% elif s.type == 'scenario_plans' %}
+      {% include "_scenario_plans.html" %}
     {% elif s.type == 'disclaimer' %}
       {% include "_disclaimer.html" %}
     {% endif %}

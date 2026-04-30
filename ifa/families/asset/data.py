@@ -316,12 +316,15 @@ class SectorBar:
 
 def fetch_a_share_sectors(client: TuShareClient, *, on_date: dt.date,
                            sleep_between: float = 0.0) -> list[SectorBar]:
+    """SW industry indexes use the dedicated `sw_daily` endpoint on this account
+    (`index_daily` returns 0 rows for SW codes). `sw_daily` returns the column
+    as `pct_change` (with underscore)."""
     end = on_date.strftime("%Y%m%d")
     start = (on_date - dt.timedelta(days=10)).strftime("%Y%m%d")
     out: list[SectorBar] = []
     for code, name in SW_SECTOR_INDEXES.items():
         try:
-            df = client.call("index_daily", ts_code=code, start_date=start, end_date=end)
+            df = client.call("sw_daily", ts_code=code, start_date=start, end_date=end)
         except Exception:
             out.append(SectorBar(code, name, None, None, None))
             continue
@@ -333,7 +336,7 @@ def fetch_a_share_sectors(client: TuShareClient, *, on_date: dt.date,
         out.append(SectorBar(
             code=code, name=name,
             close=_f(row["close"]),
-            pct_change=_f(row.get("pct_chg")),
+            pct_change=_f(row.get("pct_change")),
             trade_date=dt.datetime.strptime(str(row["trade_date"]), "%Y%m%d").date(),
         ))
         if sleep_between:

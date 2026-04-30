@@ -1,0 +1,45 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+
+  <table class="ifa-panel" style="margin-bottom:14px;">
+    <thead>
+      <tr>
+        <th style="width:18%">指数</th>
+        <th style="width:11%">最新</th>
+        <th style="width:10%; text-align:right">涨跌</th>
+        <th style="width:13%; text-align:right">成交额</th>
+        <th style="width:14%">趋势</th>
+        <th>角色 / 解读</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.indices %}
+      <tr>
+        <td>
+          <div class="ifa-panel__indicator">{{ r.name }}</div>
+          <span class="ifa-panel__period">{{ r.ts_code }}</span>
+        </td>
+        <td class="ifa-panel__value">{{ r.close_display or '—' }}</td>
+        <td class="ifa-panel__delta {% if r.pct_dir == 'up' %}ifa-panel__delta--up{% elif r.pct_dir == 'down' %}ifa-panel__delta--down{% else %}ifa-panel__delta--flat{% endif %}">{{ r.pct_display or '—' }}</td>
+        <td class="ifa-panel__value">{{ r.amount_display or '—' }}</td>
+        <td class="ifa-panel__chart">{{ r.spark_svg | safe }}</td>
+        <td class="ifa-panel__note">{{ r.role }}{% if r.commentary %} · {{ r.commentary }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if c.breadth %}
+  <div class="ifa-grid">
+    {% for cell in c.breadth %}
+    <div class="ifa-grid__cell">
+      <div class="ifa-grid__label">{{ cell.label }}</div>
+      <div class="ifa-grid__value">{{ cell.value }}{% if cell.unit %} <span style="font-size:13px;color:var(--ink-soft);font-family:var(--font-sans);font-weight:400">{{ cell.unit }}</span>{% endif %}</div>
+      {% if cell.delta %}<div class="ifa-grid__delta {{ cell.delta_dir or 'flat' }}">{{ cell.delta }}</div>{% endif %}
+      {% if cell.note %}<div class="ifa-grid__note">{{ cell.note }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>

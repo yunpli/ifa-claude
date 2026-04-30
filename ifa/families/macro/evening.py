@@ -547,7 +547,7 @@ def _render_and_save_evening(run: ReportRun, sections: list[dict], settings) -> 
     out_root = settings.output_root / run.run_mode.value
     out_root.mkdir(parents=True, exist_ok=True)
     bjt_now = to_bjt(utc_now())
-    fname = f"CN_evening_{run.report_date.strftime('%Y-%m-%d')}_{bjt_now.strftime('%H-%M')}.html"
+    fname = f"CN_macro_evening_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
     out_path = out_root / fname
     out_path.write_text(html, encoding="utf-8")
     return out_path

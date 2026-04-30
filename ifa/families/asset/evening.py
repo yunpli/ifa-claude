@@ -409,6 +409,8 @@ def _build_e7_news(ctx: AssetEveningCtx) -> dict:
                                  prompt_name="asset_evening.s7_news",
                                  parsed=parsed, resp=resp, status=status)
     content = parsed if isinstance(parsed, dict) else {"events": [], "fallback_text": ""}
+    from ifa.families._shared.news import post_process_news_events
+    content["events"] = post_process_news_events(content.get("events") or [], candidates)
     return {
         "key": "asset_evening.s7_news",
         "title": "Asset 相关新闻与事件复盘",
@@ -624,7 +626,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings) -> Path:
     out_root = settings.output_root / run.run_mode.value
     out_root.mkdir(parents=True, exist_ok=True)
     bjt_now = to_bjt(utc_now())
-    fname = f"CN_asset_evening_{run.report_date.strftime('%Y-%m-%d')}_{bjt_now.strftime('%H-%M')}.html"
+    fname = f"CN_asset_evening_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
     out_path = out_root / fname
     out_path.write_text(html, encoding="utf-8")
     return out_path

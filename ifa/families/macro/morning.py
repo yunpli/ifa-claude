@@ -490,6 +490,7 @@ def _build_s3_liquidity(ctx: RuntimeCtx) -> dict:
 # ─── S4: news list (curated from active policy events) ────────────────────
 
 def _build_s4_news(ctx: RuntimeCtx) -> dict:
+    from ifa.families._shared.news import post_process_news_events
     if not ctx.policy_events:
         return {
             "key": "macro_morning.s4_news",
@@ -505,14 +506,14 @@ def _build_s4_news(ctx: RuntimeCtx) -> dict:
         {
             "title": p.event_title,
             "source_name": p.source_name,
-            "publish_time": fmt_bjt(p.publish_time),
+            "publish_time": p.publish_time.isoformat() if p.publish_time else None,
             "policy_dimension": p.policy_dimension,
             "policy_signal": p.policy_signal,
             "summary": p.summary,
             "market_implication": p.market_implication,
             "affected_areas": p.affected_areas,
         }
-        for p in ctx.policy_events[:30]
+        for p in ctx.policy_events[:30] if p.publish_time
     ]
     user = f"""
 === 候选事件（按时间倒序，{len(candidates)} 条） ===
@@ -532,6 +533,7 @@ def _build_s4_news(ctx: RuntimeCtx) -> dict:
                                  parsed=parsed, resp=resp, status=status)
     content = parsed if isinstance(parsed, dict) else {"has_major_events": False, "events": [],
                                                         "fallback_text": "今日无重大宏观事件需提示。"}
+    content["events"] = post_process_news_events(content.get("events") or [], candidates)
     return {
         "key": "macro_morning.s4_news",
         "title": "关键新闻、政策与事件摘要",
@@ -921,7 +923,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings) -> Path:
     out_root = settings.output_root / run.run_mode.value
     out_root.mkdir(parents=True, exist_ok=True)
     bjt_now = to_bjt(utc_now())
-    fname = f"CN_morning_{run.report_date.strftime('%Y-%m-%d')}_{bjt_now.strftime('%H-%M')}.html"
+    fname = f"CN_macro_morning_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
     out_path = out_root / fname
     out_path.write_text(html, encoding="utf-8")
     return out_path

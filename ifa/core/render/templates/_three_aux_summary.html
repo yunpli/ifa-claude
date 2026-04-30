@@ -1,0 +1,30 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.integrated_summary %}
+  <div class="ifa-commentary" style="border-left-color:var(--accent); margin-bottom:14px;">
+    <span class="ifa-commentary__label">三辅整合判断</span>
+    <div>{{ c.integrated_summary }}</div>
+  </div>
+  {% endif %}
+  <table class="ifa-matrix">
+    <thead>
+      <tr>
+        <th style="width:14%">辅线</th>
+        <th>今日结论</th>
+        <th style="width:13%">影响等级</th>
+        <th style="width:32%">主报告应验证方向</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td><span class="ifa-matrix__dim">{{ r.family_display or r.family }}</span></td>
+        <td>{{ r.today_conclusion or '—' }}</td>
+        <td><span class="ifa-matrix__signal" data-signal="{{ '升温' if r.impact_level == '强' else ('降温' if r.impact_level == '弱' else '平稳') }}">{{ r.impact_level or '—' }}</span></td>
+        <td class="ifa-matrix__areas">{{ r.a_share_focus or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

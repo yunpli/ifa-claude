@@ -470,12 +470,15 @@ class SectorBar:
 
 
 def fetch_tech_sw_sectors(client: TuShareClient, *, on_date: dt.date) -> list[SectorBar]:
+    """SW industry indices use the dedicated `sw_daily` endpoint on this account
+    (`index_daily` returns 0 rows for SW codes). Note: `sw_daily` returns
+    `pct_change` (with underscore) instead of `pct_chg`."""
     end = on_date.strftime("%Y%m%d")
     start = (on_date - dt.timedelta(days=10)).strftime("%Y%m%d")
     out: list[SectorBar] = []
     for code, name in SW_TECH_INDEXES.items():
         try:
-            df = client.call("index_daily", ts_code=code, start_date=start, end_date=end)
+            df = client.call("sw_daily", ts_code=code, start_date=start, end_date=end)
         except Exception:
             out.append(SectorBar(code, name, None, None, None)); continue
         if df is None or df.empty:
@@ -485,7 +488,7 @@ def fetch_tech_sw_sectors(client: TuShareClient, *, on_date: dt.date) -> list[Se
         out.append(SectorBar(
             code=code, name=name,
             close=_f(row.get("close")),
-            pct_change=_f(row.get("pct_chg")),
+            pct_change=_f(row.get("pct_change")),  # sw_daily uses pct_change
             trade_date=_d(str(row["trade_date"])),
         ))
     return out

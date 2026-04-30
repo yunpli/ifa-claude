@@ -1,0 +1,41 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.rows %}
+  <table class="ifa-matrix">
+    <thead>
+      <tr>
+        <th style="width:14%">股票</th>
+        <th style="width:9%; text-align:right">涨跌</th>
+        <th style="width:12%; text-align:right">净额</th>
+        <th style="width:12%">资金类型</th>
+        <th style="width:13%">主力意图</th>
+        <th>上榜原因 / 解读</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td>
+          <div class="ifa-matrix__dim">{{ r.name or '—' }}</div>
+          <div style="font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);">{{ r.ts_code }}</div>
+        </td>
+        <td class="ifa-panel__delta {% if r.pct_dir == 'up' %}ifa-panel__delta--up{% elif r.pct_dir == 'down' %}ifa-panel__delta--down{% else %}ifa-panel__delta--flat{% endif %}">{{ r.pct_display or '—' }}</td>
+        <td class="ifa-panel__value">{{ r.net_display or '—' }}</td>
+        <td><span class="ifa-tone__pill" style="font-size:9.5px;padding:2px 6px;background:var(--rule-soft);color:var(--ink-2);">{{ r.actor_type or '待确认' }}</span></td>
+        <td><span class="ifa-matrix__signal" data-signal="升温">{{ r.intent or '—' }}</span></td>
+        <td>
+          <div style="font-size:12px;color:var(--ink-2);line-height:1.5;">{{ r.reason or '—' }}</div>
+          {% if r.commentary %}<div style="font-size:11.5px;color:var(--accent);font-style:italic;margin-top:3px;">{{ r.commentary }}</div>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p style="font-size:11px;color:var(--ink-muted);font-style:italic;margin-top:10px;">
+    注：本节使用 top_list 聚合数据；机构 / 游资 / 北向席位级别的细分待 top_inst 接口启用后补充。
+  </p>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '今日无显著龙虎榜数据。' }}</div>
+  {% endif %}
+</section>

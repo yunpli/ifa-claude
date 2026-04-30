@@ -1,0 +1,17 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <p class="ifa-section__intro">情景计划描述不同市场状态下的观察对象，<strong>不构成交易指令</strong>；客户根据实际盘面节奏自主决定。</p>
+  <div class="ifa-cand-grid">
+    {% for sp in c.scenarios %}
+    <div class="ifa-cand-card" style="border-left-color: {{ 'var(--up)' if sp.priority == 'high' else ('var(--accent-2)' if sp.priority == 'medium' else 'var(--ink-soft)') }};">
+      <div class="ifa-cand-card__head">
+        <span class="ifa-cand-card__name">{{ sp.scenario_label }}</span>
+        <span class="ifa-cand-card__layer">{{ (sp.priority or '—') | upper }}</span>
+      </div>
+      <div class="ifa-cand-card__row up"><span class="ifa-cand-card__lbl">触发条件</span><span>{{ sp.condition or '—' }}</span></div>
+      <div class="ifa-cand-card__row"><span class="ifa-cand-card__lbl">应观察</span><span>{{ sp.recommended_focus or '—' }}</span></div>
+    </div>
+    {% endfor %}
+  </div>
+</section>

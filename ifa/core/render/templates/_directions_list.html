@@ -1,0 +1,33 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <p class="ifa-section__intro">
+    情绪阶段说明：<strong>启动</strong>=主线刚开始放量；<strong>扩散</strong>=龙头带动同链多股跟随；
+    <strong>分歧修复</strong>=龙头分歧后重新承接；<strong>补涨</strong>=滞涨股跟随主线；
+    <strong>退潮观察</strong>=高标失败 / 缩量 / 龙头折戟时降低关注度。
+  </p>
+  <table class="ifa-matrix">
+    <thead>
+      <tr>
+        <th style="width:14%">方向</th>
+        <th style="width:9%">所属层</th>
+        <th style="width:11%">情绪阶段</th>
+        <th style="width:23%">触发原因</th>
+        <th>今日观察点</th>
+        <th style="width:9%; text-align:center">信号强度</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.directions %}
+      <tr>
+        <td><span class="ifa-matrix__dim">{{ r.direction }}</span></td>
+        <td><span class="ifa-tone__pill" style="font-size:9.5px; padding:2px 6px;">{{ (r.layer_id or '—') | upper }}</span></td>
+        <td><span class="ifa-matrix__signal" data-signal="{{ '升温' if r.rotation_phase in ['启动','扩散','分歧修复'] else ('降温' if r.rotation_phase == '退潮观察' else '平稳') }}">{{ r.rotation_phase or '—' }}</span></td>
+        <td class="ifa-matrix__areas">{{ r.trigger or '—' }}</td>
+        <td>{{ r.watch_point_today or '—' }}</td>
+        <td style="text-align:center; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-muted)">{{ r.signal_strength or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>

@@ -34,11 +34,17 @@ AI_LAYERS: list[LayerSpec] = [
         layer_en="Energy · Power · Cooling",
         narrative="AI 算力扩张的物理基础——电力、电网、储能、液冷、UPS、数据中心供电与温控。",
         ths_board_codes=[
-            "871063.TI",   # 电力
-            "884089.TI",   # 线缆部件及其他
-            "884263.TI",   # 通信线缆及配套
-            "861289.TI",   # 数据中心REIT
-            # 储能 / 液冷 / 充电桩（运行时如果 ths_index 找到匹配名称会被动态补充）
+            "885311.TI",   # 智能电网
+            "885425.TI",   # 特高压
+            "885461.TI",   # 充电桩
+            "885531.TI",   # 光伏概念
+            "885571.TI",   # 核电
+            "885641.TI",   # 风电
+            "885823.TI",   # 氢能源
+            "885921.TI",   # 储能
+            "885935.TI",   # 抽水蓄能
+            "886044.TI",   # 液冷服务器（横跨 energy + infra）
+            "861289.TI",   # 数据中心 REIT
         ],
         sw_l2_codes=["801160.SI"],  # 公用事业（含电力）
     ),
@@ -52,7 +58,8 @@ AI_LAYERS: list[LayerSpec] = [
             "884229.TI",   # 半导体设备
             "884091.TI",   # 半导体材料
             "884228.TI",   # 集成电路封测
-            "861100.TI",   # 半导体产品与设备Ⅱ
+            "861100.TI",   # 半导体产品与设备 Ⅱ
+            "885925.TI",   # MCU 芯片
         ],
         sw_l2_codes=["801080.SI"],  # 电子（含半导体）
     ),
@@ -60,15 +67,19 @@ AI_LAYERS: list[LayerSpec] = [
         layer_id="infra",
         layer_name="Infrastructure / 算力基础设施",
         layer_en="Infrastructure · Data Center · Cloud",
-        narrative="AI 数据中心的连接层——光模块、CPO、PCB、服务器、液冷、IDC、算力租赁。",
+        narrative="AI 数据中心的连接层——光模块、CPO、PCB、服务器、液冷、IDC、算力租赁、5G/6G。",
         ths_board_codes=[
-            "885957.TI",   # 东数西算 (算力)
+            "885957.TI",   # 东数西算（算力）
             "886033.TI",   # 共封装光学 CPO
             "886044.TI",   # 液冷服务器
             "886050.TI",   # 算力租赁
             "885959.TI",   # PCB 概念
             "885362.TI",   # 云计算
             "884262.TI",   # 通信网络设备及器件
+            "885556.TI",   # 5G
+            "885998.TI",   # F5G 概念
+            "886037.TI",   # 6G 概念
+            "885574.TI",   # 卫星导航
         ],
         sw_l2_codes=["801770.SI"],  # 通信
     ),
@@ -76,11 +87,13 @@ AI_LAYERS: list[LayerSpec] = [
         layer_id="models",
         layer_name="Models / 模型与软件基础设施",
         layer_en="Models · AI Platforms · Software",
-        narrative="AI 能力载体——大模型、数据要素、AI 中台、操作系统、数据库、网络安全。",
+        narrative="AI 能力载体——大模型、数据要素、AI 中台、操作系统、数据库、网络安全、工业互联网、区块链。",
         ths_board_codes=[
             "886041.TI",   # 数据要素
             "885844.TI",   # 国产操作系统
             "885459.TI",   # 网络安全
+            "885757.TI",   # 区块链
+            "885783.TI",   # 工业互联网
         ],
         sw_l2_codes=["801750.SI"],  # 计算机
     ),
@@ -88,14 +101,21 @@ AI_LAYERS: list[LayerSpec] = [
         layer_id="apps",
         layer_name="Applications / AI 应用与端侧",
         layer_en="Applications · Agents · Robotics",
-        narrative="AI 落地的需求侧——AI 应用、智能体、机器人、智能驾驶、端侧 AI、消费电子。",
+        narrative="AI 落地的需求侧——AI 应用、智能体、机器人、智能驾驶、端侧 AI、消费电子、医疗 AI、游戏。",
         ths_board_codes=[
             "886108.TI",   # AI 应用
             "886099.TI",   # AI 智能体
             "886069.TI",   # 人形机器人
             "885517.TI",   # 机器人概念
+            "885736.TI",   # 无人驾驶
+            "886047.TI",   # 脑机接口
+            "885934.TI",   # 元宇宙
+            "885402.TI",   # 智能医疗
+            "885765.TI",   # 互联网医疗
             "881124.TI",   # 消费电子
             "884098.TI",   # 消费电子零部件及组装
+            "885603.TI",   # 网络游戏
+            "885874.TI",   # 云游戏
             "884218.TI",   # 机器人
         ],
         sw_l2_codes=["801760.SI"],  # 传媒

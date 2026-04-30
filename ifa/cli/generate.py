@@ -97,6 +97,43 @@ def tech(
     console.print(f"\n[bold green]Report saved:[/bold green] {path}")
 
 
+@app.command("market")
+def market(
+    slot: str = typer.Option(..., "--slot", help="morning | noon | evening"),
+    report_date: str = typer.Option(..., "--report-date", help="YYYY-MM-DD (Beijing date)"),
+    user: str = typer.Option("default", "--user"),
+    cutoff_time: str | None = typer.Option(
+        None, "--cutoff-time",
+        help="HH:MM Beijing time. Default 09:10 (morning) / 12:15 (noon) / 18:00 (evening)."),
+    triggered_by: str | None = typer.Option(None, "--triggered-by"),
+    mode: str | None = typer.Option(None, "--mode"),
+) -> None:
+    """Render the A-share Main report (总指挥型) and save HTML."""
+    _override_mode(mode)
+    rd = dt.datetime.strptime(report_date, "%Y-%m-%d").date()
+    if slot == "morning":
+        from ifa.families.market.morning import run_market_morning
+        cutoff_utc = parse_bjt_cutoff(report_date, cutoff_time or "09:10")
+        path = run_market_morning(report_date=rd, data_cutoff_at=cutoff_utc, user=user,
+                                   triggered_by=triggered_by,
+                                   on_log=lambda m: console.print(f"  {m}"))
+    elif slot == "noon":
+        from ifa.families.market.noon import run_market_noon
+        cutoff_utc = parse_bjt_cutoff(report_date, cutoff_time or "12:15")
+        path = run_market_noon(report_date=rd, data_cutoff_at=cutoff_utc, user=user,
+                                triggered_by=triggered_by,
+                                on_log=lambda m: console.print(f"  {m}"))
+    elif slot == "evening":
+        from ifa.families.market.evening import run_market_evening
+        cutoff_utc = parse_bjt_cutoff(report_date, cutoff_time or "18:00")
+        path = run_market_evening(report_date=rd, data_cutoff_at=cutoff_utc, user=user,
+                                   triggered_by=triggered_by,
+                                   on_log=lambda m: console.print(f"  {m}"))
+    else:
+        raise typer.BadParameter(f"slot must be 'morning' | 'noon' | 'evening' (got {slot})")
+    console.print(f"\n[bold green]Report saved:[/bold green] {path}")
+
+
 @app.command("asset")
 def asset(
     slot: str = typer.Option(..., "--slot", help="morning | evening"),

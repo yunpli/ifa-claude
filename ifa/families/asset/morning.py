@@ -222,16 +222,13 @@ def _build_s2_dashboard(ctx: AssetCtx) -> dict:
                 commentary_by_idx[idx] = entry.get("commentary") or ""
         overall = parsed.get("overall_commentary") or ""
 
-    # Build category groups for the renderer
+    # Build category groups for the renderer — only include rows with usable data;
+    # CZCE-unavailable / no-data items are silently dropped per ops feedback.
     categories_payload = []
     flat_idx = 0
     for cat in ["能源", "贵金属", "有色", "黑色", "化工", "农产品"]:
-        items = by_cat.get(cat, [])
-        # also include CZCE-unavailable / no-data rows so the table shows them as 数据未启用
-        unavailable = [s for s in ctx.snapshots.values()
-                       if s.spec.category == cat and s.data_status != "ok"]
-        all_items = items + unavailable
-        if not all_items:
+        items = [s for s in by_cat.get(cat, []) if s.data_status == "ok"]
+        if not items:
             continue
         rows = []
         for snap in items:
@@ -249,30 +246,11 @@ def _build_s2_dashboard(ctx: AssetCtx) -> dict:
                 "commentary": commentary_by_idx.get(flat_idx, "—"),
             })
             flat_idx += 1
-        for snap in unavailable:
-            note = "CZCE 接口未启用" if snap.data_status == "czce_unavailable" else "无数据"
-            rows.append({
-                "logical_symbol": snap.spec.logical_symbol,
-                "display_name": snap.spec.display_name,
-                "actual_contract": "—",
-                "close_display": "—",
-                "pct_display": "—",
-                "pct_dir": "flat",
-                "vol_display": "—",
-                "oi_display": "—",
-                "spark_svg": "",
-                "commentary": note,
-            })
-        # category-level summary
         with_data = [s for s in items if s.pct_change is not None]
-        if with_data:
-            avg = sum(i.pct_change for i in with_data) / len(with_data)
-            avg_label = _fmt_pct(avg)
-        else:
-            avg_label = "—"
+        avg_label = _fmt_pct(sum(i.pct_change for i in with_data) / len(with_data)) if with_data else "—"
         categories_payload.append({
             "name": cat,
-            "n_components": len(all_items),
+            "n_components": len(items),
             "n_with_data": len(with_data),
             "avg_label": avg_label,
             "rows": rows,
@@ -560,6 +538,8 @@ def _build_s7_news(ctx: AssetCtx) -> dict:
                                  prompt_name="asset_morning.s7_news",
                                  parsed=parsed, resp=resp, status=status)
     content = parsed if isinstance(parsed, dict) else {"events": [], "fallback_text": ""}
+    from ifa.families._shared.news import post_process_news_events
+    content["events"] = post_process_news_events(content.get("events") or [], candidates)
     return {
         "key": "asset_morning.s7_news",
         "title": "Asset 相关新闻与事件摘要",
@@ -737,7 +717,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings) -> Path:
     out_root = settings.output_root / run.run_mode.value
     out_root.mkdir(parents=True, exist_ok=True)
     bjt_now = to_bjt(utc_now())
-    fname = f"CN_asset_morning_{run.report_date.strftime('%Y-%m-%d')}_{bjt_now.strftime('%H-%M')}.html"
+    fname = f"CN_asset_morning_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
     out_path = out_root / fname
     out_path.write_text(html, encoding="utf-8")
     return out_path

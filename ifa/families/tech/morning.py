@@ -312,26 +312,24 @@ def _build_s3_board_recap(ctx: TechCtx) -> dict:
             if isinstance(idx, int):
                 by_idx[idx] = entry
 
+    layer_labels = {L.layer_id: L.layer_id.upper() for L in AI_LAYERS}
     rows = []
     for i, (b, layer_id) in enumerate(top_n):
         info = by_idx.get(i, {})
         rows.append({
-            "category": f"{b.name}",
-            "strength_label": info.get("strength") or "—",
-            "avg_pct_display": _fmt_pct(b.pct_change),
-            "avg_dir": _direction(b.pct_change),
-            "up_share_display": (L.layer_name for L in AI_LAYERS if L.layer_id == layer_id).__next__()[:8] if any(L.layer_id == layer_id for L in AI_LAYERS) else "",
-            "leader": info.get("top_stock_role") or "",
-            "leader_pct": "",
-            "laggard": "",
-            "laggard_pct": "",
+            "board_name": b.name,
+            "layer_label": layer_labels.get(layer_id, "—"),
+            "strength": info.get("strength") or "—",
+            "pct_display": _fmt_pct(b.pct_change),
+            "pct_dir": _direction(b.pct_change),
+            "n_limit_up": n_limit_up_by_board.get(b.ts_code, 0),
             "commentary": info.get("commentary") or "—",
-            "a_share_focus": "",
+            "top_stock_role": info.get("top_stock_role") or "",
         })
     return {
         "key": "tech_morning.s3_board_recap",
         "title": "昨日科技板块强弱与热点回放",
-        "order": 3, "type": "category_strength",
+        "order": 3, "type": "tech_board_recap",
         "content_json": {"rows": rows},
         "prompt_name": "tech_morning.s3_board_recap", "model_output_id": moid,
     }
@@ -431,6 +429,8 @@ def _build_s5_news(ctx: TechCtx) -> dict:
                                  prompt_name="tech_morning.s5_news",
                                  parsed=parsed, resp=resp, status=status)
     content = parsed if isinstance(parsed, dict) else {"events": [], "fallback_text": ""}
+    from ifa.families._shared.news import post_process_news_events
+    content["events"] = post_process_news_events(content.get("events") or [], candidates)
     return {
         "key": "tech_morning.s5_news", "title": "全球科技与产业新闻摘要",
         "order": 5, "type": "news_list", "content_json": content,
@@ -459,22 +459,10 @@ def _build_s6_directions(ctx: TechCtx, prior: list[dict]) -> dict:
                                  prompt_name="tech_morning.s6_directions",
                                  parsed=parsed, resp=resp, status=status)
     content = parsed if isinstance(parsed, dict) else {"directions": []}
-    # adapt to mapping_table content shape (rows[].macro_variable / beneficiaries / pressured_areas / watch_point_today / signal_strength)
-    rows = []
-    for d in content.get("directions", []) or []:
-        rows.append({
-            "macro_variable": d.get("direction"),
-            "data_timing": (d.get("layer_id") or "—").upper(),
-            "beneficiaries": [d.get("rotation_phase")] if d.get("rotation_phase") else [],
-            "pressured_areas": [],
-            "watch_point_today": d.get("watch_point_today"),
-            "signal_strength": d.get("signal_strength"),
-            "confidence": d.get("signal_strength"),
-        })
     return {
         "key": "tech_morning.s6_directions", "title": "今日可能活跃的科技方向",
-        "order": 6, "type": "mapping_table",
-        "content_json": {"rows": rows},
+        "order": 6, "type": "directions_list",
+        "content_json": {"directions": content.get("directions") or []},
         "prompt_name": "tech_morning.s6_directions", "model_output_id": moid,
     }
 
@@ -889,7 +877,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
     out_root = settings.output_root / run.run_mode.value
     out_root.mkdir(parents=True, exist_ok=True)
     bjt_now = to_bjt(utc_now())
-    fname = f"CN_tech_morning_{user}_{run.report_date.strftime('%Y-%m-%d')}_{bjt_now.strftime('%H-%M')}.html"
+    fname = f"CN_tech_morning_{user}_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
     out_path = out_root / fname
     out_path.write_text(html, encoding="utf-8")
     return out_path

@@ -1,0 +1,25 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <div class="ifa-grid">
+    {% for cell in c.cells %}
+    <div class="ifa-grid__cell">
+      <div class="ifa-grid__label">{{ cell.label }}</div>
+      <div class="ifa-grid__value">{{ cell.value }}{% if cell.unit %} <span style="font-size:13px;color:var(--ink-soft);font-family:var(--font-sans);font-weight:400">{{ cell.unit }}</span>{% endif %}</div>
+      {% if cell.delta %}<div class="ifa-grid__delta {{ cell.delta_dir or 'flat' }}">{{ cell.delta }}</div>{% endif %}
+      {% if cell.note %}<div class="ifa-grid__note">{{ cell.note }}</div>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;">
+    {% if c.cycle_phase %}<span class="ifa-tone__pill" data-tone="{{ '积极' if c.cycle_phase in ['启动','扩散'] else ('谨慎' if c.cycle_phase in ['退潮','分歧','弱启动'] else '中性') }}">情绪阶段 · {{ c.cycle_phase }}</span>{% endif %}
+    {% if c.ladder_health %}<span class="ifa-tone__pill" data-tone="{{ '积极' if c.ladder_health == '健康' else ('谨慎' if c.ladder_health in ['偏弱','失血'] else '中性') }}">接力健康度 · {{ c.ladder_health }}</span>{% endif %}
+  </div>
+  {% if c.commentary %}
+  <div class="ifa-commentary" style="margin-top:14px;">
+    <span class="ifa-commentary__label">短线生态</span>
+    <div>{{ c.commentary }}</div>
+    {% if c.risk_note %}<div style="margin-top:6px; color:var(--down); font-style:italic; font-size:12.5px;">⚠ 情绪风险点 · {{ c.risk_note }}</div>{% endif %}
+  </div>
+  {% endif %}
+</section>
