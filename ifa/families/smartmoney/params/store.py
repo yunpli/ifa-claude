@@ -152,7 +152,7 @@ def freeze_params(
             (version_id, version_name, params_json,
              frozen_from_backtest_run_id, status, notes)
         VALUES
-            (:vid, :name, :params_json::jsonb,
+            (:vid, :name, cast(:params_json AS jsonb),
              :bt_id, :status, :notes)
         ON CONFLICT (version_name) DO UPDATE SET
             params_json                  = EXCLUDED.params_json,

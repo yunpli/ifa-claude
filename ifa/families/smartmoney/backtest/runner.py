@@ -49,7 +49,7 @@ def _insert_backtest_run(
              params_json, param_version_used, status, notes)
         VALUES
             (:rid, :start, :end,
-             :pjson::jsonb, :pver, 'running', :notes)
+             cast(:pjson AS jsonb), :pver, 'running', :notes)
     """)
     with engine.begin() as conn:
         conn.execute(sql, {
