@@ -1,0 +1,151 @@
+# SmartMoney Factor System — Default Parameters
+# ──────────────────────────────────────────────────────────────────────────────
+# These values are the "P0 baseline" derived from intuition / domain knowledge.
+# After running the backtest (Phase 6), freeze optimized values via:
+#   ifa smartmoney params freeze --name v2026_04 --from-backtest <run_id>
+#
+# Structure mirrors the params dict consumed by factor modules:
+#   liquidity.py  ← liquidity.*
+#   flow.py       ← factors.*, kpl.*
+#   (future) role.py / cycle.py ← role.*, cycle.*
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Market liquidity & state ───────────────────────────────────────────────────
+liquidity:
+  # Rolling window config
+  amount_history_days: 60        # days of amount history for percentile base
+  amount_short_avg_days: 10      # short moving average (10-day)
+
+  # Market state classification thresholds
+  # States are classified in priority order: 进攻 → 退潮 → 防守 → 中性
+  market_state:
+
+    attack:                      # 进攻 — 放量普涨 + 连板强 + 炸板少
+      amount_pct_min: 0.65       # amount_percentile_60d >= this
+      amount_ratio_min: 1.08     # today_amount / 10d_avg >= this
+      up_ratio_min: 0.55         # up_count / total_count >= this
+      limit_up_min: 20           # absolute limit-up stock count >= this
+      consec_min: 3              # max consecutive limit-up height >= this
+      blow_up_rate_max: 0.35     # blow-up rate <= this (炸板率)
+      min_score: 5               # at least 5 out of 7 sub-conditions must be met
+
+    retreat:                     # 退潮 — 大幅缩量 + 炸板高 + 跌多
+      amount_pct_max: 0.20       # amount_percentile_60d <= this
+      blow_up_rate_min: 0.50     # blow-up rate >= this
+      down_ratio_min: 0.55       # down_count / total_count >= this
+      min_score: 4               # conditions weighted; need at least 4
+
+    defense:                     # 防守 — 缩量 + 偏弱 + 连板不活跃
+      amount_pct_max: 0.35       # amount_percentile_60d <= this
+      down_ratio_min: 0.50       # down_count / total_count >= this (OR condition)
+      min_score: 3               # conditions weighted; need at least 3
+
+    # 中性 is the fallback when none of the above thresholds are met
+
+
+# ── Sector factor computation ─────────────────────────────────────────────────
+factors:
+  # Rolling windows (trading days)
+  history_days: 60               # max lookback for percentile calculations
+  short_window: 10               # short-term rolling mean (10-day)
+  medium_window: 20              # medium-term rolling (20-day; reserved for P1)
+  persistence_window: 5          # persistence check: recent N-day window
+
+  # heat_score weights (sum should = 1.0)
+  heat:
+    net_amount_weight: 0.50      # net_amount cross-section rank
+    elg_rate_weight: 0.30        # buy_elg_amount_rate (超大单占比) — DC only
+    amount_vs_avg_weight: 0.20   # today amount vs rolling average
+    winsorize_lower: 0.02        # winsorization clip (lower quantile)
+    winsorize_upper: 0.98        # winsorization clip (upper quantile)
+
+  # trend_score weights
+  trend:
+    pct_change_weight: 0.60      # pct_change cross-section rank
+    consistency_weight: 0.40     # fraction of last N days with positive pct
+    consistency_window: 5        # days for trend consistency check
+
+  # persistence_score config
+  persistence:
+    window: 5                    # check last N days
+    min_positive_ratio: 0.60     # net_amount > 0 in at least 60% of window days
+
+  # crowding_score config
+  crowding:
+    # Computed as: heat_rank × (1 - trend_rank)
+    # High crowding = lots of money in + price not rising → trapped capital
+    # No separate weights needed; formula is: amount_rank × (1 - pct_rank)
+
+
+# ── KPL concept signal config ─────────────────────────────────────────────────
+kpl:
+  z_t_min: 2                     # minimum 涨停数 to include a concept in factors
+  max_concepts: 15               # top N concepts to track (by z_t_num)
+
+
+# ── (Future) Sector role classification thresholds ────────────────────────────
+# These will be used by role.py in Phase 3.B
+role:
+  mainline:                      # 主线
+    heat_score_min: 0.75
+    persistence_score_min: 0.60
+    trend_score_min: 0.65
+
+  core_troop:                    # 中军 (大资金确认)
+    heat_score_min: 0.65
+    trend_score_min: 0.60
+
+  rotation:                      # 轮动 (次级流入)
+    heat_score_min: 0.55
+    heat_score_max: 0.75
+    trend_score_min: 0.50
+
+  defense:                       # 防守 (风险规避)
+    crowding_score_max: 0.30
+    persistence_score_min: 0.40
+
+  catalyst:                      # 催化 (事件驱动; requires LLM news signal)
+    heat_score_min: 0.60
+    persistence_score_max: 0.40  # short duration = event-driven
+
+  retreat:                       # 退潮
+    heat_score_max: 0.35
+    persistence_score_max: 0.30
+
+
+# ── (Future) 7-stage sentiment cycle thresholds ───────────────────────────────
+# These will be used by cycle.py in Phase 3.B
+cycle:
+  # State transitions use rolling windows on heat/trend/crowding
+  cold:                          # 冷
+    heat_score_max: 0.30
+    persistence_score_max: 0.20
+
+  ignition:                      # 点火
+    heat_score_delta_min: 0.20   # heat increased by at least this vs prior day
+    heat_score_min: 0.40
+    persistence_score_max: 0.30  # just started, not yet persistent
+
+  confirm:                       # 确认
+    heat_score_min: 0.55
+    trend_score_min: 0.55
+    persistence_window: 2        # at least 2 consecutive positive flow days
+
+  expand:                        # 扩散
+    heat_score_min: 0.60
+    trend_score_min: 0.60
+    persistence_score_min: 0.60
+    breadth_min: 0.50            # up_num / total_num >= this (sector breadth)
+
+  peak:                          # 高潮
+    heat_score_min: 0.80
+    crowding_score_min: 0.50     # money in but price stalling
+
+  diverge:                       # 分歧
+    crowding_score_min: 0.65
+    heat_score_delta_max: -0.10  # heat declining
+
+  retire:                        # 退潮
+    heat_score_max: 0.35
+    crowding_score_min: 0.60     # trapped capital
+    persistence_score_max: 0.25
