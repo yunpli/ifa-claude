@@ -83,7 +83,26 @@ kpl:
   max_concepts: 15               # top N concepts to track (by z_t_num)
 
 
-# ── (Future) Sector role classification thresholds ────────────────────────────
+# ── Leader stock identification (used by leader.py) ──────────────────────────
+leader:
+  top_n: 5                       # consider top N stocks per sector for role assignment
+  weights:
+    rs_weight: 0.30              # relative-strength (vs sector avg)
+    amount_weight: 0.20          # trading amount cross-section rank
+    elg_weight: 0.20             # 超大单净流入 rank
+    limit_weight: 0.20           # 涨停状态 + 连板 bonus
+    top_inst_weight: 0.10        # 龙虎榜机构席位
+
+
+# ── Candidate stock pool (used by candidate.py) ──────────────────────────────
+candidate:
+  min_amount: 50000000           # 5000 万 minimum trading amount
+  min_circ_mv: 2000000000        # 20 亿 minimum circulating market cap
+  fillers_per_sector: 3          # top 补涨 stocks per active sector
+  trending_top_n: 15             # global top 趋势 stocks
+
+
+# ── Sector role classification thresholds (used by role.py) ──────────────────
 # These will be used by role.py in Phase 3.B
 role:
   mainline:                      # 主线
