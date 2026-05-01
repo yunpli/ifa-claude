@@ -12,7 +12,7 @@ Every CLI invocation runs in exactly one of three modes:
 
 1. Explicit `--mode` CLI flag (highest precedence).
 2. `IFA_RUN_MODE` env var.
-3. Default = `manual` (safest while we're still building).
+3. Default = `manual` (safest for ad-hoc operator use).
 
 ## Why both DB-level and column-level isolation
 

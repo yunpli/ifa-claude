@@ -8,36 +8,213 @@ Customer-facing reports are **Chinese**; this engineering spec is **English**.
 ## What this repo is
 
 A report-generation system that turns market data, news, policy, macro variables,
-commodity prices, and sector behavior into **structured, source-anchored, reviewable
-investment judgments** — and renders them as professional-grade HTML reports.
+commodity prices, and sector money-flow behavior into **structured, source-anchored,
+reviewable investment judgments** — rendered as professional-grade HTML reports.
 
 It is **not** a chatbot. It is **not** a market data terminal. Every report is a
 deterministic *report run* with persisted facts, signals, judgments, prompts,
-LLM I/O, and source references. Every claim is later reviewable against the market.
-
-Product spec & rationale: see [`docs/`](docs/) and the local design notes in
-`/Users/neoclaw/claude/local/` (`ifa-overall.txt`, `ifa-macro-v1.txt`,
-`project-joblist.txt`, `tushare-probe.txt`, `tushare-landscapte.txt`).
+LLM I/O, and source references. Every LLM judgment generates tomorrow's *hypotheses*,
+which are automatically reviewed the next morning against actual market outcomes.
 
 ---
 
-## Scope of this iteration
+## Report families
 
-The full product spans ~21 P0 templates (long reports + intraday briefings + weekend),
-plus P1/P2 layers. **This iteration delivers a slice:**
+| Family | CLI | Slots | Sections | Focus |
+|---|---|---|---|---|
+| **SmartMoney** | `ifa smartmoney` | evening | 14 | Institutional money flow, sector roles, cycle phases, ML factor backtest |
+| **Market** | `ifa generate market` | morning / noon / evening | 14 | A-share main report — 总指挥型, index/breadth/sentiment/龙虎 |
+| **Tech** | `ifa generate tech` | morning / evening | 12 | AI Five-Layer Cake — 算力/模型/应用/终端/生态链 |
+| **Asset** | `ifa generate asset` | morning / evening | 10 | Cross-asset transmission — 商品/期货/A股板块传导 |
+| **Macro** | `ifa generate macro` | morning / evening | 11–12 | Macro overlay — policy, liquidity, cross-asset, FX |
 
-| Area                      | In scope                             | Out of scope (later) |
-|---------------------------|--------------------------------------|----------------------|
-| Report families           | Macro morning, Macro evening         | Main A-share, Tech, Asset, weekend, briefings |
-| Pre-jobs                  | `macro_text_derived_capture_job`, `macro_policy_event_memory_job` (scaffolding) | OCR / PDF research extraction |
-| Common tools              | LLM client (with fallback), TuShare client, DB layer, HTML renderer | — |
-| Output formats            | HTML (institutional style)           | PDF, Markdown KB, Telegram |
-| User system               | None                                 | Subscriptions, watchlists, entitlements |
-| Database                  | Local PostgreSQL `ifavr` / `ifavr_test` | Cloud, replication |
+The reporting database (`ifavr`) is shared across all families:
+`report_runs`, `report_sections`, `report_judgments`, `model_outputs` serve every report.
 
-The reporting database `IFAVR` is shared across **all** future report families
-(`report_runs`, `report_facts`, `report_signals`, `report_judgments`, …) so the
-schema we build now serves the whole P0 → P2 roadmap, not only Macro.
+---
+
+## SmartMoney — Flow Intelligence
+
+The most complete module. Tracks **institutional money flow** through A-share sectors
+(申万 SW / 东财 DC / 同花顺 THS / 开盘啦 KPL) and synthesises it into a daily
+evening report with LLM analysis and verifiable next-day hypotheses.
+
+### Pipeline
+
+```
+TuShare API
+    │
+    ▼
+ETL (20 raw_* tables / day)
+    │
+    ▼
+Factor Engine                        ML Layer
+  liquidity.py → market_state_daily    features.py      31-feature matrix
+  flow.py      → factor_daily          logistic.py      SmartMoneyLogistic
+  role.py      → sector role           random_forest.py SmartMoneyRandomForest
+  cycle.py     → cycle phase           xgboost_model.py SmartMoneyXGBoost
+  leader.py    → stock_signals_daily   news_catalyst.py sector catalyst scoring
+  candidate.py → 补涨候选              persistence.py   model versioning
+    │
+    ▼
+Backtest Engine
+  metrics.py  IC / RankIC / TopN / Q1–Q5 group returns (pure math)
+  engine.py   backtest loop + walk-forward ML AUC evaluation
+  runner.py   DB persistence → backtest_runs + backtest_metrics
+    │
+    ▼
+Param Store
+  default.yaml  → baseline params
+  param_versions table  → freeze best backtest result as active version
+    │
+    ▼
+Evening Report (14 sections, Jinja2 HTML)
+  E1  sm_market_pulse      市场水位 / 涨停跌停 / 炸板率
+  E2  sm_sector_flow (in)  净流入 Top — 板块角色 + LLM 评语
+  E3  sm_sector_flow (out) 净流出 Top — 退潮信号
+  E4  sm_quality_flow      优质流入 vs 拥挤板块
+  E5  crowding risk        拥挤风险提示
+  E6  sm_cycle_grid        情绪周期格（点火/确认/扩散/高潮/分歧/退潮）
+  E7  market state         市场水位卡
+  E8  candidate_pool       补涨候选池
+  E9  review_table         昨日假设 Review（自动对账）
+  E10 sm_tomorrow_targets  明日观察清单 + 验证点
+  E11 sm_sector_structure  龙头 / 中军 / 情绪先锋结构
+  E12 hypotheses_list      今日判断资产（沉淀到 report_judgments）
+  E13 sm_strategy_view     策略视角（主线延续/分歧修复/高低切/防守切换）
+  E14 disclaimer
+```
+
+### Factor scores
+
+| Score | What it measures |
+|---|---|
+| `heat_score` | Relative money-flow strength vs cross-section |
+| `trend_score` | Directional momentum (buy/sell pressure) |
+| `persistence_score` | Consistency of flow over recent days |
+| `crowding_score` | Money piled in but price not moving — crowding risk |
+
+### Sector roles & cycle phases
+
+**Roles:** 主线 / 中军 / 轮动 / 防守 / 催化 / 退潮 / 未识别
+
+**Cycle phases:** 冷 / 点火 / 确认 / 扩散 / 高潮 / 分歧 / 退潮 / 未识别
+
+### Backtest metrics (per factor × forward window)
+
+- **IC / IC-IR** — Pearson information coefficient + information ratio
+- **RankIC / RankIC-IR** — Spearman rank IC
+- **TopN hit rate** — % of top-5 factor-ranked sectors up next day
+- **Q1–Q5 group returns** — equal-count quintile mean forward return
+
+Walk-forward ML: rolling 60d train → 20d step, AUC for 3 model types.
+
+### SmartMoney CLI
+
+```bash
+# ETL
+ifa smartmoney etl      --report-date 2026-04-30
+ifa smartmoney backfill --start 20251101 --end 20260430
+
+# Factor compute (run after ETL)
+ifa smartmoney compute  --report-date 2026-04-30
+ifa smartmoney compute  --start 2025-11-01 --end 2026-04-30
+
+# Report
+ifa smartmoney evening  --report-date 2026-04-30
+
+# Backtest
+ifa smartmoney backtest --start 2025-11-01 --end 2026-04-30 --windows 1,5
+ifa smartmoney bt list
+ifa smartmoney bt show <run-id>
+
+# Param versioning
+ifa smartmoney params list
+ifa smartmoney params freeze --name v2026_05 --from-backtest <run-id>
+ifa smartmoney params archive v2026_04
+```
+
+---
+
+## Market — A-share Main (总指挥型)
+
+The centrepiece daily report. Three slots: morning briefing, intraday noon update, evening recap.
+
+**Evening sections (14):**
+S1 commentary · S2 index_panel · S3 category_strength · S4 sentiment_grid ·
+S5 dragon_tiger (龙虎榜) · S6 three_aux_summary (SmartMoney/Tech/Asset 三辅验证) ·
+S7 review_table (morning hypotheses) · S8 review_table (noon hypotheses) ·
+S9 focus_deep (10 stocks) · S10 focus_brief (20 stocks) ·
+S11 attribution · S12 hypotheses_list · S13 watchlist · S14 disclaimer
+
+```bash
+ifa generate market --slot morning  --report-date 2026-04-30 --user default
+ifa generate market --slot noon     --report-date 2026-04-30
+ifa generate market --slot evening  --report-date 2026-04-30
+```
+
+---
+
+## Tech — AI Five-Layer Cake
+
+Tracks the tech/AI ecosystem across five structural layers:
+**算力层 → 模型层 → 应用层 → 终端层 → 生态链**
+
+**Evening sections (12):**
+S1 commentary · S2 layer_map (五层复盘) · S3 category_strength ·
+S4 review_table · S5 leader_table (科技龙头) · S6 candidate_pool ·
+S7 focus_deep · S8 focus_brief · S9 news_list · S10 watchlist ·
+S11 hypotheses_list · S12 disclaimer
+
+```bash
+ifa generate tech --slot morning --report-date 2026-04-30 --user default
+ifa generate tech --slot evening --report-date 2026-04-30 --user default
+```
+
+---
+
+## Asset — Cross-Asset Transmission
+
+Tracks commodity/futures markets and their transmission effects into A-share sectors:
+**原油 / 贵金属 / 有色 / 黑色 / 化工 / 农产品** → 申万行业当日表现
+
+**Evening sections (10):**
+S1 commentary · S2 commodity_dashboard · S3 category_strength ·
+S4 review_table · S5 transmission_review (Asset→A股传导复盘) ·
+S6 chain_review (分链复盘) · S7 news_list · S8 watchlist ·
+S9 hypotheses_list · S10 disclaimer
+
+```bash
+ifa generate asset --slot morning --report-date 2026-04-30
+ifa generate asset --slot evening --report-date 2026-04-30
+```
+
+---
+
+## Macro — Policy & Liquidity Overlay
+
+Macro overlay report covering policy events, liquidity, FX, and cross-asset context.
+Feeds indicator data from TuShare structured endpoints + LLM-extracted text signals.
+
+**Evening sections (11):**
+S1 commentary · S2 review_table · S3 news_list · S4 data_panel ·
+S5 liquidity_grid · S6 cross_asset_grid · S7 attribution · S8 watchlist ·
+S9 hypotheses_list · S10 indicator_capture_table · S11 disclaimer
+
+**Pre-jobs** (feed the Macro report with low-frequency text signals):
+
+```bash
+# Extract structured macro indicators from news (incremental, watermark-based)
+ifa job text-capture --lookback-days 90 --mode test
+
+# Curate active policy events into memory table
+ifa job policy-memory --lookback-days 14 --mode test
+```
+
+```bash
+ifa generate macro --slot morning --report-date 2026-04-30
+ifa generate macro --slot evening --report-date 2026-04-30
+```
 
 ---
 
@@ -46,143 +223,186 @@ schema we build now serves the whole P0 → P2 roadmap, not only Macro.
 ```
 ifa-claude/
 ├── README.md
-├── pyproject.toml                # uv-managed, Python 3.12
-├── .python-version
-├── .env.example                  # documents env vars (no secrets)
-├── alembic.ini                   # (added once schema is approved)
-├── alembic/                      # migrations
-├── docs/
-│   ├── architecture.md
-│   ├── database-schema.md        # IFAVR table-by-table design
-│   └── run-modes.md
-├── ifa/                          # main package
-│   ├── config.py                 # Pydantic Settings, loads ifaenv/secrets/.env
-│   ├── runtime.py                # RunContext: mode, run_id, output paths
+├── pyproject.toml                       # uv-managed, Python 3.12
+├── alembic/
+│   └── versions/
+│       ├── *_core_schema.py             # report_runs/sections/judgments/model_outputs
+│       └── *_smartmoney_schema.py       # smartmoney.raw_* + business tables
+├── ifa/
+│   ├── config.py                        # Pydantic Settings → ifaenv/secrets/.env
 │   ├── core/
-│   │   ├── llm/                  # OpenAI-compatible client w/ primary→fallback
-│   │   ├── tushare/              # token-aware data wrapper
-│   │   ├── db/                   # SQLAlchemy engine + ORM
-│   │   ├── render/               # Jinja2 HTML templates
-│   │   └── report/               # ReportRun lifecycle, Section base, FSJ helpers
+│   │   ├── llm/                         # OpenAI-compatible relay, primary→fallback
+│   │   ├── tushare/                     # TuShare token-aware wrapper
+│   │   ├── db/                          # SQLAlchemy engine (port 55432)
+│   │   ├── render/
+│   │   │   └── templates/
+│   │   │       ├── report.html          # section dispatcher
+│   │   │       ├── _tone_card.html      # shared section partials (20+)
+│   │   │       ├── _sm_market_pulse.html
+│   │   │       ├── _sm_sector_flow.html
+│   │   │       ├── _sm_quality_flow.html
+│   │   │       ├── _sm_cycle_grid.html
+│   │   │       ├── _sm_tomorrow_targets.html
+│   │   │       ├── _sm_sector_structure.html
+│   │   │       └── _sm_strategy_view.html
+│   │   └── report/                      # ReportRun lifecycle, insert_section, finalize
 │   ├── families/
+│   │   ├── _shared/
+│   │   │   └── news.py                  # shared news loader
+│   │   ├── smartmoney/
+│   │   │   ├── etl/
+│   │   │   │   ├── raw_fetchers.py      # 20 TuShare fetchers (one per raw_* table)
+│   │   │   │   └── runner.py            # run_etl_for_date, run_backfill
+│   │   │   ├── factors/
+│   │   │   │   ├── flow.py              # heat/trend/persistence/crowding → factor_daily
+│   │   │   │   ├── liquidity.py         # market water-level → market_state_daily
+│   │   │   │   ├── role.py              # sector role classification (7 roles)
+│   │   │   │   ├── cycle.py             # cycle phase state machine + write_sector_states
+│   │   │   │   ├── leader.py            # 龙头股 scoring → stock_signals_daily
+│   │   │   │   └── candidate.py         # 补涨候选 scoring
+│   │   │   ├── ml/
+│   │   │   │   ├── features.py          # 31-feature matrix (F1 raw → F7 DC extras)
+│   │   │   │   ├── dataset.py           # MLDataset, time-based split, label schemes
+│   │   │   │   ├── logistic.py          # SmartMoneyLogistic (StandardScaler+balanced)
+│   │   │   │   ├── random_forest.py     # SmartMoneyRandomForest (n_est=100)
+│   │   │   │   ├── xgboost_model.py     # SmartMoneyXGBoost (hist, nthread=2)
+│   │   │   │   ├── news_catalyst.py     # LLM sector catalyst scoring
+│   │   │   │   └── persistence.py       # save/load/list models + manifest.json
+│   │   │   ├── backtest/
+│   │   │   │   ├── metrics.py           # IC/RankIC/TopN/group returns (pure math)
+│   │   │   │   ├── engine.py            # backtest loop, walk-forward ML eval
+│   │   │   │   └── runner.py            # DB persistence, list/show helpers
+│   │   │   ├── params/
+│   │   │   │   ├── default.yaml         # baseline param set
+│   │   │   │   └── store.py             # get_active_params, freeze_params
+│   │   │   ├── data.py                  # pure DB loaders for report sections
+│   │   │   ├── prompts.py               # 7 LLM prompt bundles + SYSTEM_PERSONA
+│   │   │   ├── evening.py               # 14-section orchestrator
+│   │   │   └── universe.py
+│   │   ├── market/
+│   │   │   ├── morning.py / noon.py / evening.py
+│   │   │   ├── data.py / prompts.py / universe.py / _common.py
+│   │   ├── tech/
+│   │   │   ├── morning.py / evening.py / focus.py
+│   │   │   ├── data.py / prompts.py / universe.py
+│   │   ├── asset/
+│   │   │   ├── morning.py / evening.py
+│   │   │   ├── data.py / prompts.py / universe.py
 │   │   └── macro/
-│   │       ├── morning/          # 12 sections per ifa-macro-v1
-│   │       ├── evening/          # 11 sections
-│   │       └── prompts/          # versioned prompt YAML
-│   ├── jobs/
-│   │   ├── macro_text_capture.py
-│   │   └── macro_policy_memory.py
-│   └── cli/                      # `ifa healthcheck`, `ifa generate macro ...`
-├── scripts/
-│   ├── postgres-bootstrap.sh     # brew install + initdb at ifaenv/pgdata
-│   ├── postgres-start.sh
-│   └── postgres-stop.sh
-└── tests/
+│   │       ├── morning.py / evening.py
+│   │       └── data.py / prompts.py
+│   └── cli/
+│       ├── __main__.py                  # root: job / generate / smartmoney
+│       ├── smartmoney.py                # etl/compute/backfill/backtest/evening/params/bt
+│       ├── generate.py                  # macro/tech/market/asset
+│       ├── jobs.py                      # text-capture / policy-memory
+│       └── healthcheck.py
+└── scripts/
+    ├── postgres-bootstrap.sh
+    ├── postgres-start.sh
+    └── postgres-stop.sh
 ```
 
-External (not in repo, gitignored anyway):
+External (gitignored):
 
 ```
 /Users/neoclaw/claude/ifaenv/
-├── secrets/.env                  # all API keys & DB password (chmod 600)
-├── pgdata/                       # PostgreSQL data directory
-├── out/{test,manual,production}/ # rendered reports + JSON snapshots
-└── logs/
+├── secrets/.env                         # all API keys & DB password (chmod 600)
+├── pgdata/                              # PostgreSQL 16 data dir, port 55432
+├── models/smartmoney/                   # pickled ML models + manifest.json
+└── out/{test,manual,production}/        # rendered HTML reports by date/run-id
 ```
 
 ---
 
 ## Run modes
 
-Every report run records the mode it was triggered under. Set via `--mode` CLI flag
-or `IFA_RUN_MODE` env. Three modes:
+| Mode | DB | Trigger | Output path |
+|---|---|---|---|
+| `test` | `ifavr_test` | developer / CI | `ifaenv/out/test/<date>/<run-id>/` |
+| `manual` | `ifavr` | operator re-run | `ifaenv/out/manual/<date>/<run-id>/` |
+| `production` | `ifavr` | cron scheduled | `ifaenv/out/production/<date>/<run-id>/` |
 
-| Mode         | When                                    | DB                          | Output dir                              |
-|--------------|-----------------------------------------|-----------------------------|-----------------------------------------|
-| `test`       | Developer or CI testing                 | `ifavr_test` (separate DB)  | `ifaenv/out/test/<date>/<run-id>/`      |
-| `manual`     | Operator triggers a re-run after deploy | `ifavr`                     | `ifaenv/out/manual/<date>/<run-id>/`    |
-| `production` | Cron-scheduled run                      | `ifavr`                     | `ifaenv/out/production/<date>/<run-id>/`|
-
-`report_runs.run_mode` is recorded so we can filter/exclude test runs from any
-review/aggregation query. See [`docs/run-modes.md`](docs/run-modes.md).
+Set via `--mode` flag or `IFA_RUN_MODE` env var.
+`report_runs.run_mode` is persisted so test runs can be excluded from any review query.
 
 ---
 
 ## Setup
 
-### 1. Bootstrap the Python env
+### 1. Python environment
 ```bash
 cd /Users/neoclaw/claude/ifa-claude
 uv venv --python 3.12
 uv sync
 ```
 
-### 2. Install local PostgreSQL (one-time)
+### 2. PostgreSQL (one-time)
 ```bash
-./scripts/postgres-bootstrap.sh    # brew install postgresql@16, initdb to ifaenv/pgdata
+./scripts/postgres-bootstrap.sh    # brew install postgresql@16, initdb
 ./scripts/postgres-start.sh        # starts cluster on 127.0.0.1:55432
 ```
 
-### 3. Verify everything is wired
+### 3. Run migrations
 ```bash
-uv run ifa healthcheck
-```
-Pings primary LLM, fallback LLM, TuShare, and the database.
-
-### 4. Run the macro pre-jobs (text capture + policy memory)
-These two scaffold jobs feed the morning/evening reports with low-frequency
-macro signals that TuShare doesn't expose as structured data:
-
-```bash
-# Extract 新增人民币贷款 / 人民币贷款余额 from major_news / news / npr
-uv run ifa job text-capture --lookback-days 90 --mode test
-
-# Curate active policy events into the active-memory table
-uv run ifa job policy-memory --lookback-days 14 --mode test
+alembic upgrade head
 ```
 
-Both are **incremental**: each run advances `news_scan_watermarks`, so the
-next call only scans rows newer than the high-water mark. The first run on
-a fresh DB will scan up to `--lookback-days` (capped at 90).
-
-Pipeline per source (chunked weekly):
-1. **Keyword filter (no LLM)** — narrow ten-thousand-row news dumps down to a
-   few candidates that mention the target indicator / policy dimension.
-2. **Batch LLM extraction (5 candidates / call)** — `gpt-5.4` returns strict
-   JSON; on parse failure we retry once at temperature 0 then drop the batch.
-3. **Idempotent upsert** — `macro_text_derived_indicators` (unique on
-   `(source_url, indicator_name, reported_period)`) and
-   `macro_policy_event_memory` (unique on `event_id` derived from URL/title/time).
-
-Audit script (read-only, no DB writes):
+### 4. Verify
 ```bash
-uv run python scripts/audit_macro_sources.py --lookback-days 30
+ifa healthcheck                    # pings LLM, TuShare, DB
 ```
-Probes which TuShare structured macro endpoints are live, prints news keyword
-density per source, and shows the latest `npr` policy items.
 
-### 5. Generate a Macro report (once schema & sections are landed)
+### 5. SmartMoney full pipeline (initial backfill)
 ```bash
-uv run ifa generate macro \
-  --slot morning \
-  --report-date 2026-04-29 \
-  --data-cutoff "2026-04-29T08:45:00+08:00" \
-  --mode manual
+# Raw data backfill (~90 min for 120 trading days)
+ifa smartmoney backfill --start 20251101 --end 20260430
+
+# Factor + role + cycle + leader + candidate compute
+ifa smartmoney compute --start 2025-11-01 --end 2026-04-30
+
+# Backtest and freeze params
+ifa smartmoney backtest --start 2025-11-01 --end 2026-04-30 --no-ml
+ifa smartmoney params freeze --name v2026_05 --from-backtest <run-id>
+
+# Generate latest evening report
+ifa smartmoney evening --report-date 2026-04-30
 ```
+
+### 6. Other family reports
+```bash
+ifa generate market --slot evening --report-date 2026-04-30 --user default
+ifa generate tech   --slot evening --report-date 2026-04-30 --user default
+ifa generate asset  --slot evening --report-date 2026-04-30
+ifa generate macro  --slot evening --report-date 2026-04-30
+```
+
+---
+
+## Tech stack
+
+| Layer | Choice |
+|---|---|
+| Python | 3.12, uv |
+| Database | PostgreSQL 16, port 55432, SQLAlchemy 2.0 (raw SQL via `text()`, no ORM) |
+| LLM | OpenAI-compatible relay — primary `gpt-5.4`, fallback `gpt-5.5` |
+| Market data | TuShare Pro API |
+| Templates | Jinja2, inline CSS, self-contained HTML (no external CDN) |
+| ML | scikit-learn 1.8, XGBoost 3.2 (M1-safe: `tree_method='hist'`, `nthread=2`) |
+| Model storage | Pickle + atomic `manifest.json` → `ifaenv/models/smartmoney/` |
 
 ---
 
 ## Secrets
 
-API keys, DB passwords, and tokens **never** enter this repo. They live in
-`/Users/neoclaw/claude/ifaenv/secrets/.env` (chmod 600). `ifa.config` reads that
-file via `IFA_SECRETS_FILE` env. `.env.example` in the repo only documents the
-variable names and non-secret defaults.
+All API keys and DB credentials live in `ifaenv/secrets/.env` (chmod 600),
+never in this repo. `.env.example` documents variable names only.
 
 ---
 
-## Compliance footer
+## Compliance
 
-All formal reports include the `Lindenwood Management LLC` disclaimer (English short
-header + full English/Chinese long-form). Reports are informational and research
-only — never investment advice.
+All reports include the Lindenwood Management LLC disclaimer (English + Chinese).
+Reports are **informational and research only — not investment advice**.
+No LLM prompt instructs the model to give buy/sell recommendations.
+All LLM outputs use 观察 / 假设 / 验证点 framing only.
