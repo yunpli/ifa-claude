@@ -70,7 +70,7 @@ def upgrade() -> None:
         _ck("ck_report_runs_market", "market",
             ["china_a", "hk", "us", "cross_asset"]),
         _ck("ck_report_runs_family", "report_family",
-            ["macro", "asset", "tech", "main", "weekend", "briefing", "adhoc"]),
+            ["macro", "asset", "tech", "main", "weekend", "briefing", "adhoc", "smartmoney"]),
         _ck("ck_report_runs_status", "status",
             ["running", "succeeded", "failed", "partial", "superseded"]),
         _ck("ck_report_runs_run_mode", "run_mode",
