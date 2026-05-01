@@ -110,7 +110,7 @@ def compute(
 
         # 2. Market state → market_state_daily
         try:
-            snap = compute_market_state(engine, td)
+            snap = compute_market_state(engine, td, params=params)
             write_market_state(engine, snap)
             console.print(f"  market_state: {snap.market_state}  (total {snap.total_amount:.0f}亿)")
         except Exception as exc:

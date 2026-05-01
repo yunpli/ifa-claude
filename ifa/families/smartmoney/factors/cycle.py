@@ -306,6 +306,18 @@ def compute_phases_for_date(
 
 # ── DB write (combines role + phase into sector_state_daily) ──────────────────
 
+def _sanitize_for_json(obj: Any) -> Any:
+    """Recursively replace float NaN/Inf with None so json.dumps produces valid JSON."""
+    import math
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    return obj
+
+
 def write_sector_states(
     engine: Engine,
     *,
@@ -361,10 +373,10 @@ def write_sector_states(
             "cycle_phase": p.cycle_phase if p else "未识别",
             "role_conf": r.confidence if r else "low",
             "phase_conf": p.confidence if p else "low",
-            "evidence_json": json.dumps({
+            "evidence_json": json.dumps(_sanitize_for_json({
                 "role": r.evidence if r else None,
                 "phase": p.evidence if p else None,
-            }, ensure_ascii=False),
+            }), ensure_ascii=False),
         })
 
     with engine.begin() as conn:

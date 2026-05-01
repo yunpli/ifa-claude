@@ -192,7 +192,7 @@ def _compute_dc_factors(
             "net_amount_rate": round(float(row["net_amount_rate"] or 0), 4),
             "buy_elg_amount_rate": round(float(row["buy_elg_amount_rate"] or 0), 4),
             "pct_change": round(float(row["pct_change"] or 0), 4),
-            "dc_rank": int(row["rank"] or 0),
+            "dc_rank": int(row["rank"]) if row["rank"] == row["rank"] and row["rank"] is not None else 0,
             "consec_positive_days": consecutive_positive(net_hist),
             "content_type": row["content_type"],
         }
