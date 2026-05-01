@@ -1,0 +1,71 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.intro %}<p class="ifa-section__intro">{{ c.intro }}</p>{% endif %}
+  {% if c.rows %}
+  <div class="ifa-struct-grid">
+    {% for r in c.rows %}
+    <div class="ifa-struct-card">
+      <div class="ifa-struct-card__head">
+        <div>
+          <span class="ifa-struct-card__name">{{ r.sector_name }}</span>
+          <span class="ifa-flow-table__src">{{ r.sector_code }}</span>
+        </div>
+        <div class="ifa-struct-card__tags">
+          <span class="ifa-flow-table__tag tag-role" data-role="{{ r.role }}">{{ r.role }}</span>
+          <span class="ifa-flow-table__tag tag-cycle" data-cycle="{{ r.cycle_phase }}">{{ r.cycle_phase }}</span>
+        </div>
+      </div>
+      <div class="ifa-struct-card__body">
+        {% if r.leader %}
+        <div class="ifa-struct-row">
+          <span class="ifa-struct-row__lbl">龙头</span>
+          <span class="ifa-struct-row__val"><strong>{{ r.leader.name or '—' }}</strong>
+            <span class="ifa-flow-table__src">{{ r.leader.ts_code }}</span>
+            {% if r.leader.lu_desc %}<span class="ifa-struct-row__lu">{{ r.leader.lu_desc }}</span>{% endif %}
+            {% if r.leader.score is not none %}<span class="ifa-struct-row__num">分 {{ '%.2f'|format(r.leader.score) }}</span>{% endif %}
+          </span>
+        </div>
+        {% endif %}
+        {% if r.vanguard %}
+        <div class="ifa-struct-row">
+          <span class="ifa-struct-row__lbl">情绪先锋</span>
+          <span class="ifa-struct-row__val"><strong>{{ r.vanguard.name or '—' }}</strong>
+            <span class="ifa-flow-table__src">{{ r.vanguard.ts_code }}</span>
+            {% if r.vanguard.lu_desc %}<span class="ifa-struct-row__lu">{{ r.vanguard.lu_desc }}</span>{% endif %}
+            {% if r.vanguard.consec_boards %}<span class="ifa-struct-row__num">{{ r.vanguard.consec_boards }} 连</span>{% endif %}
+          </span>
+        </div>
+        {% endif %}
+        {% if r.core_troops %}
+        <div class="ifa-struct-row">
+          <span class="ifa-struct-row__lbl">中军</span>
+          <span class="ifa-struct-row__val">
+            {% for t in r.core_troops %}{{ t.name or '—' }}<span class="ifa-flow-table__src">{{ t.ts_code }}</span>{% if not loop.last %}; {% endif %}{% endfor %}
+          </span>
+        </div>
+        {% endif %}
+        {% if not r.leader and not r.vanguard and not r.core_troops %}
+        <div class="ifa-struct-row__empty">该板块今日无明显结构信号。</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '今日无活跃板块结构数据。' }}</div>
+  {% endif %}
+</section>
+<style>
+.ifa-struct-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.ifa-struct-card{border:1px solid var(--rule);background:var(--paper-tint);padding:12px 14px;}
+.ifa-struct-card__head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px dashed var(--rule);padding-bottom:8px;margin-bottom:8px;}
+.ifa-struct-card__name{font-family:var(--font-serif);font-weight:600;font-size:14px;color:var(--ink);}
+.ifa-struct-card__tags{display:flex;gap:6px;}
+.ifa-struct-row{display:grid;grid-template-columns:80px 1fr;gap:10px;padding:4px 0;font-size:12.5px;color:var(--ink-2);align-items:start;}
+.ifa-struct-row__lbl{font-size:10.5px;color:var(--ink-muted);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding-top:1px;}
+.ifa-struct-row__lu{display:inline-block;background:#fee2e2;color:#991b1b;font-size:10.5px;padding:1px 6px;border-radius:2px;margin-left:6px;font-weight:600;}
+.ifa-struct-row__num{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-muted);margin-left:6px;}
+.ifa-struct-row__empty{font-size:12px;color:var(--ink-muted);font-style:italic;text-align:center;padding:8px;}
+@media (max-width:720px){.ifa-struct-grid{grid-template-columns:1fr;}}
+</style>

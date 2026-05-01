@@ -1,0 +1,67 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.overall_commentary %}
+  <p class="ifa-section__intro">{{ c.overall_commentary }}</p>
+  {% endif %}
+  {% if c.rows %}
+  <table class="ifa-flow-table" data-direction="{{ c.direction }}">
+    <thead>
+      <tr>
+        <th>板块</th>
+        <th>涨跌幅</th>
+        <th>净流{% if c.direction == 'in' %}入{% else %}出{% endif %}</th>
+        <th>超大单占比</th>
+        <th>角色</th>
+        <th>周期</th>
+        <th>解读</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td><span class="ifa-flow-table__name">{{ r.sector_name }}</span><span class="ifa-flow-table__src">{{ r.sector_source }}</span></td>
+        <td class="{% if r.pct_change and r.pct_change > 0 %}up{% elif r.pct_change and r.pct_change < 0 %}down{% endif %}">{{ r.pct_change_display }}</td>
+        <td class="ifa-flow-table__amt {% if c.direction == 'in' %}up{% else %}down{% endif %}">{{ r.net_amount_display }}</td>
+        <td>{% if r.elg_buy_rate is not none %}{{ '%.1f'|format(r.elg_buy_rate) }}%{% else %}—{% endif %}</td>
+        <td><span class="ifa-flow-table__tag tag-role" data-role="{{ r.role }}">{{ r.role }}</span></td>
+        <td><span class="ifa-flow-table__tag tag-cycle" data-cycle="{{ r.cycle_phase }}">{{ r.cycle_phase }}</span></td>
+        <td class="ifa-flow-table__cmt">
+          {% if r.signal_quality %}<span class="ifa-flow-table__sig" data-sig="{{ r.signal_quality }}">{{ r.signal_quality }}</span>{% endif %}
+          {{ r.commentary or '—' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '暂无数据。' }}</div>
+  {% endif %}
+</section>
+<style>
+.ifa-flow-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+.ifa-flow-table th{text-align:left;border-bottom:1px solid var(--rule);padding:6px 8px;color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
+.ifa-flow-table td{padding:8px;border-bottom:1px solid var(--rule-soft);vertical-align:top;}
+.ifa-flow-table__name{font-weight:600;color:var(--ink);}
+.ifa-flow-table__src{font-family:var(--font-mono);font-size:10px;color:var(--ink-muted);margin-left:6px;text-transform:uppercase;}
+.ifa-flow-table__amt{font-family:var(--font-mono);font-weight:600;}
+.ifa-flow-table__tag{font-size:10.5px;padding:2px 8px;border-radius:2px;letter-spacing:0.04em;font-weight:600;display:inline-block;}
+.tag-role[data-role='主线']{background:#fbe8e0;color:#9a3412;}
+.tag-role[data-role='中军']{background:#e6f0fb;color:#1d4ed8;}
+.tag-role[data-role='轮动']{background:#fff3cd;color:#92400e;}
+.tag-role[data-role='防守']{background:#e6f4ea;color:#166534;}
+.tag-role[data-role='催化']{background:#fde2e2;color:#991b1b;}
+.tag-role[data-role='退潮']{background:#f3f4f6;color:#475569;}
+.tag-cycle[data-cycle='扩散']{background:#dcfce7;color:#166534;}
+.tag-cycle[data-cycle='高潮']{background:#fee2e2;color:#991b1b;}
+.tag-cycle[data-cycle='点火']{background:#fff7ed;color:#c2410c;}
+.tag-cycle[data-cycle='确认']{background:#dbeafe;color:#1e40af;}
+.tag-cycle[data-cycle='分歧']{background:#fef3c7;color:#92400e;}
+.tag-cycle[data-cycle='退潮']{background:#f3f4f6;color:#475569;}
+.ifa-flow-table__cmt{color:var(--ink-2);font-size:12px;}
+.ifa-flow-table__sig{display:inline-block;font-size:10px;padding:1px 6px;margin-right:6px;border-radius:2px;font-weight:600;letter-spacing:0.04em;}
+.ifa-flow-table__sig[data-sig='健康']{background:#dcfce7;color:#166534;}
+.ifa-flow-table__sig[data-sig='诱多']{background:#fef3c7;color:#92400e;}
+.ifa-flow-table__sig[data-sig='诱空']{background:#fee2e2;color:#991b1b;}
+.ifa-flow-table__sig[data-sig='中性']{background:#f3f4f6;color:#475569;}
+</style>

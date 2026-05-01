@@ -49,6 +49,27 @@ def etl(
     _print_day_stats(s)
 
 
+@app.command("evening")
+def evening(
+    report_date: str = typer.Option(..., "--report-date", help="YYYY-MM-DD"),
+    cutoff_time: str = typer.Option("18:00", "--cutoff-time"),
+    triggered_by: str | None = typer.Option(None, "--triggered-by"),
+    mode: str | None = typer.Option(None, "--mode"),
+) -> None:
+    """Render a SmartMoney evening report and save HTML."""
+    _override_mode(mode)
+    from ifa.core.report.timezones import parse_bjt_cutoff
+    from ifa.families.smartmoney.evening import run_smartmoney_evening
+    rd = dt.datetime.strptime(report_date, "%Y-%m-%d").date()
+    cutoff_utc = parse_bjt_cutoff(report_date, cutoff_time)
+    path = run_smartmoney_evening(
+        report_date=rd, data_cutoff_at=cutoff_utc,
+        triggered_by=triggered_by,
+        on_log=lambda m: console.print(f"  {m}"),
+    )
+    console.print(f"\n[bold green]Report saved:[/bold green] {path}")
+
+
 @app.command("backfill")
 def backfill(
     start: str = typer.Option(..., "--start", help="YYYYMMDD"),

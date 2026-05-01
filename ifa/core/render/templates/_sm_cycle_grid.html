@@ -1,0 +1,55 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.intro %}<p class="ifa-section__intro">{{ c.intro }}</p>{% endif %}
+  {% if c.rows %}
+  <div class="ifa-cycle-grid">
+    {% for phase in ['点火','确认','扩散','高潮','分歧','退潮'] %}
+    {% set phase_rows = c.rows | selectattr('cycle_phase','equalto',phase) | list %}
+    {% if phase_rows %}
+    <div class="ifa-cycle-col" data-phase="{{ phase }}">
+      <div class="ifa-cycle-col__head">{{ phase }} <span class="ifa-cycle-col__count">{{ phase_rows | length }}</span></div>
+      <ul class="ifa-cycle-col__list">
+        {% for r in phase_rows %}
+        <li>
+          <div class="ifa-cycle-row">
+            <span class="ifa-cycle-row__name">{{ r.sector_name }}</span>
+            <span class="ifa-cycle-row__src">{{ r.sector_source }}</span>
+          </div>
+          <div class="ifa-cycle-row__meta">
+            <span class="ifa-flow-table__tag tag-role" data-role="{{ r.role }}">{{ r.role }}</span>
+            {% if r.heat_score is not none %}<span class="ifa-cycle-row__num">heat {{ '%.2f'|format(r.heat_score) }}</span>{% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '暂无活跃周期数据。' }}</div>
+  {% endif %}
+</section>
+<style>
+.ifa-cycle-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;}
+.ifa-cycle-col{border:1px solid var(--rule);background:var(--paper-tint);padding:8px;border-top-width:3px;border-top-style:solid;}
+.ifa-cycle-col[data-phase='点火']{border-top-color:#c2410c;}
+.ifa-cycle-col[data-phase='确认']{border-top-color:#1d4ed8;}
+.ifa-cycle-col[data-phase='扩散']{border-top-color:#16a34a;}
+.ifa-cycle-col[data-phase='高潮']{border-top-color:#dc2626;}
+.ifa-cycle-col[data-phase='分歧']{border-top-color:#ca8a04;}
+.ifa-cycle-col[data-phase='退潮']{border-top-color:#475569;}
+.ifa-cycle-col__head{font-family:var(--font-serif);font-weight:600;font-size:13px;color:var(--ink);padding-bottom:6px;border-bottom:1px solid var(--rule-soft);margin-bottom:6px;display:flex;justify-content:space-between;align-items:baseline;}
+.ifa-cycle-col__count{font-family:var(--font-mono);font-size:11px;color:var(--ink-muted);}
+.ifa-cycle-col__list{list-style:none;padding:0;margin:0;}
+.ifa-cycle-col__list li{padding:6px 0;border-bottom:1px dashed var(--rule-soft);}
+.ifa-cycle-col__list li:last-child{border-bottom:none;}
+.ifa-cycle-row{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;}
+.ifa-cycle-row__name{font-size:12px;color:var(--ink);font-weight:500;}
+.ifa-cycle-row__src{font-family:var(--font-mono);font-size:10px;color:var(--ink-muted);}
+.ifa-cycle-row__meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+.ifa-cycle-row__num{font-family:var(--font-mono);font-size:10px;color:var(--ink-muted);}
+@media (max-width:900px){.ifa-cycle-grid{grid-template-columns:repeat(3,1fr);}}
+@media (max-width:520px){.ifa-cycle-grid{grid-template-columns:repeat(2,1fr);}}
+</style>

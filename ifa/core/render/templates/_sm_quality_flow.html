@@ -1,0 +1,70 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.intro %}<p class="ifa-section__intro">{{ c.intro }}</p>{% endif %}
+  {% if c.summary %}<p class="ifa-section__intro" style="background:var(--paper-tint);padding:10px 14px;border-left:3px solid var(--accent-2);">{{ c.summary }}</p>{% endif %}
+
+  {% if c.rows %}
+  <table class="ifa-quality-table" data-kind="{{ c.kind }}">
+    <thead>
+      <tr>
+        <th>板块</th>
+        <th>涨跌幅</th>
+        <th>净流入</th>
+        {% if c.kind == 'quality' %}<th>超大单占比</th>{% endif %}
+        <th>角色</th>
+        <th>周期</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td><strong>{{ r.sector_name }}</strong> <span class="ifa-flow-table__src">{{ r.sector_code }}</span></td>
+        <td class="{% if r.pct_change and r.pct_change > 0 %}up{% elif r.pct_change and r.pct_change < 0 %}down{% endif %}">{{ r.pct_change_display }}</td>
+        <td class="ifa-flow-table__amt">{{ r.net_amount_display }}</td>
+        {% if c.kind == 'quality' %}<td>{% if r.elg_buy_rate is not none %}{{ '%.1f'|format(r.elg_buy_rate) }}%{% else %}—{% endif %}</td>{% endif %}
+        <td><span class="ifa-flow-table__tag tag-role" data-role="{{ r.role }}">{{ r.role }}</span></td>
+        <td><span class="ifa-flow-table__tag tag-cycle" data-cycle="{{ r.cycle_phase }}">{{ r.cycle_phase }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '暂无数据。' }}</div>
+  {% endif %}
+
+  {% if c.risks %}
+  <div class="ifa-risk-grid">
+    {% for r in c.risks %}
+    <div class="ifa-risk-card" data-conf="{{ r.confidence }}">
+      <div class="ifa-risk-card__head">
+        <span class="ifa-risk-card__name">{{ r.sector_name }}</span>
+        <span class="ifa-risk-card__sig">{{ r.crowding_signal }}</span>
+      </div>
+      <div class="ifa-risk-card__body">{{ r.implication }}</div>
+      <div class="ifa-risk-card__foot">信心 · {{ r.confidence }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if c.action_hint %}
+  <div class="ifa-action-hint">观察建议：{{ c.action_hint }}</div>
+  {% endif %}
+</section>
+<style>
+.ifa-quality-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-bottom:10px;}
+.ifa-quality-table th{text-align:left;border-bottom:1px solid var(--rule);padding:6px 8px;color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
+.ifa-quality-table td{padding:7px 8px;border-bottom:1px solid var(--rule-soft);}
+.ifa-risk-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px;}
+.ifa-risk-card{border:1px solid var(--rule);border-left:3px solid #c2410c;background:var(--paper-tint);padding:10px 14px;}
+.ifa-risk-card[data-conf='high']{border-left-color:#991b1b;}
+.ifa-risk-card[data-conf='low']{border-left-color:#92400e;}
+.ifa-risk-card__head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;}
+.ifa-risk-card__name{font-family:var(--font-serif);font-weight:600;font-size:14px;color:var(--ink);}
+.ifa-risk-card__sig{font-size:10.5px;background:var(--rule-soft);padding:1px 8px;color:var(--ink-2);font-weight:600;letter-spacing:0.04em;}
+.ifa-risk-card__body{font-size:12.5px;color:var(--ink-2);line-height:1.5;}
+.ifa-risk-card__foot{font-size:10.5px;color:var(--ink-muted);margin-top:6px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;text-align:right;}
+.ifa-action-hint{margin-top:12px;background:var(--paper-tint);border:1px solid var(--rule);border-left:3px solid var(--accent);padding:10px 14px;font-size:13px;color:var(--ink);}
+@media (max-width:720px){.ifa-risk-grid{grid-template-columns:1fr;}}
+</style>

@@ -96,6 +96,20 @@
       {% include "_sentiment_grid.html" %}
     {% elif s.type == 'scenario_plans' %}
       {% include "_scenario_plans.html" %}
+    {% elif s.type == 'sm_market_pulse' %}
+      {% include "_sm_market_pulse.html" %}
+    {% elif s.type == 'sm_sector_flow' %}
+      {% include "_sm_sector_flow.html" %}
+    {% elif s.type == 'sm_quality_flow' %}
+      {% include "_sm_quality_flow.html" %}
+    {% elif s.type == 'sm_cycle_grid' %}
+      {% include "_sm_cycle_grid.html" %}
+    {% elif s.type == 'sm_tomorrow_targets' %}
+      {% include "_sm_tomorrow_targets.html" %}
+    {% elif s.type == 'sm_sector_structure' %}
+      {% include "_sm_sector_structure.html" %}
+    {% elif s.type == 'sm_strategy_view' %}
+      {% include "_sm_strategy_view.html" %}
     {% elif s.type == 'disclaimer' %}
       {% include "_disclaimer.html" %}
     {% endif %}

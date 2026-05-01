@@ -1,0 +1,70 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.summary %}
+  <p class="ifa-section__intro" style="background:var(--paper-tint);padding:10px 14px;border-left:3px solid var(--accent);">{{ c.summary }}</p>
+  {% endif %}
+  {% if c.targets %}
+  <div class="ifa-targets">
+    {% for t in c.targets %}
+    <div class="ifa-target-card" data-priority="{{ t.priority }}">
+      <div class="ifa-target-card__head">
+        <div>
+          <span class="ifa-target-card__name">{{ t.sector_name }}</span>
+          <span class="ifa-target-card__code">{{ t.sector_code or '' }}</span>
+        </div>
+        <div class="ifa-target-card__tags">
+          <span class="ifa-flow-table__tag tag-role" data-role="{{ t.role }}">{{ t.role }}</span>
+          <span class="ifa-flow-table__tag tag-cycle" data-cycle="{{ t.cycle_phase }}">{{ t.cycle_phase }}</span>
+          <span class="ifa-target-card__pri">优先级 {{ t.priority or 'medium' }}</span>
+        </div>
+      </div>
+      <div class="ifa-target-card__row">
+        <div class="ifa-target-card__lbl">观察逻辑</div>
+        <div>{{ t.watch_logic or '—' }}</div>
+      </div>
+      <div class="ifa-target-card__row up">
+        <div class="ifa-target-card__lbl">明日假设</div>
+        <div>{{ t.tomorrow_hypothesis or '—' }}</div>
+      </div>
+      {% if t.validation_signals %}
+      <div class="ifa-target-card__row">
+        <div class="ifa-target-card__lbl">验证信号</div>
+        <ul class="ifa-target-card__list">
+          {% for v in t.validation_signals %}<li>{{ v }}</li>{% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+      {% if t.risk_signals %}
+      <div class="ifa-target-card__row down">
+        <div class="ifa-target-card__lbl">风险信号</div>
+        <ul class="ifa-target-card__list">
+          {% for r in t.risk_signals %}<li>{{ r }}</li>{% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ifa-empty">{{ c.fallback_text or '今日活跃板块池为空。' }}</div>
+  {% endif %}
+</section>
+<style>
+.ifa-targets{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.ifa-target-card{border:1px solid var(--rule);border-left:3px solid var(--accent-2);background:var(--paper-tint);padding:14px 16px;}
+.ifa-target-card[data-priority='high']{border-left-color:#dc2626;}
+.ifa-target-card[data-priority='low']{border-left-color:#94a3b8;}
+.ifa-target-card__head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px dashed var(--rule);padding-bottom:8px;margin-bottom:10px;}
+.ifa-target-card__name{font-family:var(--font-serif);font-size:15px;font-weight:600;color:var(--ink);}
+.ifa-target-card__code{font-family:var(--font-mono);font-size:11px;color:var(--ink-muted);margin-left:6px;}
+.ifa-target-card__tags{display:flex;gap:6px;flex-wrap:wrap;}
+.ifa-target-card__pri{font-size:10.5px;background:var(--rule-soft);padding:2px 8px;color:var(--ink-2);font-weight:600;letter-spacing:0.04em;text-transform:uppercase;}
+.ifa-target-card__row{display:grid;grid-template-columns:84px 1fr;gap:10px;padding:5px 0;font-size:12.5px;color:var(--ink-2);}
+.ifa-target-card__row.up .ifa-target-card__lbl{color:var(--up);}
+.ifa-target-card__row.down .ifa-target-card__lbl{color:var(--down);}
+.ifa-target-card__lbl{font-size:10.5px;color:var(--ink-muted);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding-top:1px;}
+.ifa-target-card__list{margin:0;padding-left:16px;font-size:12.5px;color:var(--ink-2);}
+.ifa-target-card__list li{margin-bottom:2px;}
+@media (max-width:720px){.ifa-targets{grid-template-columns:1fr;}}
+</style>

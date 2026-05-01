@@ -1,0 +1,50 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.stances %}
+  <div class="ifa-stance-grid">
+    {% for st in c.stances %}
+    <div class="ifa-stance-card">
+      <div class="ifa-stance-card__head" data-stance="{{ st.stance }}">{{ st.stance }}</div>
+      <div class="ifa-stance-card__body">{{ st.interpretation or '—' }}</div>
+      {% if st.supporting_evidence %}
+      <div class="ifa-stance-card__row up">
+        <div class="ifa-stance-card__lbl">支持证据</div>
+        <ul>{% for e in st.supporting_evidence %}<li>{{ e }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+      {% if st.counter_signals %}
+      <div class="ifa-stance-card__row down">
+        <div class="ifa-stance-card__lbl">反向信号</div>
+        <ul>{% for cs in st.counter_signals %}<li>{{ cs }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="ifa-empty">今日策略视角不足以形成。</div>
+  {% endif %}
+  {% if c.closing_note %}
+  <div class="ifa-closing-note">{{ c.closing_note }}</div>
+  {% endif %}
+</section>
+<style>
+.ifa-stance-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
+.ifa-stance-card{border:1px solid var(--rule);background:var(--paper-tint);padding:12px 16px;}
+.ifa-stance-card__head{display:inline-block;font-family:var(--font-serif);font-size:14px;font-weight:600;color:var(--ink);padding:3px 10px;background:var(--rule-soft);border-left:3px solid var(--accent);margin-bottom:8px;}
+.ifa-stance-card__head[data-stance='主线延续']{border-left-color:#16a34a;}
+.ifa-stance-card__head[data-stance='分歧修复']{border-left-color:#ca8a04;}
+.ifa-stance-card__head[data-stance='高低切']{border-left-color:#1d4ed8;}
+.ifa-stance-card__head[data-stance='防守切换']{border-left-color:#475569;}
+.ifa-stance-card__head[data-stance='缩量观望']{border-left-color:#94a3b8;}
+.ifa-stance-card__body{font-size:13px;color:var(--ink-2);line-height:1.55;margin-bottom:8px;}
+.ifa-stance-card__row{display:grid;grid-template-columns:84px 1fr;gap:10px;padding:4px 0;font-size:12.5px;color:var(--ink-2);}
+.ifa-stance-card__row.up .ifa-stance-card__lbl{color:var(--up);}
+.ifa-stance-card__row.down .ifa-stance-card__lbl{color:var(--down);}
+.ifa-stance-card__lbl{font-size:10.5px;color:var(--ink-muted);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;}
+.ifa-stance-card__row ul{margin:0;padding-left:16px;}
+.ifa-stance-card__row li{margin-bottom:3px;}
+.ifa-closing-note{margin-top:14px;background:var(--paper-tint);border:1px solid var(--rule);border-left:3px solid var(--ink);padding:12px 16px;font-family:var(--font-serif);font-size:13.5px;color:var(--ink);font-style:italic;}
+@media (max-width:720px){.ifa-stance-grid{grid-template-columns:1fr;}}
+</style>

@@ -1,0 +1,52 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <div class="ifa-pulse-state" data-state="{{ c.market_state }}">
+    <span class="ifa-pulse-state__label">市场状态</span>
+    <span class="ifa-pulse-state__value">{{ c.market_state }}</span>
+    <span class="ifa-pulse-state__date">{{ c.trade_date or '—' }}</span>
+  </div>
+  <div class="ifa-pulse-grid">
+    <div class="ifa-pulse-cell">
+      <div class="ifa-pulse-cell__lbl">总成交额</div>
+      <div class="ifa-pulse-cell__val">{{ '%.0f'|format(c.total_amount_yi or 0) }} <span class="ifa-pulse-cell__unit">亿</span></div>
+      <div class="ifa-pulse-cell__sub">10 日均 {{ '%.0f'|format(c.amount_10d_avg_yi or 0) }} · 比 {{ '%.2f'|format(c.amount_ratio_10d or 1) }}×</div>
+    </div>
+    <div class="ifa-pulse-cell">
+      <div class="ifa-pulse-cell__lbl">60 日分位</div>
+      <div class="ifa-pulse-cell__val">{{ '%.0f'|format((c.amount_percentile_60d or 0)*100) }}%</div>
+      <div class="ifa-pulse-cell__sub">{% if c.amount_percentile_60d and c.amount_percentile_60d >= 0.7 %}显著放量{% elif c.amount_percentile_60d and c.amount_percentile_60d <= 0.3 %}缩量低位{% else %}量能正常{% endif %}</div>
+    </div>
+    <div class="ifa-pulse-cell">
+      <div class="ifa-pulse-cell__lbl">涨跌家数</div>
+      <div class="ifa-pulse-cell__val"><span class="up">{{ c.up_count or 0 }}</span> / <span class="down">{{ c.down_count or 0 }}</span></div>
+      <div class="ifa-pulse-cell__sub">平 {{ c.flat_count or 0 }}</div>
+    </div>
+    <div class="ifa-pulse-cell">
+      <div class="ifa-pulse-cell__lbl">涨停 / 跌停</div>
+      <div class="ifa-pulse-cell__val"><span class="up">{{ c.limit_up_count or 0 }}</span> / <span class="down">{{ c.limit_down_count or 0 }}</span></div>
+      <div class="ifa-pulse-cell__sub">最高连板 {{ c.max_consecutive_limit_up or 0 }}</div>
+    </div>
+    <div class="ifa-pulse-cell">
+      <div class="ifa-pulse-cell__lbl">炸板 / 炸板率</div>
+      <div class="ifa-pulse-cell__val">{{ c.blow_up_count or 0 }} / {{ '%.1f'|format(c.blow_up_rate_pct or 0) }}%</div>
+      <div class="ifa-pulse-cell__sub">{% if c.blow_up_rate_pct and c.blow_up_rate_pct > 50 %}情绪偏弱{% elif c.blow_up_rate_pct and c.blow_up_rate_pct < 20 %}情绪坚挺{% else %}中性{% endif %}</div>
+    </div>
+  </div>
+</section>
+<style>
+.ifa-pulse-state{display:inline-flex;align-items:center;gap:14px;background:var(--paper-tint);border:1px solid var(--rule);border-left:3px solid var(--accent);padding:8px 14px;margin-bottom:12px;font-size:13px;}
+.ifa-pulse-state__label{color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
+.ifa-pulse-state__value{font-family:var(--font-serif);font-size:18px;font-weight:600;color:var(--ink);}
+.ifa-pulse-state__date{color:var(--ink-soft);font-family:var(--font-mono);font-size:12px;margin-left:auto;}
+.ifa-pulse-state[data-state='进攻']{border-left-color:var(--up);}
+.ifa-pulse-state[data-state='退潮'],.ifa-pulse-state[data-state='防守']{border-left-color:var(--down);}
+.ifa-pulse-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;}
+.ifa-pulse-cell{border:1px solid var(--rule);background:var(--paper-tint);padding:10px 12px;}
+.ifa-pulse-cell__lbl{font-size:10.5px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin-bottom:4px;}
+.ifa-pulse-cell__val{font-family:var(--font-serif);font-size:18px;font-weight:600;color:var(--ink);line-height:1.1;}
+.ifa-pulse-cell__val .up{color:var(--up);}.ifa-pulse-cell__val .down{color:var(--down);}
+.ifa-pulse-cell__unit{font-size:11px;color:var(--ink-muted);font-weight:400;}
+.ifa-pulse-cell__sub{font-size:11px;color:var(--ink-soft);margin-top:4px;}
+@media (max-width:720px){.ifa-pulse-grid{grid-template-columns:repeat(2,1fr);}}
+</style>
