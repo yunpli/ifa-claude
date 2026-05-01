@@ -1,7 +1,6 @@
 {% set c = s.content_json %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
-  {% if c.intro %}<p class="ifa-section__intro">{{ c.intro }}</p>{% endif %}
   {% if c.rows %}
   <div class="ifa-cycle-grid">
     {% for phase in ['点火','确认','扩散','高潮','分歧','退潮'] %}
@@ -19,6 +18,7 @@
           <div class="ifa-cycle-row__meta">
             <span class="ifa-flow-table__tag tag-role" data-role="{{ r.role }}">{{ r.role }}</span>
             {% if r.heat_score is not none %}<span class="ifa-cycle-row__num">heat {{ '%.2f'|format(r.heat_score) }}</span>{% endif %}
+            {% if r.leader_name %}<span class="ifa-cycle-row__leader">▶ {{ r.leader_name }}</span>{% endif %}
           </div>
         </li>
         {% endfor %}
@@ -50,6 +50,7 @@
 .ifa-cycle-row__src{font-family:var(--font-mono);font-size:10px;color:var(--ink-muted);}
 .ifa-cycle-row__meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
 .ifa-cycle-row__num{font-family:var(--font-mono);font-size:10px;color:var(--ink-muted);}
+.ifa-cycle-row__leader{font-size:10px;color:var(--accent);font-weight:600;letter-spacing:0.02em;}
 @media (max-width:900px){.ifa-cycle-grid{grid-template-columns:repeat(3,1fr);}}
 @media (max-width:520px){.ifa-cycle-grid{grid-template-columns:repeat(2,1fr);}}
 </style>

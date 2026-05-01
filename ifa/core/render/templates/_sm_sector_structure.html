@@ -1,7 +1,6 @@
 {% set c = s.content_json %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
-  {% if c.intro %}<p class="ifa-section__intro">{{ c.intro }}</p>{% endif %}
   {% if c.rows %}
   <div class="ifa-struct-grid">
     {% for r in c.rows %}
@@ -19,7 +18,7 @@
       <div class="ifa-struct-card__body">
         {% if r.leader %}
         <div class="ifa-struct-row">
-          <span class="ifa-struct-row__lbl">龙头</span>
+          <span class="ifa-struct-row__lbl">{{ r.leader.role or '龙头' }}</span>
           <span class="ifa-struct-row__val"><strong>{{ r.leader.name or '—' }}</strong>
             <span class="ifa-flow-table__src">{{ r.leader.ts_code }}</span>
             {% if r.leader.lu_desc %}<span class="ifa-struct-row__lu">{{ r.leader.lu_desc }}</span>{% endif %}
@@ -29,7 +28,7 @@
         {% endif %}
         {% if r.vanguard %}
         <div class="ifa-struct-row">
-          <span class="ifa-struct-row__lbl">情绪先锋</span>
+          <span class="ifa-struct-row__lbl">{{ r.vanguard.role or '情绪先锋' }}</span>
           <span class="ifa-struct-row__val"><strong>{{ r.vanguard.name or '—' }}</strong>
             <span class="ifa-flow-table__src">{{ r.vanguard.ts_code }}</span>
             {% if r.vanguard.lu_desc %}<span class="ifa-struct-row__lu">{{ r.vanguard.lu_desc }}</span>{% endif %}
@@ -39,14 +38,14 @@
         {% endif %}
         {% if r.core_troops %}
         <div class="ifa-struct-row">
-          <span class="ifa-struct-row__lbl">中军</span>
+          <span class="ifa-struct-row__lbl">跟板</span>
           <span class="ifa-struct-row__val">
             {% for t in r.core_troops %}{{ t.name or '—' }}<span class="ifa-flow-table__src">{{ t.ts_code }}</span>{% if not loop.last %}; {% endif %}{% endfor %}
           </span>
         </div>
         {% endif %}
         {% if not r.leader and not r.vanguard and not r.core_troops %}
-        <div class="ifa-struct-row__empty">该板块今日无明显结构信号。</div>
+        <div class="ifa-struct-row__empty">暂无板块内个股信号（历史数据期）。</div>
         {% endif %}
       </div>
     </div>

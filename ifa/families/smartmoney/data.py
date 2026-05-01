@@ -433,6 +433,61 @@ def load_tomorrow_target_pool(
     return targets
 
 
+def _load_kpl_stocks_for_sectors(
+    engine: Engine,
+    trade_date: dt.date,
+    sector_names: list[str],
+) -> dict[str, list[dict[str, Any]]]:
+    """Fallback: find limit-up stocks whose theme/lu_desc matches active sector names.
+
+    Used when stock_signals_daily is empty (no dc_member historical data).
+    Returns {sector_name → [stock_dict, ...]}.
+    """
+    # Load all kpl_list stocks for the date
+    sql = text(f"""
+        SELECT ts_code, name, lu_desc, theme, status, pct_chg, amount
+        FROM {SCHEMA}.raw_kpl_list
+        WHERE trade_date = :d
+          AND (lu_time IS NOT NULL OR status IS NOT NULL)
+        ORDER BY (CASE WHEN status LIKE '%连板%' OR CAST(COALESCE(LEFT(status, 1), '0') AS TEXT) > '1' THEN 1 ELSE 2 END),
+                 amount DESC NULLS LAST
+    """)
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"d": trade_date}).fetchall()
+
+    if not rows:
+        return {}
+
+    # Build keyword map: each sector contributes keyword tokens from its name
+    # We try full name first, then progressively shorter prefixes for fuzzy matching
+    def _tokens(name: str) -> list[str]:
+        name = name.replace("Ⅰ", "").replace("Ⅱ", "").replace("Ⅲ", "")
+        name = name.replace("（", "").replace("）", "").strip()
+        tokens = [name]
+        # For long names (4+ chars), also try the first 2-3 char prefix as keyword
+        if len(name) >= 4:
+            tokens.append(name[:3])
+        if len(name) >= 3:
+            tokens.append(name[:2])
+        return [t for t in tokens if len(t) >= 2]
+
+    result: dict[str, list[dict[str, Any]]] = {sn: [] for sn in sector_names}
+    for row in rows:
+        ts_code, name, lu_desc, theme, status, pct_chg, amount = row
+        stock_info_str = f"{lu_desc or ''} {theme or ''}".lower()
+        stock_dict = {
+            "ts_code": ts_code, "name": name,
+            "lu_desc": lu_desc or "", "theme": theme or "",
+            "status": status,
+            "pct_chg": float(pct_chg) if pct_chg is not None else None,
+        }
+        for sn in sector_names:
+            if any(tok in stock_info_str for tok in _tokens(sn) if len(tok) >= 2):
+                result[sn].append(stock_dict)
+
+    return result
+
+
 def load_sector_structures(
     engine: Engine,
     trade_date: dt.date,
@@ -442,6 +497,7 @@ def load_sector_structures(
     """Per-sector internal structure: leader / core troops / vanguard.
 
     Restricted to top N active sectors (by heat) to keep the table compact.
+    Falls back to kpl_list-based stock matching when stock_signals_daily is empty.
     """
     sql_sec = text(f"""
         SELECT ss.sector_code, ss.sector_source, ss.sector_name,
@@ -460,42 +516,76 @@ def load_sector_structures(
     with engine.connect() as conn:
         sectors = conn.execute(sql_sec, {"d": trade_date, "n": top_n_sectors}).fetchall()
 
+    if not sectors:
+        return out
+
+    sector_names = [s[2] or "" for s in sectors]
+
+    # First try stock_signals_daily (preferred — has formal role assignment)
+    sig_check = text(f"SELECT 1 FROM {SCHEMA}.stock_signals_daily WHERE trade_date=:d LIMIT 1")
+    with engine.connect() as conn:
+        has_signals = conn.execute(sig_check, {"d": trade_date}).fetchone() is not None
+
+    # Fallback map from kpl_list if no stock signals available
+    kpl_fallback: dict[str, list[dict]] = {}
+    if not has_signals:
+        kpl_fallback = _load_kpl_stocks_for_sectors(engine, trade_date, sector_names)
+
     for s in sectors:
         sec_code, sec_src, sec_name, role, cycle = s
-
-        # Pull stocks tagged as 龙头 / 中军 / 情绪先锋 for this sector
-        sig_sql = text(f"""
-            SELECT ts_code, name, role, score, lu_desc, theme, evidence_json
-            FROM {SCHEMA}.stock_signals_daily
-            WHERE trade_date = :d
-              AND primary_sector_code = :sc
-              AND primary_sector_source = :src
-              AND role IN ('龙头','中军','情绪先锋')
-        """)
-        with engine.connect() as conn:
-            sig_rows = conn.execute(sig_sql, {
-                "d": trade_date, "sc": sec_code, "src": sec_src,
-            }).fetchall()
 
         leader = None
         cores: list[dict[str, Any]] = []
         vanguard = None
-        for sr in sig_rows:
-            ev = sr[6] if isinstance(sr[6], dict) else (json.loads(sr[6]) if sr[6] else {})
-            stock_dict = {
-                "ts_code": sr[0], "name": sr[1], "role": sr[2],
-                "score": float(sr[3]) if sr[3] is not None else None,
-                "lu_desc": sr[4], "theme": sr[5],
-                "consec_boards": ev.get("consec_boards"),
-                "rs": ev.get("rs"),
-                "has_top_inst": ev.get("has_top_inst"),
-            }
-            if sr[2] == "龙头":
-                leader = stock_dict
-            elif sr[2] == "中军":
-                cores.append(stock_dict)
-            elif sr[2] == "情绪先锋":
-                vanguard = stock_dict
+
+        if has_signals:
+            # Pull stocks tagged as 龙头 / 中军 / 情绪先锋 for this sector
+            sig_sql = text(f"""
+                SELECT ts_code, name, role, score, lu_desc, theme, evidence_json
+                FROM {SCHEMA}.stock_signals_daily
+                WHERE trade_date = :d
+                  AND primary_sector_code = :sc
+                  AND primary_sector_source = :src
+                  AND role IN ('龙头','中军','情绪先锋')
+            """)
+            with engine.connect() as conn:
+                sig_rows = conn.execute(sig_sql, {
+                    "d": trade_date, "sc": sec_code, "src": sec_src,
+                }).fetchall()
+
+            for sr in sig_rows:
+                ev = sr[6] if isinstance(sr[6], dict) else (json.loads(sr[6]) if sr[6] else {})
+                stock_dict = {
+                    "ts_code": sr[0], "name": sr[1], "role": sr[2],
+                    "score": float(sr[3]) if sr[3] is not None else None,
+                    "lu_desc": sr[4], "theme": sr[5],
+                    "consec_boards": ev.get("consec_boards"),
+                    "rs": ev.get("rs"),
+                    "has_top_inst": ev.get("has_top_inst"),
+                }
+                if sr[2] == "龙头":
+                    leader = stock_dict
+                elif sr[2] == "中军":
+                    cores.append(stock_dict)
+                elif sr[2] == "情绪先锋":
+                    vanguard = stock_dict
+        else:
+            # Fallback: assign roles from kpl matches heuristically
+            kpl_stocks = kpl_fallback.get(sec_name or "", [])
+            for i, st in enumerate(kpl_stocks[:4]):
+                stock_dict = {
+                    "ts_code": st["ts_code"], "name": st["name"],
+                    "lu_desc": st["lu_desc"], "theme": st["theme"],
+                    "score": None, "consec_boards": None,
+                    "rs": None, "has_top_inst": None,
+                    "role": "连板" if (st["status"] and "连板" in st["status"]) else "涨停",
+                }
+                if i == 0:
+                    leader = stock_dict
+                elif i == 1:
+                    vanguard = stock_dict
+                else:
+                    cores.append(stock_dict)
 
         out.append(SectorStructureRow(
             sector_code=sec_code, sector_source=sec_src,

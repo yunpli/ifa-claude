@@ -18,7 +18,9 @@
       <span><strong>报告日期</strong> {{ report.report_date_bjt }}</span>
       <span><strong>数据截止</strong> {{ report.data_cutoff_bjt }} 北京时间</span>
       <span><strong>模板</strong> {{ report.template_version }}</span>
-      <span><strong>运行模式</strong> {{ report.run_mode }}</span>
+      <span class="ifa-run-mode-badge ifa-run-mode-badge--{{ report.run_mode }}">
+        {% if report.run_mode == 'test' %}⚠ TEST 测试模式{% elif report.run_mode == 'manual' %}✎ MANUAL 手动运行{% else %}✓ PRODUCTION 生产{% endif %}
+      </span>
     </div>
     <div class="ifa-banner__short-disclaimer">
       由 Lindenwood Management LLC 编制。仅供信息汇总与研究参考，不构成投资建议。

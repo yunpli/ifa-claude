@@ -165,7 +165,7 @@ def _build_e1_tone(ctx: SMEveningCtx) -> dict:
 slot: {SLOT}
 
 === 市场水位 ===
-总成交额 {_fmt_amt(ctx.pulse.total_amount, scale=1e4, suffix='万')}; 10 日均 {_fmt_amt(ctx.pulse.amount_10d_avg, scale=1e4, suffix='万')};
+总成交额 {_fmt_amt(ctx.pulse.total_amount)}; 10 日均 {_fmt_amt(ctx.pulse.amount_10d_avg)};
 60 日分位 {ctx.pulse.amount_percentile_60d:.2f};
 涨家数 {ctx.pulse.up_count} / 跌家数 {ctx.pulse.down_count};
 涨停 {ctx.pulse.limit_up_count} / 跌停 {ctx.pulse.limit_down_count};
@@ -260,7 +260,7 @@ def _build_flow_section(
     candidates_blob = "\n".join(
         f"  [{i}] {s.sector_name} ({s.sector_source})  涨幅 {_fmt_pct(s.pct_change)}  "
         f"净流{('入' if direction == 'in' else '出')} "
-        f"{_fmt_amt(abs(s.net_amount or 0), scale=1e4, suffix='万')};  "
+        f"{_fmt_amt(abs(s.net_amount or 0))};  "
         f"超大单占比 {(s.elg_buy_rate or 0):.2f}%;  "
         f"角色 {s.role or '—'};  周期 {s.cycle_phase or '—'}"
         for i, s in enumerate(flows)
@@ -301,8 +301,8 @@ def _build_flow_section(
             "sector_source": s.sector_source,
             "pct_change": s.pct_change,
             "pct_change_display": _fmt_pct(s.pct_change),
-            "net_amount_yi": round((s.net_amount or 0) / 1e4, 2),
-            "net_amount_display": _fmt_amt(s.net_amount, scale=1e4, suffix='万'),
+            "net_amount_yi": round((s.net_amount or 0) / 1e8, 2),
+            "net_amount_display": _fmt_amt(s.net_amount),
             "elg_buy_rate": s.elg_buy_rate,
             "role": s.role or "—",
             "cycle_phase": s.cycle_phase or "—",
@@ -332,12 +332,52 @@ def _build_e5_quality(ctx: SMEveningCtx) -> dict:
             "sector_name": s.sector_name, "sector_code": s.sector_code,
             "pct_change": s.pct_change,
             "pct_change_display": _fmt_pct(s.pct_change),
-            "net_amount_display": _fmt_amt(s.net_amount, scale=1e4, suffix='万'),
+            "net_amount_display": _fmt_amt(s.net_amount),
             "elg_buy_rate": s.elg_buy_rate,
             "role": s.role or "—", "cycle_phase": s.cycle_phase or "—",
         }
         for s in ctx.quality
     ]
+
+    # Batch LLM commentary for each quality row (reuse flow commentary infrastructure)
+    quality_commentary: dict[int, str] = {}
+    if ctx.quality:
+        q_blob = "\n".join(
+            f"  [{i}] {s.sector_name}  涨幅 {_fmt_pct(s.pct_change)}  "
+            f"净流入 {_fmt_amt(s.net_amount)};  超大单 {(s.elg_buy_rate or 0):.1f}%;  "
+            f"角色 {s.role or '—'};  周期 {s.cycle_phase or '—'}"
+            for i, s in enumerate(ctx.quality)
+        )
+        q_user = f"""
+=== 高质量流入板块（量价齐升+主线/轮动角色）===
+{q_blob}
+
+=== 任务 ===
+针对每个板块给出 1-2 句中文解读，说明：①量价关系质量 ②资金性质（超大单高→机构驱动；低→散户/题材） ③周期位置风险提示。
+每条解读不超过 40 字，直接作为表格"解读"列展示。
+
+=== 输出 schema ===
+{{
+  "rows": [
+    {{"idx": 0, "commentary": "..."}},
+    ...
+  ]
+}}
+"""
+        q_parsed, q_resp, q_status = _safe_chat_json(
+            ctx.llm, system=prompts.SYSTEM_PERSONA, user=q_user, max_tokens=800,
+        )
+        _persist_model_output(ctx, section_key="smartmoney_evening.e5_quality",
+                              prompt_name="smartmoney_evening.quality_commentary",
+                              parsed=q_parsed, resp=q_resp, status=q_status)
+        if isinstance(q_parsed, dict):
+            for item in q_parsed.get("rows", []):
+                if isinstance(item, dict):
+                    quality_commentary[item.get("idx", -1)] = item.get("commentary", "")
+
+    for i, row in enumerate(rows):
+        row["commentary"] = quality_commentary.get(i, "")
+
     return {
         "key": "smartmoney_evening.e5_quality", "title": "高质量流入板块",
         "order": 5, "type": "sm_quality_flow",
@@ -358,7 +398,7 @@ def _build_e6_crowding(ctx: SMEveningCtx) -> dict:
             "sector_name": s.sector_name, "sector_code": s.sector_code,
             "pct_change": s.pct_change,
             "pct_change_display": _fmt_pct(s.pct_change),
-            "net_amount_display": _fmt_amt(s.net_amount, scale=1e4, suffix='万'),
+            "net_amount_display": _fmt_amt(s.net_amount),
             "role": s.role or "—", "cycle_phase": s.cycle_phase or "—",
         }
         for s in ctx.crowded
@@ -421,6 +461,16 @@ def _build_e6_crowding(ctx: SMEveningCtx) -> dict:
 # ─── E7: Cycle grid ──────────────────────────────────────────────────────────
 
 def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
+    # Build leader lookup from structures: sector_code → leader name
+    leader_map: dict[str, str] = {}
+    for st in ctx.structures:
+        if st.leader:
+            leader_map[st.sector_code] = st.leader.get("name", "")
+        elif st.vanguard:
+            leader_map[st.sector_code] = st.vanguard.get("name", "")
+        elif st.core_troops:
+            leader_map[st.sector_code] = st.core_troops[0].get("name", "")
+
     rows = [
         {
             "sector_name": c.sector_name,
@@ -431,6 +481,7 @@ def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
             "heat_score": round(c.heat_score, 3) if c.heat_score is not None else None,
             "persistence_score": round(c.persistence_score, 3) if c.persistence_score is not None else None,
             "crowding_score": round(c.crowding_score, 3) if c.crowding_score is not None else None,
+            "leader_name": leader_map.get(c.sector_code, ""),
         }
         for c in ctx.cycle_rows
     ]
