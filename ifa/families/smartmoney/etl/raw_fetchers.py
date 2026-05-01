@@ -393,6 +393,10 @@ def fetch_raw_ths_hot(client: TuShareClient, engine: Engine, *, trade_date: dt.d
     df = client.call("ths_hot", trade_date=trade_date.strftime("%Y%m%d"))
     if df is None or df.empty:
         return 0
+    # Drop foreign-market rows (美股/港股/期货) that have no A-share ts_code
+    df = df[df["ts_code"].notna() & (df["ts_code"].astype(str).str.strip() != "")]
+    if df.empty:
+        return 0
     _replace_for_date(engine, "raw_ths_hot", trade_date)
     rows = []
     for r in df.itertuples():
@@ -420,6 +424,10 @@ def fetch_raw_ths_hot(client: TuShareClient, engine: Engine, *, trade_date: dt.d
 def fetch_raw_dc_hot(client: TuShareClient, engine: Engine, *, trade_date: dt.date) -> int:
     df = client.call("dc_hot", trade_date=trade_date.strftime("%Y%m%d"))
     if df is None or df.empty:
+        return 0
+    # Drop foreign-market rows (美股市场/港股市场) that have no A-share ts_code
+    df = df[df["ts_code"].notna() & (df["ts_code"].astype(str).str.strip() != "")]
+    if df.empty:
         return 0
     _replace_for_date(engine, "raw_dc_hot", trade_date)
     rows = []

@@ -46,6 +46,119 @@ def _print_day_stats(s) -> None:
     console.print(f"[bold]Total: {s.total_rows:,} rows in {s.total_seconds:.1f}s[/bold]")
 
 
+# ─── Factor compute ───────────────────────────────────────────────────────────
+
+@app.command("compute")
+def compute(
+    report_date: str = typer.Option(None, "--report-date", help="YYYY-MM-DD (single day)"),
+    start: str = typer.Option(None, "--start", help="YYYY-MM-DD (range start)"),
+    end: str = typer.Option(None, "--end", help="YYYY-MM-DD (range end)"),
+    mode: str | None = typer.Option(None, "--mode"),
+) -> None:
+    """Compute factors + role/cycle + leader/candidate for a date or range.
+
+    Runs in order: flow factors → market state → role → cycle → leaders → candidates.
+    Requires raw ETL data to already be loaded.
+    """
+    _override_mode(mode)
+    from ifa.families.smartmoney.factors.flow import compute_factors_for_date
+    from ifa.families.smartmoney.factors.liquidity import compute_market_state, write_market_state
+    from ifa.families.smartmoney.factors.role import compute_roles_for_date
+    from ifa.families.smartmoney.factors.cycle import compute_phases_for_date, write_sector_states
+    from ifa.families.smartmoney.factors.leader import compute_leaders_for_date, write_stock_signals
+    from ifa.families.smartmoney.factors.candidate import compute_candidates_for_date
+    from ifa.families.smartmoney.params.store import get_active_params
+
+    engine = _engine()
+    params = get_active_params(engine)
+
+    # Resolve date(s)
+    if report_date:
+        dates = [dt.datetime.strptime(report_date, "%Y-%m-%d").date()]
+    elif start and end:
+        s = dt.datetime.strptime(start, "%Y-%m-%d").date()
+        e = dt.datetime.strptime(end, "%Y-%m-%d").date()
+        # Fetch trade calendar to iterate only trading days
+        from ifa.core.db.engine import get_engine as _ge
+        from sqlalchemy import text as _t
+        with engine.connect() as conn:
+            rows = conn.execute(_t("""
+                SELECT DISTINCT trade_date FROM smartmoney.raw_daily
+                WHERE trade_date BETWEEN :s AND :e ORDER BY trade_date
+            """), {"s": s, "e": e}).fetchall()
+        dates = [r[0] for r in rows]
+        if not dates:
+            console.print(f"[yellow]No raw_daily data found for [{s}, {e}] — run backfill first.[/yellow]")
+            raise typer.Exit(1)
+    else:
+        console.print("[red]Provide --report-date or --start + --end[/red]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]SmartMoney Compute · {dates[0]} → {dates[-1]}[/bold]  ({len(dates)} days)")
+
+    for i, td in enumerate(dates, 1):
+        console.print(f"\n[cyan]--- {i}/{len(dates)} · {td} ---[/cyan]")
+
+        # 1. Flow factors → factor_daily
+        try:
+            written = compute_factors_for_date(engine, td, params=params)
+            total_f = sum(written.values())
+            console.print(f"  factors:      {written}  ({total_f} rows)")
+        except Exception as exc:
+            console.print(f"  [red]factors FAIL:[/red] {exc}")
+            continue
+
+        # 2. Market state → market_state_daily
+        try:
+            snap = compute_market_state(engine, td)
+            write_market_state(engine, snap)
+            console.print(f"  market_state: {snap.market_state}  (total {snap.total_amount:.0f}亿)")
+        except Exception as exc:
+            console.print(f"  [yellow]market_state WARN:[/yellow] {exc}")
+
+        # 3. Roles → sector_state_daily (role column)
+        try:
+            roles = compute_roles_for_date(engine, td, params=params)
+            console.print(f"  roles:        {len(roles)} sectors")
+        except Exception as exc:
+            console.print(f"  [yellow]roles WARN:[/yellow] {exc}")
+            roles = []
+
+        # 4. Cycle phases → sector_state_daily (cycle_phase column)
+        try:
+            phases = compute_phases_for_date(engine, td, params=params)
+            console.print(f"  phases:       {len(phases)} sectors")
+        except Exception as exc:
+            console.print(f"  [yellow]phases WARN:[/yellow] {exc}")
+            phases = []
+
+        # 5. Write sector_state_daily (roles + phases merged)
+        if roles or phases:
+            try:
+                n = write_sector_states(engine, roles=roles, phases=phases)
+                console.print(f"  sector_state: {n} rows upserted")
+            except Exception as exc:
+                console.print(f"  [red]sector_state FAIL:[/red] {exc}")
+
+        # 6. Leaders → stock_signals_daily
+        try:
+            signals = compute_leaders_for_date(engine, td, params=params)
+            n = write_stock_signals(engine, signals)
+            console.print(f"  leaders:      {n} signals")
+        except Exception as exc:
+            console.print(f"  [yellow]leaders WARN:[/yellow] {exc}")
+
+        # 7. Candidates → stock_signals_daily
+        try:
+            candidates = compute_candidates_for_date(engine, td, params=params)
+            n = write_stock_signals(engine, candidates)
+            console.print(f"  candidates:   {n} signals")
+        except Exception as exc:
+            console.print(f"  [yellow]candidates WARN:[/yellow] {exc}")
+
+    console.print(f"\n[bold green]Compute done.[/bold green] {len(dates)} days processed.")
+
+
 # ─── ETL ──────────────────────────────────────────────────────────────────────
 
 @app.command("etl")
