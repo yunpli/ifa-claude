@@ -461,15 +461,23 @@ def _build_e6_crowding(ctx: SMEveningCtx) -> dict:
 # ─── E7: Cycle grid ──────────────────────────────────────────────────────────
 
 def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
-    # Build leader lookup from structures: sector_code → leader name
-    leader_map: dict[str, str] = {}
+    # Build leader lookup: sector_name → leader name (from structures, match by name)
+    leader_by_name: dict[str, str] = {}
     for st in ctx.structures:
-        if st.leader:
-            leader_map[st.sector_code] = st.leader.get("name", "")
-        elif st.vanguard:
-            leader_map[st.sector_code] = st.vanguard.get("name", "")
-        elif st.core_troops:
-            leader_map[st.sector_code] = st.core_troops[0].get("name", "")
+        top = (st.leader or st.vanguard or
+               (st.core_troops[0] if st.core_troops else None))
+        if top and st.sector_name:
+            leader_by_name[st.sector_name] = top.get("name", "")
+
+    # Also annotate cycle sectors that aren't in structures, using kpl fallback
+    cycle_sector_names = [c.sector_name for c in ctx.cycle_rows
+                          if c.sector_name not in leader_by_name]
+    if cycle_sector_names and ctx.used_trade_date:
+        from .data import _load_kpl_stocks_for_sectors
+        kpl_map = _load_kpl_stocks_for_sectors(ctx.engine, ctx.used_trade_date, cycle_sector_names)
+        for sn, stocks in kpl_map.items():
+            if stocks and sn not in leader_by_name:
+                leader_by_name[sn] = stocks[0]["name"]
 
     rows = [
         {
@@ -481,7 +489,7 @@ def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
             "heat_score": round(c.heat_score, 3) if c.heat_score is not None else None,
             "persistence_score": round(c.persistence_score, 3) if c.persistence_score is not None else None,
             "crowding_score": round(c.crowding_score, 3) if c.crowding_score is not None else None,
-            "leader_name": leader_map.get(c.sector_code, ""),
+            "leader_name": leader_by_name.get(c.sector_name, ""),
         }
         for c in ctx.cycle_rows
     ]
