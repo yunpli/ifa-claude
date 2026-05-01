@@ -19,6 +19,10 @@ app.command("healthcheck")(healthcheck_command)
 app.add_typer(jobs_app, name="job")
 app.add_typer(generate_app, name="generate")
 
+# SmartMoney module (lazy import — heavy deps)
+from ifa.cli.smartmoney import app as sm_app  # noqa: E402
+app.add_typer(sm_app, name="smartmoney")
+
 
 if __name__ == "__main__":
     app()
