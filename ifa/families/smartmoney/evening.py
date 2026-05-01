@@ -73,7 +73,7 @@ TEMPLATE_VERSION = "smartmoney_evening_v0.1"
 REPORT_FAMILY = "smartmoney"
 REPORT_TYPE = "evening_long"
 SLOT = "evening"
-MARKET = "cn_a_share"
+MARKET = "china_a"
 
 
 # ── Runtime context ───────────────────────────────────────────────────────────
