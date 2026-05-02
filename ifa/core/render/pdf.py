@@ -1,6 +1,7 @@
 """HTML-to-PDF conversion for iFA reports using Chrome headless."""
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import tempfile
@@ -65,6 +66,12 @@ _PRINT_CSS = """
   h1 { font-size: 18px !important; }
   h2 { font-size: 15px !important; }
   h3 { font-size: 13px !important; }
+
+  /* Force all <details> open — Top-5 drill-downs must show in PDF */
+  details { display: block !important; }
+  details > * { display: block !important; }
+  summary { list-style: none !important; cursor: default !important; }
+  summary::marker, summary::-webkit-details-marker { display: none !important; }
 
   /* Links: keep clean for financial report */
   a[href]:after { content: "" !important; }
@@ -136,14 +143,20 @@ def html_to_pdf(html_path: Path, pdf_path: Path | None = None) -> Path:
 
     chrome = find_chrome()
 
-    # Read the original HTML and inject print CSS before </head>
+    # Read the original HTML
     source = html_path.read_text(encoding="utf-8")
+
+    # Force-open all <details> elements so Top-5 drills show in PDF
+    # <details> and <details open> → <details open>
+    patched = re.sub(r"<details(\s[^>]*)?>", lambda m: f"<details open{m.group(1) or ''}>", source)
+
+    # Inject print CSS before </head>
     injected_style = f"<style>{_PRINT_CSS}</style>"
-    if "</head>" in source:
-        patched = source.replace("</head>", f"{injected_style}\n</head>", 1)
+    if "</head>" in patched:
+        patched = patched.replace("</head>", f"{injected_style}\n</head>", 1)
     else:
         # Fallback: prepend to document
-        patched = injected_style + "\n" + source
+        patched = injected_style + "\n" + patched
 
     # Write patched HTML to a temp file
     with tempfile.NamedTemporaryFile(
