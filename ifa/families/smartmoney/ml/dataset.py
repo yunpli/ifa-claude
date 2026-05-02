@@ -10,10 +10,11 @@ Label construction (next-day return classification):
     three_class — 2=up / 1=neutral / 0=down  (not used in P0 models)
 
 Label sources by sector_source:
-  sw  → raw_sw_daily.pct_change
-  dc  → raw_moneyflow_ind_dc.pct_change  (or raw_dc_index.pct_change)
-  ths → raw_moneyflow_ind_ths.pct_change
-  kpl → no price series → excluded from supervised learning
+  sw    → raw_sw_daily.pct_change                  (TuShare L1 index daily)
+  sw_l2 → equal-weighted AVG(raw_daily.pct_chg) over sw_member_monthly L2
+  dc    → raw_moneyflow_ind_dc.pct_change           (or raw_dc_index.pct_change)
+  ths   → raw_moneyflow_ind_ths.pct_change
+  kpl   → no price series → excluded from supervised learning
 
 Split strategy:
   Time-based split (never shuffle): last val_frac of dates = val set.
@@ -51,6 +52,32 @@ def _load_sw_returns(engine: Engine, start: dt.date, end: dt.date) -> pd.DataFra
     return pd.DataFrame(rows, columns=["trade_date", "sector_code", "sector_source", "pct_chg"])
 
 
+def _load_sw_l2_returns(engine: Engine, start: dt.date, end: dt.date) -> pd.DataFrame:
+    """Equal-weighted SW L2 sector daily return.
+
+    SW L2 has no direct daily index in TuShare (sw_daily is L1 only). We
+    construct an equal-weighted L2 sector return as the AVG of member
+    stocks' pct_chg via the PIT-correct sw_member_monthly snapshot.
+
+    Why equal-weight (not value-weighted): equal-weighted returns are more
+    sensitive to broad participation (mid/small caps), which is the SmartMoney
+    thesis. Value-weighted would over-emphasise the few largest names.
+    """
+    sql = f"""
+        SELECT m.trade_date, sm.l2_code AS sector_code,
+               'sw_l2' AS sector_source, AVG(m.pct_chg) AS pct_chg
+        FROM {SCHEMA}.raw_daily m
+        JOIN {SCHEMA}.sw_member_monthly sm
+          ON m.ts_code = sm.ts_code
+         AND sm.snapshot_month = date_trunc('month', m.trade_date)::date
+        WHERE m.trade_date BETWEEN :start AND :end
+        GROUP BY m.trade_date, sm.l2_code
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(text(sql), {"start": start, "end": end}).fetchall()
+    return pd.DataFrame(rows, columns=["trade_date", "sector_code", "sector_source", "pct_chg"])
+
+
 def _load_dc_returns(engine: Engine, start: dt.date, end: dt.date) -> pd.DataFrame:
     sql = f"""
         SELECT trade_date, ts_code AS sector_code,
@@ -80,9 +107,13 @@ def _build_return_panel(
     start: dt.date,
     end: dt.date,
 ) -> pd.DataFrame:
-    """Combine all source returns into one panel."""
+    """Combine all source returns into one panel.
+
+    Order of frames matters only for diagnostic logs — the panel is queried
+    by (sector_code, sector_source) so each source is keyed independently.
+    """
     frames = []
-    for fn in [_load_sw_returns, _load_dc_returns, _load_ths_returns]:
+    for fn in [_load_sw_l2_returns, _load_sw_returns, _load_dc_returns, _load_ths_returns]:
         df = fn(engine, start, end)
         if not df.empty:
             frames.append(df)
@@ -94,57 +125,71 @@ def _build_return_panel(
     return df.dropna(subset=["pct_chg"])
 
 
-def _attach_next_day_label(
+def _attach_forward_return_label(
     feature_df: pd.DataFrame,
     return_panel: pd.DataFrame,
     *,
-    scheme: str = "binary_up",
+    horizon_days: int = 1,
+    scheme: str = "binary_top_quintile",
     threshold: float = 0.5,
+    quantile: float = 0.20,
 ) -> pd.DataFrame:
-    """Join next-day return as label onto feature_df.
+    """Attach forward N-day return + label onto feature_df.
 
-    For each row (date=T, sector_code, sector_source) in feature_df, find the
-    row with date=T+1 (next trading day in the panel) and attach its pct_chg.
+    For each row (date=T, sector_code, sector_source) we compound pct_chg over
+    T+1 .. T+horizon_days (using the sector's own trading-day calendar).
 
-    Args:
-        feature_df:    Output of build_feature_matrix.
-        return_panel:  Panel with (trade_date, sector_code, sector_source, pct_chg).
-        scheme:        'binary_up' → 0/1 label.
-        threshold:     pct_chg > threshold → label=1.
+    Schemes:
+      'binary_up'           → label=1 if cumulative forward return > threshold (%)
+      'binary_top_quintile' → per-date cross-section: top `quantile` fraction = 1
+                              (recommended for cross-sectional ranking models)
+      'three_class'         → 2/1/0 by ±threshold cutoff
+      'regression'          → label = forward_return (no binarisation)
 
-    Returns:
-        feature_df with added 'label' and 'next_pct_chg' columns,
-        with rows dropped where next-day data is unavailable.
+    Returns feature_df with added 'forward_return' and 'label' columns; rows
+    where forward return is unavailable are dropped.
     """
-    # Build mapping: (sector_code, sector_source, date) → pct_chg
-    ret_idx = return_panel.set_index(["sector_code", "sector_source", "trade_date"])["pct_chg"]
+    if horizon_days < 1:
+        raise ValueError(f"horizon_days must be >= 1, got {horizon_days}")
 
-    # For each (code, src), find the next trade date
+    # Sort returns once per (code, src) and build a lookup
+    panel = return_panel.sort_values(["sector_code", "sector_source", "trade_date"]).reset_index(drop=True)
     dates_by_key: dict[tuple[str, str], list[dt.date]] = {}
-    for (code, src), grp in return_panel.groupby(["sector_code", "sector_source"]):
-        dates_by_key[(code, src)] = sorted(grp["trade_date"].tolist())
+    rets_by_key: dict[tuple[str, str], list[float]] = {}
+    for (code, src), grp in panel.groupby(["sector_code", "sector_source"], sort=False):
+        dates_by_key[(code, src)] = grp["trade_date"].tolist()
+        rets_by_key[(code, src)] = grp["pct_chg"].tolist()
 
-    def _next_pct(row: pd.Series) -> float:
+    def _forward_return(row: pd.Series) -> float:
         key = (row["sector_code"], row["sector_source"])
-        td = row["trade_date"]
         dates = dates_by_key.get(key, [])
+        rets = rets_by_key.get(key, [])
         try:
-            idx = dates.index(td)
-            next_date = dates[idx + 1]
-            return float(ret_idx.get((key[0], key[1], next_date), np.nan))
-        except (ValueError, IndexError):
+            idx = dates.index(row["trade_date"])
+        except ValueError:
             return np.nan
+        # Compound the pct_chg from idx+1 to idx+horizon_days
+        if idx + horizon_days >= len(dates):
+            return np.nan  # not enough forward data
+        cum = 1.0
+        for j in range(idx + 1, idx + 1 + horizon_days):
+            cum *= 1.0 + (rets[j] / 100.0)
+        return (cum - 1.0) * 100.0
 
     feature_df = feature_df.copy()
-    feature_df["next_pct_chg"] = feature_df.apply(_next_pct, axis=1)
-    feature_df = feature_df.dropna(subset=["next_pct_chg"]).copy()
+    feature_df["forward_return"] = feature_df.apply(_forward_return, axis=1)
+    feature_df = feature_df.dropna(subset=["forward_return"]).copy()
 
     if scheme == "binary_up":
-        feature_df["label"] = (feature_df["next_pct_chg"] > threshold).astype(int)
-    elif scheme == "binary_up5d":
-        # Only labels rows that are at least 5 trading days from the end
-        # Callers should ensure the return_panel extends 5 days beyond feature_df end
-        feature_df["label"] = (feature_df["next_pct_chg"] > threshold).astype(int)
+        feature_df["label"] = (feature_df["forward_return"] > threshold).astype(int)
+    elif scheme == "binary_top_quintile":
+        # Per-date cross-section: rank within each trade_date, top `quantile` = 1
+        feature_df["_pct_rank"] = (
+            feature_df.groupby("trade_date")["forward_return"]
+            .rank(pct=True, method="first")
+        )
+        feature_df["label"] = (feature_df["_pct_rank"] >= 1.0 - quantile).astype(int)
+        feature_df = feature_df.drop(columns=["_pct_rank"])
     elif scheme == "three_class":
         def _three(v: float) -> int:
             if v > threshold:
@@ -152,11 +197,34 @@ def _attach_next_day_label(
             if v < -threshold:
                 return 0
             return 1
-        feature_df["label"] = feature_df["next_pct_chg"].apply(_three)
+        feature_df["label"] = feature_df["forward_return"].apply(_three)
+    elif scheme == "regression":
+        feature_df["label"] = feature_df["forward_return"].astype(float)
     else:
         raise ValueError(f"Unknown label scheme: {scheme}")
 
     return feature_df
+
+
+# Backwards-compat alias for any caller still using the 1-day-only function
+def _attach_next_day_label(
+    feature_df: pd.DataFrame,
+    return_panel: pd.DataFrame,
+    *,
+    scheme: str = "binary_up",
+    threshold: float = 0.5,
+) -> pd.DataFrame:
+    """Deprecated: use `_attach_forward_return_label(horizon_days=1, ...)`.
+
+    Kept for backwards compatibility — translates 1-day-only intent to the
+    new general helper. The legacy 'binary_up5d' scheme was actually 1-day
+    (a known bug fixed by this refactor); callers wanting 5-day labels
+    should now use `_attach_forward_return_label(horizon_days=5, ...)`.
+    """
+    return _attach_forward_return_label(
+        feature_df, return_panel,
+        horizon_days=1, scheme=scheme, threshold=threshold,
+    )
 
 
 # ── Dataset container ─────────────────────────────────────────────────────────
@@ -198,8 +266,10 @@ def build_dataset(
     train_start: dt.date,
     train_end: dt.date,
     val_frac: float = 0.20,
-    label_scheme: str = "binary_up",
+    label_scheme: str = "binary_top_quintile",
     label_threshold: float = 0.5,
+    label_quantile: float = 0.20,
+    horizon_days: int = 1,
     source: str | None = None,
     predict_date: dt.date | None = None,
 ) -> MLDataset:
@@ -208,18 +278,22 @@ def build_dataset(
     Args:
         engine:          SQLAlchemy engine.
         train_start:     Start of the feature+label window.
-        train_end:       End of the feature window (labels look one day ahead).
+        train_end:       End of the feature window (labels look horizon_days ahead).
         val_frac:        Fraction of *dates* (not rows) to use as validation.
-        label_scheme:    'binary_up' / 'three_class'.
-        label_threshold: pct_chg threshold for positive label (default 0.5%).
+        label_scheme:    'binary_up' / 'binary_top_quintile' / 'three_class' / 'regression'.
+        label_threshold: pct_chg threshold for positive label in 'binary_up' (%).
+        label_quantile:  Top fraction for 'binary_top_quintile' (default 0.20).
+        horizon_days:    Forward return horizon in trading days (1=short-term RF,
+                         20=mid-term XGB).
         source:          Sector source filter or None (all sources).
         predict_date:    If given, build X_pred for this date (no label).
 
     Returns:
         MLDataset ready for model.fit(ds.X_train, ds.y_train).
     """
-    # Need return data one day beyond train_end to label the last feature day
-    return_end = train_end + dt.timedelta(days=7)
+    # Need return data extending horizon_days beyond train_end (with calendar
+    # padding for weekends/holidays) to label the last feature day
+    return_end = train_end + dt.timedelta(days=max(horizon_days * 2 + 7, 7))
 
     feature_df = build_feature_matrix(engine, train_start, train_end, source=source)
     if feature_df.empty:
@@ -229,9 +303,12 @@ def build_dataset(
     if return_panel.empty:
         raise RuntimeError("No return data found for label construction")
 
-    labeled = _attach_next_day_label(
+    labeled = _attach_forward_return_label(
         feature_df, return_panel,
-        scheme=label_scheme, threshold=label_threshold,
+        horizon_days=horizon_days,
+        scheme=label_scheme,
+        threshold=label_threshold,
+        quantile=label_quantile,
     )
     if labeled.empty:
         raise RuntimeError("No labeled rows after join (check data overlap)")
