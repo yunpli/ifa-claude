@@ -1,0 +1,122 @@
+{# Ningbo: position alerts (stop-loss / take-profit triggered today) #}
+<section class="ifa-section ifa-ningbo-alerts">
+  <h2 class="ifa-section__title">{{ s.order }}. {{ s.title }}</h2>
+
+  <style>
+    .ifa-alerts__group {
+      margin-bottom: 12px;
+    }
+    .ifa-alerts__group-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 4px 10px;
+      margin-bottom: 6px;
+      border-left: 3px solid;
+    }
+    .ifa-alerts__group--stop_loss .ifa-alerts__group-title {
+      border-color: var(--down);
+      background: var(--down-soft);
+      color: var(--down);
+    }
+    .ifa-alerts__group--take_profit .ifa-alerts__group-title {
+      border-color: var(--up);
+      background: var(--up-soft);
+      color: var(--up);
+    }
+    .ifa-alerts__table {
+      width: 100%;
+      font-size: 12px;
+      border-collapse: collapse;
+    }
+    .ifa-alerts__table th, .ifa-alerts__table td {
+      padding: 5px 8px;
+      text-align: left;
+      border-bottom: 1px solid var(--rule-soft);
+    }
+    .ifa-alerts__table th {
+      color: var(--ink-soft);
+      font-weight: normal;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      font-size: 10.5px;
+      background: var(--paper-tint);
+    }
+    .ifa-alerts__table td.num {
+      font-family: var(--font-mono);
+      text-align: right;
+    }
+    .ifa-alerts__table td.cum-pos { color: var(--up); font-weight: 600; }
+    .ifa-alerts__table td.cum-neg { color: var(--down); font-weight: 600; }
+    .ifa-alerts__empty {
+      color: var(--ink-soft);
+      font-style: italic;
+      font-size: 12px;
+      padding: 8px 0;
+    }
+  </style>
+
+  {% set sl = s.content_json.stop_loss %}
+  {% set tp = s.content_json.take_profit %}
+
+  {% if sl or tp %}
+    {% if sl %}
+    <div class="ifa-alerts__group ifa-alerts__group--stop_loss">
+      <div class="ifa-alerts__group-title">⚠ 今日触发止损 (跌破 24 日均线): {{ sl|length }} 只</div>
+      <table class="ifa-alerts__table">
+        <thead>
+          <tr>
+            <th>推荐日</th><th>股票</th><th>策略</th><th>模式</th>
+            <th class="num">推荐价</th><th class="num">当前累计</th>
+            <th class="num">追踪日</th><th class="num">期间峰值</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in sl %}
+          <tr>
+            <td>{{ a.rec_date }}</td>
+            <td>{{ a.ts_code }}</td>
+            <td>{{ a.strategy }}</td>
+            <td>{{ a.scoring_mode }}</td>
+            <td class="num">¥{{ '%.2f'|format(a.rec_price) }}</td>
+            <td class="num cum-neg">{{ '%+.2f'|format(a.final_cum_return * 100) }}%</td>
+            <td class="num">T+{{ a.outcome_track_day }}</td>
+            <td class="num cum-pos">{{ '%+.2f'|format(a.peak_cum_return * 100) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if tp %}
+    <div class="ifa-alerts__group ifa-alerts__group--take_profit">
+      <div class="ifa-alerts__group-title">✓ 今日触发止盈 (累计 ≥ +20%): {{ tp|length }} 只</div>
+      <table class="ifa-alerts__table">
+        <thead>
+          <tr>
+            <th>推荐日</th><th>股票</th><th>策略</th><th>模式</th>
+            <th class="num">推荐价</th><th class="num">当前累计</th>
+            <th class="num">追踪日</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for a in tp %}
+          <tr>
+            <td>{{ a.rec_date }}</td>
+            <td>{{ a.ts_code }}</td>
+            <td>{{ a.strategy }}</td>
+            <td>{{ a.scoring_mode }}</td>
+            <td class="num">¥{{ '%.2f'|format(a.rec_price) }}</td>
+            <td class="num cum-pos">{{ '%+.2f'|format(a.final_cum_return * 100) }}%</td>
+            <td class="num">T+{{ a.outcome_track_day }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  {% else %}
+    <div class="ifa-alerts__empty">今日无止损 / 止盈触发事件。</div>
+  {% endif %}
+</section>

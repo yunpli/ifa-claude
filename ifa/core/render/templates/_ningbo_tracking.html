@@ -1,0 +1,165 @@
+{# Ningbo: tracking recap with sparklines (split by scoring_mode) #}
+<section class="ifa-section ifa-ningbo-tracking">
+  <h2 class="ifa-section__title">{{ s.order }}. {{ s.title }}</h2>
+
+  <p class="ifa-section__intro" style="font-size:12px; color:var(--ink-soft);">
+    每条推荐追踪 15 个交易日。终态后停止追踪：
+    <span style="color:var(--down)">▼ 跌破 24MA 止损</span>　·
+    <span style="color:var(--up)">▲ 累计 ≥ +20% 止盈</span>　·
+    <span style="color:var(--ink-soft)">● 满 15 日到期</span>
+    走势条 <span style="color:var(--up); font-weight:600;">红=涨</span>
+    <span style="color:var(--down); font-weight:600;">绿=跌</span>（中国惯例）
+  </p>
+
+  <style>
+    .ifa-track__pane {
+      border: 1px solid var(--rule-soft);
+      padding: 10px 12px;
+      margin-bottom: 14px;
+    }
+    .ifa-track__pane-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-2);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      padding-bottom: 4px;
+      border-bottom: 1px dashed var(--rule-soft);
+    }
+    .ifa-track__table {
+      width: 100%;
+      font-size: 11.5px;
+      border-collapse: collapse;
+    }
+    .ifa-track__table th, .ifa-track__table td {
+      padding: 4px 6px;
+      border-bottom: 1px dotted var(--rule-soft);
+      vertical-align: middle;
+    }
+    .ifa-track__table th {
+      background: var(--paper-tint);
+      color: var(--ink-soft);
+      font-size: 10.5px;
+      font-weight: normal;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      text-align: left;
+    }
+    .ifa-track__table td.num {
+      font-family: var(--font-mono);
+      text-align: right;
+    }
+    .ifa-track__table td.spark { text-align: center; padding: 2px 4px; }
+    .ifa-track__cum-pos { color: var(--up); font-weight: 600; }
+    .ifa-track__cum-neg { color: var(--down); font-weight: 600; }
+    .ifa-track__status {
+      font-size: 10.5px;
+      padding: 1px 6px;
+      border-radius: 2px;
+      font-weight: 500;
+    }
+    .ifa-track__status[data-status="in_progress"] {
+      background: var(--paper-tint); color: var(--ink-2);
+    }
+    .ifa-track__status[data-status="stop_loss"] {
+      background: var(--down-soft); color: var(--down);
+    }
+    .ifa-track__status[data-status="take_profit"] {
+      background: var(--up-soft); color: var(--up);
+    }
+    .ifa-track__status[data-status="expired"] {
+      background: var(--paper-tint); color: var(--ink-soft);
+    }
+    .ifa-track__empty {
+      color: var(--ink-soft); font-style: italic; font-size: 12px; padding: 10px 0;
+    }
+    .ifa-track__summary {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: var(--ink-2);
+      padding-top: 6px;
+      border-top: 1px dashed var(--rule-soft);
+      margin-top: 6px;
+    }
+    .ifa-track__summary strong { color: var(--ink); }
+  </style>
+
+  {% for pane in s.content_json.panes %}
+    <div class="ifa-track__pane">
+      <div class="ifa-track__pane-title">{{ pane.label }}</div>
+
+      {% if pane.recs %}
+        <table class="ifa-track__table">
+          <thead>
+            <tr>
+              <th>推荐日</th>
+              <th>股票</th>
+              <th>策略</th>
+              <th class="num">推荐价</th>
+              <th class="spark" style="text-align:center;">15日累计走势</th>
+              <th class="num">当前累计</th>
+              <th class="num">期间峰值</th>
+              <th class="num">追踪日</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in pane.recs %}
+            <tr>
+              <td>{{ r.rec_date.strftime('%m-%d') if r.rec_date.strftime else r.rec_date }}</td>
+              <td style="font-family:var(--font-mono);">{{ r.ts_code }}</td>
+              <td>
+                {%- if r.strategy == 'sniper' -%}神枪手
+                {%- elif r.strategy == 'treasure_basin' -%}聚宝盆
+                {%- elif r.strategy == 'half_year_double' -%}半年翻倍
+                {%- elif r.strategy == 'multi' -%}多策略
+                {%- else -%}{{ r.strategy }}
+                {%- endif -%}
+              </td>
+              <td class="num">{{ '%.2f'|format(r.rec_price) }}</td>
+              <td class="spark">{{ r.sparkline_svg|safe }}</td>
+              <td class="num {% if r.current_cum_return >= 0 %}ifa-track__cum-pos{% else %}ifa-track__cum-neg{% endif %}">
+                {{ '%+.2f'|format(r.current_cum_return * 100) }}%
+              </td>
+              <td class="num {% if r.peak_cum_return >= 0 %}ifa-track__cum-pos{% else %}ifa-track__cum-neg{% endif %}">
+                {{ '%+.2f'|format(r.peak_cum_return * 100) }}%
+              </td>
+              <td class="num">T+{{ r.track_day }}</td>
+              <td>
+                <span class="ifa-track__status" data-status="{{ r.outcome_status }}">
+                  {%- if r.outcome_status == 'in_progress' -%}进行中
+                  {%- elif r.outcome_status == 'stop_loss' -%}⚠ 止损
+                  {%- elif r.outcome_status == 'take_profit' -%}✓ 止盈
+                  {%- elif r.outcome_status == 'expired' -%}● 满15日
+                  {%- endif -%}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        {% if pane.summary %}
+        <div class="ifa-track__summary">
+          <span><strong>{{ pane.summary.total }}</strong> 条记录</span>
+          <span>进行中 <strong>{{ pane.summary.in_progress }}</strong></span>
+          <span style="color:var(--down)">止损 <strong>{{ pane.summary.stop_loss }}</strong></span>
+          <span style="color:var(--up)">止盈 <strong>{{ pane.summary.take_profit }}</strong></span>
+          <span>满15日 <strong>{{ pane.summary.expired }}</strong></span>
+        </div>
+        {% endif %}
+      {% else %}
+        <div class="ifa-track__empty">
+          {% if pane.scoring_mode == 'ml' %}
+            ML 评分模式将在 Phase 3 上线。
+          {% else %}
+            最近 15 个交易日内尚无追踪记录（首次运行需积累若干天数据）。
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  {% endfor %}
+</section>

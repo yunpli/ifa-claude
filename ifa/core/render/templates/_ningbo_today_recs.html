@@ -1,0 +1,147 @@
+{# Ningbo: today's top recommendations (per scoring_mode) #}
+<section class="ifa-section ifa-ningbo-recs">
+  <h2 class="ifa-section__title">{{ s.order }}. {{ s.title }}</h2>
+
+  <style>
+    .ifa-ningbo-recs__pane {
+      border: 1px solid var(--rule-soft);
+      padding: 12px 14px 6px;
+      margin-bottom: 14px;
+    }
+    .ifa-ningbo-recs__pane-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-2);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      padding-bottom: 4px;
+      border-bottom: 1px dashed var(--rule-soft);
+    }
+    .ifa-ningbo-recs__empty {
+      color: var(--ink-soft);
+      font-style: italic;
+      font-size: 12px;
+      padding: 8px 0;
+    }
+    .ifa-ningbo-rec {
+      padding: 8px 0;
+      border-bottom: 1px dotted var(--rule-soft);
+    }
+    .ifa-ningbo-rec:last-child { border-bottom: none; }
+    .ifa-ningbo-rec__head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: baseline;
+      font-size: 13px;
+    }
+    .ifa-ningbo-rec__rank {
+      display: inline-block;
+      width: 22px;
+      height: 22px;
+      line-height: 22px;
+      text-align: center;
+      background: var(--paper-tint);
+      color: var(--ink-2);
+      font-weight: 600;
+      font-family: var(--font-mono);
+      border-radius: 50%;
+      font-size: 11px;
+    }
+    .ifa-ningbo-rec__code {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .ifa-ningbo-rec__name {
+      color: var(--ink-2);
+    }
+    .ifa-ningbo-rec__strategy {
+      font-size: 11px;
+      padding: 1px 7px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border-radius: 2px;
+      font-weight: 500;
+    }
+    .ifa-ningbo-rec__strategy[data-strategy="multi"] {
+      background: var(--up-soft);
+      color: var(--up);
+    }
+    .ifa-ningbo-rec__price {
+      font-family: var(--font-mono);
+      color: var(--ink-2);
+    }
+    .ifa-ningbo-rec__conf {
+      font-family: var(--font-mono);
+      color: var(--ink-2);
+      font-size: 12px;
+      margin-left: auto;
+    }
+    .ifa-ningbo-rec__conf strong {
+      font-size: 13px;
+      color: var(--ink);
+    }
+    .ifa-ningbo-rec__hits {
+      font-size: 11px;
+      color: var(--ink-soft);
+    }
+    .ifa-ningbo-rec__narrative {
+      font-size: 12.5px;
+      line-height: 1.65;
+      color: var(--ink-2);
+      margin-top: 6px;
+      padding: 6px 10px;
+      background: var(--paper-tint);
+      border-left: 2px solid var(--accent);
+    }
+  </style>
+
+  {% for pane in s.content_json.panes %}
+    <div class="ifa-ningbo-recs__pane">
+      <div class="ifa-ningbo-recs__pane-title">
+        {{ pane.label }}
+        <span style="color:var(--ink-soft); font-weight:normal; text-transform:none;">
+          (param_version: {{ pane.param_version }})
+        </span>
+      </div>
+
+      {% if pane.recs %}
+        {% for r in pane.recs %}
+          <div class="ifa-ningbo-rec">
+            <div class="ifa-ningbo-rec__head">
+              <span class="ifa-ningbo-rec__rank">{{ loop.index }}</span>
+              <span class="ifa-ningbo-rec__code">{{ r.ts_code }}</span>
+              {% if r.name %}<span class="ifa-ningbo-rec__name">{{ r.name }}</span>{% endif %}
+              <span class="ifa-ningbo-rec__strategy" data-strategy="{{ r.strategy }}">
+                {%- if r.strategy == 'sniper' -%}神枪手
+                {%- elif r.strategy == 'treasure_basin' -%}聚宝盆
+                {%- elif r.strategy == 'half_year_double' -%}半年翻倍
+                {%- elif r.strategy == 'multi' -%}多策略共振 ×{{ r.strategies_hit|length }}
+                {%- else -%}{{ r.strategy }}
+                {%- endif -%}
+              </span>
+              {% if r.strategies_hit and r.strategies_hit|length > 1 %}
+                <span class="ifa-ningbo-rec__hits">[{{ r.strategies_hit|join(' + ') }}]</span>
+              {% endif %}
+              <span class="ifa-ningbo-rec__price">¥{{ '%.2f'|format(r.rec_price) }}</span>
+              <span class="ifa-ningbo-rec__conf">置信 <strong>{{ '%.2f'|format(r.confidence_score) }}</strong></span>
+            </div>
+            {% if r.llm_narrative %}
+              <div class="ifa-ningbo-rec__narrative">{{ r.llm_narrative }}</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="ifa-ningbo-recs__empty">
+          {% if pane.scoring_mode == 'ml' %}
+            ML 评分模式将在 Phase 3 上线。当前仅显示启发式评分结果。
+          {% else %}
+            今日无符合策略的高置信信号。
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  {% endfor %}
+</section>

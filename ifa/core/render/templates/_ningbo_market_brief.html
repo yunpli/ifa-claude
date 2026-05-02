@@ -1,0 +1,74 @@
+{# Ningbo: short market brief intro #}
+<section class="ifa-section ifa-ningbo-brief">
+  <h2 class="ifa-section__title">{{ s.order }}. {{ s.title }}</h2>
+
+  <style>
+    .ifa-brief__row {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      align-items: baseline;
+      font-size: 13px;
+      padding: 8px 12px;
+      background: var(--paper-tint);
+      border-left: 3px solid var(--accent);
+      margin-bottom: 8px;
+    }
+    .ifa-brief__row strong { color: var(--ink); }
+    .ifa-brief__pct--pos { color: var(--up); font-weight: 600; }
+    .ifa-brief__pct--neg { color: var(--down); font-weight: 600; }
+    .ifa-brief__notes {
+      font-size: 12px;
+      color: var(--ink-2);
+      line-height: 1.6;
+    }
+    .ifa-brief__funnel {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 11px;
+      color: var(--ink-soft);
+      margin-top: 6px;
+    }
+    .ifa-brief__funnel span strong { color: var(--ink-2); font-family: var(--font-mono); }
+  </style>
+
+  {% set c = s.content_json %}
+
+  <div class="ifa-brief__row">
+    <span><strong>上证</strong>
+      <span class="{% if c.index_pct_chg >= 0 %}ifa-brief__pct--pos{% else %}ifa-brief__pct--neg{% endif %}">
+        {{ '%+.2f'|format(c.index_pct_chg) }}%
+      </span>
+    </span>
+    {% if c.index_close %}<span><strong>收盘</strong> {{ '%.2f'|format(c.index_close) }}</span>{% endif %}
+    {% if c.cs1000_pct_chg is not none %}
+    <span><strong>中证 1000</strong>
+      <span class="{% if c.cs1000_pct_chg >= 0 %}ifa-brief__pct--pos{% else %}ifa-brief__pct--neg{% endif %}">
+        {{ '%+.2f'|format(c.cs1000_pct_chg) }}%
+      </span>
+    </span>
+    {% endif %}
+    {% if c.gem_pct_chg is not none %}
+    <span><strong>创业板</strong>
+      <span class="{% if c.gem_pct_chg >= 0 %}ifa-brief__pct--pos{% else %}ifa-brief__pct--neg{% endif %}">
+        {{ '%+.2f'|format(c.gem_pct_chg) }}%
+      </span>
+    </span>
+    {% endif %}
+  </div>
+
+  {% if c.funnel %}
+  <div class="ifa-brief__funnel">
+    <span>选股六步曲扫描: <strong>{{ c.funnel.universe_size }}</strong> 只</span>
+    <span>≥4 步通过: <strong>{{ c.funnel.six_step_pass }}</strong></span>
+    <span>神枪手候选: <strong>{{ c.funnel.sniper }}</strong></span>
+    <span>聚宝盆候选: <strong>{{ c.funnel.basin }}</strong></span>
+    <span>半年翻倍候选: <strong>{{ c.funnel.hyd }}</strong></span>
+  </div>
+  {% endif %}
+
+  {% if c.notes %}
+  <p class="ifa-brief__notes">{{ c.notes }}</p>
+  {% endif %}
+</section>

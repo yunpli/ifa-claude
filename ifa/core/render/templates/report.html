@@ -114,6 +114,14 @@
       {% include "_sm_strategy_view.html" %}
     {% elif s.type == 'sm_glossary' %}
       {% include "_sm_glossary.html" %}
+    {% elif s.type == 'ningbo_market_brief' %}
+      {% include "_ningbo_market_brief.html" %}
+    {% elif s.type == 'ningbo_today_recs' %}
+      {% include "_ningbo_today_recs.html" %}
+    {% elif s.type == 'ningbo_alerts' %}
+      {% include "_ningbo_alerts.html" %}
+    {% elif s.type == 'ningbo_tracking' %}
+      {% include "_ningbo_tracking.html" %}
     {% elif s.type == 'disclaimer' %}
       {% include "_disclaimer.html" %}
     {% endif %}
