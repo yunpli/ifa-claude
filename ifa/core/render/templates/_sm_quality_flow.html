@@ -35,18 +35,21 @@
   {% endif %}
 
   {% if c.risks %}
-  <div class="ifa-risk-grid">
-    {% for r in c.risks %}
-    <div class="ifa-risk-card" data-conf="{{ r.confidence }}">
-      <div class="ifa-risk-card__head">
-        <span class="ifa-risk-card__name">{{ r.sector_name }}</span>
-        <span class="ifa-risk-card__sig">{{ r.crowding_signal }}</span>
-      </div>
-      <div class="ifa-risk-card__body">{{ r.implication }}</div>
-      <div class="ifa-risk-card__foot">信心 · {{ r.confidence }}</div>
-    </div>
-    {% endfor %}
-  </div>
+  <table class="ifa-risk-table">
+    <thead>
+      <tr><th>板块</th><th>拥挤信号</th><th>含义 / 风险描述</th><th>信心</th></tr>
+    </thead>
+    <tbody>
+      {% for r in c.risks %}
+      <tr data-conf="{{ r.confidence }}">
+        <td><strong>{{ r.sector_name }}</strong></td>
+        <td><span class="ifa-risk-table__sig">{{ r.crowding_signal }}</span></td>
+        <td class="ifa-risk-table__imp">{{ r.implication }}</td>
+        <td class="ifa-risk-table__conf">{{ r.confidence }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
   {% endif %}
 
   {% if c.action_hint %}
@@ -58,15 +61,14 @@
 .ifa-quality-table th{text-align:left;border-bottom:1px solid var(--rule);padding:6px 8px;color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
 .ifa-quality-table td{padding:7px 8px;border-bottom:1px solid var(--rule-soft);}
 .ifa-quality-table__cmt{color:var(--ink-2);font-size:12px;max-width:220px;line-height:1.45;}
-.ifa-risk-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px;}
-.ifa-risk-card{border:1px solid var(--rule);border-left:3px solid #c2410c;background:var(--paper-tint);padding:10px 14px;}
-.ifa-risk-card[data-conf='high']{border-left-color:#991b1b;}
-.ifa-risk-card[data-conf='low']{border-left-color:#92400e;}
-.ifa-risk-card__head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;}
-.ifa-risk-card__name{font-family:var(--font-serif);font-weight:600;font-size:14px;color:var(--ink);}
-.ifa-risk-card__sig{font-size:10.5px;background:var(--rule-soft);padding:1px 8px;color:var(--ink-2);font-weight:600;letter-spacing:0.04em;}
-.ifa-risk-card__body{font-size:12.5px;color:var(--ink-2);line-height:1.5;}
-.ifa-risk-card__foot{font-size:10.5px;color:var(--ink-muted);margin-top:6px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;text-align:right;}
+.ifa-risk-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;}
+.ifa-risk-table th{text-align:left;border-bottom:1px solid var(--rule);padding:6px 8px;color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;background:var(--paper-tint);}
+.ifa-risk-table td{padding:7px 8px;border-bottom:1px solid var(--rule-soft);vertical-align:top;}
+.ifa-risk-table tr[data-conf='high']{border-left:3px solid #991b1b;}
+.ifa-risk-table tr[data-conf='medium']{border-left:3px solid #c2410c;}
+.ifa-risk-table tr[data-conf='low']{border-left:3px solid #92400e;}
+.ifa-risk-table__sig{font-size:11px;background:var(--rule-soft);padding:1px 8px;color:var(--ink-2);font-weight:600;letter-spacing:0.04em;display:inline-block;}
+.ifa-risk-table__imp{color:var(--ink-2);line-height:1.5;max-width:480px;}
+.ifa-risk-table__conf{font-size:11px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
 .ifa-action-hint{margin-top:12px;background:var(--paper-tint);border:1px solid var(--rule);border-left:3px solid var(--accent);padding:10px 14px;font-size:13px;color:var(--ink);}
-@media (max-width:720px){.ifa-risk-grid{grid-template-columns:1fr;}}
 </style>

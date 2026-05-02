@@ -188,10 +188,12 @@ def load_sector_flows(
     order_dir = "DESC" if direction == "in" else "ASC"
 
     if source == "sw_l2":
+        # net_amount in sector_moneyflow_sw_daily is 万元; convert to 元
+        # to match downstream _fmt_amt which assumes 元 base unit.
         sql = text(f"""
             SELECT sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
                    sw.pct_change,
-                   sf.net_amount, NULL AS net_amount_rate,
+                   sf.net_amount * 10000 AS net_amount, NULL AS net_amount_rate,
                    CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
                         THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
                         ELSE NULL END AS elg_buy_rate,
@@ -275,29 +277,42 @@ def load_quality_flows(
     Falls back gracefully if factor_daily has no sw_l2 rows yet (pre-C2).
     """
     if source == "sw_l2":
+        # B6c: 净流入 ≥ 10亿 (= 100,000 万元) AND 超大单买入占比 ≥ 50%.
+        # Wrap in subquery so we can DISTINCT ON (l2_code) and still ORDER BY
+        # heat_score in the outer query.  net_amount converted 万→元 in output.
         sql = text(f"""
-            SELECT sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
-                   sw.pct_change, sf.net_amount, NULL AS net_amount_rate,
-                   CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
-                        THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
-                        ELSE NULL END AS elg_buy_rate,
-                   ss.role, ss.cycle_phase
-            FROM {SCHEMA}.sector_moneyflow_sw_daily sf
-            JOIN {SCHEMA}.factor_daily fd
-                  ON fd.sector_code = sf.l2_code
-                 AND fd.sector_source = 'sw_l2'
-                 AND fd.trade_date = sf.trade_date
-            JOIN {SCHEMA}.sector_state_daily ss
-                  ON ss.sector_code = sf.l2_code
-                 AND ss.sector_source = 'sw_l2'
-                 AND ss.trade_date = sf.trade_date
-            LEFT JOIN {SCHEMA}.raw_sw_daily sw
-                   ON sw.ts_code = sf.l1_code AND sw.trade_date = sf.trade_date
-            WHERE sf.trade_date = :d
-              AND fd.heat_score >= 0.65
-              AND fd.trend_score >= 0.60
-              AND ss.role IN ('主线','中军','轮动','催化')
-            ORDER BY fd.heat_score DESC
+            SELECT l2_code, sector_source, l2_name, pct_change,
+                   net_amount * 10000 AS net_amount,
+                   net_amount_rate, elg_buy_rate, role, cycle_phase
+            FROM (
+                SELECT DISTINCT ON (sf.l2_code)
+                       sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
+                       sw.pct_change, sf.net_amount, NULL AS net_amount_rate,
+                       CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
+                            THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
+                            ELSE NULL END AS elg_buy_rate,
+                       ss.role, ss.cycle_phase, fd.heat_score
+                FROM {SCHEMA}.sector_moneyflow_sw_daily sf
+                JOIN {SCHEMA}.factor_daily fd
+                      ON fd.sector_code = sf.l2_code
+                     AND fd.sector_source = 'sw_l2'
+                     AND fd.trade_date = sf.trade_date
+                JOIN {SCHEMA}.sector_state_daily ss
+                      ON ss.sector_code = sf.l2_code
+                     AND ss.sector_source = 'sw_l2'
+                     AND ss.trade_date = sf.trade_date
+                LEFT JOIN {SCHEMA}.raw_sw_daily sw
+                       ON sw.ts_code = sf.l1_code AND sw.trade_date = sf.trade_date
+                WHERE sf.trade_date = :d
+                  AND sf.net_amount >= 100000
+                  AND (sf.buy_elg_amount + sf.sell_elg_amount) > 0
+                  AND sf.buy_elg_amount / NULLIF(sf.buy_elg_amount + sf.sell_elg_amount, 0) >= 0.50
+                  AND fd.heat_score >= 0.65
+                  AND fd.trend_score >= 0.60
+                  AND ss.role IN ('主线','中军','轮动','催化')
+                ORDER BY sf.l2_code, fd.heat_score DESC
+            ) q
+            ORDER BY q.heat_score DESC NULLS LAST
             LIMIT :n
         """)
     else:
@@ -352,9 +367,11 @@ def load_crowded_sectors(
     source='sw_l2' (default) uses sector_moneyflow_sw_daily; 'dc' uses DC.
     """
     if source == "sw_l2":
+        # net_amount 万→元 conversion to keep _fmt_amt unit-consistent.
         sql = text(f"""
             SELECT sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
-                   sw.pct_change, sf.net_amount, NULL AS net_amount_rate,
+                   sw.pct_change,
+                   sf.net_amount * 10000 AS net_amount, NULL AS net_amount_rate,
                    CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
                         THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
                         ELSE NULL END AS elg_buy_rate,
