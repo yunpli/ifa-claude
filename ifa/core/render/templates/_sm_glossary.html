@@ -1,0 +1,31 @@
+{% set c = s.content_json %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  {% if c.intro %}<p class="ifa-section__intro" style="font-size:12.5px;color:var(--ink-muted);">{{ c.intro }}</p>{% endif %}
+  <table class="ifa-glossary">
+    <thead>
+      <tr>
+        <th class="ifa-glossary__sec">章节</th>
+        <th class="ifa-glossary__term">术语</th>
+        <th>定义</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in c.rows %}
+      <tr>
+        <td class="ifa-glossary__sec"><strong>{{ r.section }}</strong></td>
+        <td class="ifa-glossary__term">{{ r.term }}</td>
+        <td>{{ r.definition }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+<style>
+.ifa-glossary{width:100%;border-collapse:collapse;font-size:12.5px;}
+.ifa-glossary th{text-align:left;border-bottom:1px solid var(--rule);padding:6px 8px;color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;background:var(--paper-tint);}
+.ifa-glossary td{padding:7px 8px;border-bottom:1px solid var(--rule-soft);vertical-align:top;line-height:1.5;}
+.ifa-glossary__sec{width:60px;font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);}
+.ifa-glossary__sec strong{color:var(--accent);}
+.ifa-glossary__term{width:160px;color:var(--ink);font-weight:600;}
+</style>

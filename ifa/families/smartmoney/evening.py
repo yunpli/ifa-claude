@@ -1077,6 +1077,48 @@ def _build_e13_review(ctx: SMEveningCtx) -> dict:
     }
 
 
+# ─── E13.5: Glossary (B6e §11) ────────────────────────────────────────────────
+
+_GLOSSARY_TERMS: list[dict[str, str]] = [
+    # Section reference
+    {"section": "§02", "term": "市场资金水位",
+     "definition": "全市场总成交额 + 涨跌停结构 + 炸板率，刻画当日资金活跃度。"},
+    {"section": "§03/04", "term": "净流入 / 净流出",
+     "definition": "板块当日所有成份股『主力资金净流入』之和（万元）；正为净流入，负为净流出。"},
+    {"section": "§03/04", "term": "超大单占比",
+     "definition": "板块当日超大单买入金额 / (超大单买入 + 卖出) — 大于 50% 表示买盘主导。"},
+    {"section": "§05", "term": "高质量流入",
+     "definition": "净流入 ≥ 10亿 + 超大单买入占比 ≥ 50% + heat_score ≥ 0.65 + trend_score ≥ 0.60，且角色 ∈ {主线/中军/轮动/催化}。"},
+    {"section": "§06", "term": "拥挤度（crowding_score）",
+     "definition": "高资金堆积 + 价格滞涨 / 分歧的复合分数，预警退潮风险。"},
+    {"section": "§07", "term": "情绪周期 7 阶段",
+     "definition": "冷 → 点火 → 确认 → 扩散 → 高潮 → 分歧 → 退潮（cycle.py 状态机）。"},
+    {"section": "§07", "term": "转移概率",
+     "definition": "B5 经验矩阵 + 板块 Bayes 后验：α₀=5 个伪观测的全局先验 + 该板块自身历史。"},
+    {"section": "§08", "term": "操作建议",
+     "definition": "下一个交易日的资金候选板块；非买卖建议，仅供研究观察。"},
+    {"section": "§09", "term": "龙头 / 中军 / 情绪先锋",
+     "definition": "龙头=综合分第 1；中军=次级稳健龙头（无涨停）；情绪先锋=最强连板情绪驱动者。"},
+    {"section": "§10", "term": "补涨 / 趋势",
+     "definition": "补涨=板块强但个股未充分表现（短线池）；趋势=多日上涨 + 资金持续（中长线池）。"},
+    {"section": "§10", "term": "RF / XGB 模型",
+     "definition": "短线池 RandomForest（1–3天动量+资金方向）；中长线池 XGBoost（趋势+周期+资金趋势）。当前为规则版，B8 训练后切换。"},
+]
+
+
+def _build_glossary() -> dict:
+    return {
+        "key": "smartmoney_evening.e13b_glossary",
+        "title": "术语词汇表（章节定义）",
+        "order": 13,
+        "type": "sm_glossary",
+        "content_json": {
+            "intro": "下表列出晚报中各章节使用的关键术语及其确切定义。",
+            "rows": _GLOSSARY_TERMS,
+        },
+    }
+
+
 # ─── E14: Disclaimer ──────────────────────────────────────────────────────────
 
 def _build_e14_disclaimer() -> dict:
@@ -1227,9 +1269,10 @@ def run_smartmoney_evening(
                 pass
         on_log(f"  E12 done in {time.monotonic()-t0:.1f}s ({len(e12_hyps_for_db)} hypotheses)")
 
-        # E13 review + E14 disclaimer
+        # E13 review + glossary + E14 disclaimer
         for label, builder in [
             ("E13 review",     lambda: _build_e13_review(ctx)),
+            ("Glossary",       _build_glossary),
             ("E14 disclaimer", _build_e14_disclaimer),
         ]:
             t0 = time.monotonic()
