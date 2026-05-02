@@ -74,7 +74,9 @@ This is the canonical sector-flow table consumed by Market and SmartMoney.
 
 ### `raw_sw_daily`
 
-SW index daily price/volume — currently **L1 only**. Adding L2 daily price coverage is a V2.2 TODO so per-L2 price strength can be computed without re-aggregating from member stocks.
+SW index daily price/volume. **V2.1.1: now backfilled to all ~131 L2 codes** in addition to the 31 L1 codes. Per-L2 close/pct_change/amount/total_mv is queried directly; member-stock aggregation is kept only as a fallback for any missing rows.
+
+Backfill script: `scripts/backfill_sw_l2_daily.py` — one TuShare `sw_daily(ts_code, start, end)` call per L2 code over the full window. Idempotent; safe to re-run for incremental top-up via `--recent-days N`.
 
 ---
 
@@ -94,23 +96,31 @@ This is the canonical reference. Any consumer that drifts from this table is wro
 
 ## The Market main-line dynamic query
 
-Market's 主线 list is no longer a hand-curated config. It is computed each report run from SW L2 资金流, joined to per-sector aggregated `pct_change` from member stocks:
+Market's 主线 list is no longer a hand-curated config. It is computed each report run from SW L2 资金流, with `close` / `pct_change` taken directly from `raw_sw_daily` (V2.1.1) and falling back to member-stock aggregation when the L2 row is absent:
 
 ```sql
-WITH member_pct AS (
-  SELECT m.l2_code, AVG(d.pct_chg) AS avg_pct_chg
-  FROM smartmoney.sw_member_monthly m
-  JOIN smartmoney.raw_daily d USING (ts_code)
-  WHERE m.snapshot_month = date_trunc('month', :rd)::date
-    AND d.trade_date     = :rd
-  GROUP BY m.l2_code
+WITH ranked AS (
+  SELECT l2_code, l2_name, net_amount
+  FROM smartmoney.sector_moneyflow_sw_daily
+  WHERE trade_date = :rd AND l2_code IS NOT NULL AND net_amount IS NOT NULL
+  ORDER BY net_amount DESC LIMIT :n
+),
+agg AS (
+  SELECT s.l2_code, AVG(d.pct_chg) AS pct_change, AVG(d.close) AS close
+  FROM smartmoney.sw_member_monthly s
+  JOIN smartmoney.raw_daily d
+    ON d.ts_code = s.ts_code AND d.trade_date = :rd
+  WHERE s.snapshot_month = :sm AND s.l2_code IN (SELECT l2_code FROM ranked)
+  GROUP BY s.l2_code
 )
-SELECT s.l2_code, s.l2_name, s.net_amount, mp.avg_pct_chg
-FROM smartmoney.sector_moneyflow_sw_daily s
-LEFT JOIN member_pct mp USING (l2_code)
-WHERE s.trade_date = :rd
-ORDER BY s.net_amount DESC
-LIMIT :n;
+SELECT r.l2_code, r.l2_name, r.net_amount,
+       COALESCE(sw.close,      a.close)      AS close,
+       COALESCE(sw.pct_change, a.pct_change) AS pct_change
+FROM ranked r
+LEFT JOIN smartmoney.raw_sw_daily sw
+       ON sw.ts_code = r.l2_code AND sw.trade_date = :rd
+LEFT JOIN agg a USING (l2_code)
+ORDER BY r.net_amount DESC;
 ```
 
 This makes 主线 a deterministic function of (date, top_n) — reproducible and auditable.
@@ -134,9 +144,18 @@ The audit trail of which aggregations were affected lives in `docs/audit-pre-b8.
 
 ---
 
+## V2.1.1 — SW L2 daily price ETL
+
+Added `scripts/backfill_sw_l2_daily.py`. Pulls `sw_daily(ts_code, start_date, end_date)` once per L2 code (one call per code, full date window) and bulk-upserts into `raw_sw_daily`. ~131 codes × 1300 trade days ≈ 170 k rows; ~3 minutes wall time.
+
+Daily incremental top-up: `uv run python scripts/backfill_sw_l2_daily.py --recent-days 5` (cheap; can be added to a nightly cron alongside the existing per-day ETL).
+
+`fetch_main_lines` now uses `COALESCE(raw_sw_daily.{close,pct_change}, member_agg.{close,pct_change})` so L2 prices are taken directly when available, with the member aggregation as a safety net for any backfill gaps.
+
+---
+
 ## V2.2 TODO
 
-- **`raw_sw_daily` L2 coverage.** Currently only L1. Pull L2 daily price/volume so per-L2 price strength does not need to be re-derived from member stocks at query time.
 - **Transition matrix LLM nudge.** `transition_matrix.py` (B5) will support a ±10% LLM hook to bias next-phase probabilities based on macro / news context.
 - **Persistent param store v2026_05.** After B/C complete, freeze the first SW-trained baseline.
 - **Drop DC paths from `factors/flow.py`.** Currently kept as a `sector_source='dc'` fallback; remove once SW path is fully validated.

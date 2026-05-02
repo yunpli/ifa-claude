@@ -285,22 +285,18 @@ def fetch_main_lines(engine: Engine, *, on_date: dt.date,
     """Top-N SW L2 sectors representing today's "main lines".
 
     V2.1 migration: replaces the fixed 15-element THS thematic-board list
-    with a dynamic SW-only selection. Strategy:
+    with a dynamic SW-only selection.
+    V2.1.1 enhancement: prefers direct SW L2 OHLC from `raw_sw_daily` (now
+    backfilled to L2). Falls back to member-stock aggregation if the L2 row
+    is missing for `on_date`. Final fallback: rank by `raw_sw_daily.pct_change`.
 
-    1. Primary — `smartmoney.sector_moneyflow_sw_daily` ordered by `net_amount DESC`
-       (only L2 rows where l2_code is non-null). Joined with `raw_sw_daily` to
-       attach `close` + `pct_change` for that L2 code on the same day.
-    2. Fallback — if the moneyflow table has no rows for `on_date`, rank
-       SW L2 directly by `raw_sw_daily.pct_change DESC` (codes with prefix
-       8011/8012/8017/8018/8019, excluding L1 which are 80101x/80103x style).
-
-    Returns a list of SectorBar with rank populated; SW-derived close/pct_change
-    so the same downstream display code keeps working.
+    Returns a list of SectorBar with rank populated.
     """
     out: list[SectorBar] = []
+    snapshot_month = on_date.replace(day=1)
     # Primary path: net_amount-based ranking from sector_moneyflow_sw_daily.
-    # raw_sw_daily only carries SW L1 codes, so for L2 close/pct_change we
-    # aggregate from member stocks via sw_member_monthly + raw_daily.
+    # close/pct_change come from raw_sw_daily L2 row (V2.1.1); if absent
+    # (e.g. L2 backfill incomplete), aggregate from member stocks.
     sql_primary = text("""
         WITH ranked AS (
             SELECT l2_code, l2_name, net_amount
@@ -324,12 +320,15 @@ def fetch_main_lines(engine: Engine, *, on_date: dt.date,
              GROUP BY s.l2_code
         )
         SELECT r.l2_code, r.l2_name, r.net_amount,
-               a.close, a.pct_change
+               COALESCE(sw.close,      a.close)      AS close,
+               COALESCE(sw.pct_change, a.pct_change) AS pct_change
           FROM ranked r
+          LEFT JOIN smartmoney.raw_sw_daily sw
+                 ON sw.ts_code = r.l2_code
+                AND sw.trade_date = :td
           LEFT JOIN agg a USING (l2_code)
          ORDER BY r.net_amount DESC
     """)
-    snapshot_month = on_date.replace(day=1)
     try:
         with engine.connect() as conn:
             rows = conn.execute(sql_primary, {"td": on_date, "n": top_n, "sm": snapshot_month}).all()

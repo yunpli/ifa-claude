@@ -1,6 +1,6 @@
 # ifa-claude — iFA China Market Report System
 
-**Version 2.1.0** · AI-native, structured, source-anchored daily intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
+**Version 2.1.1** · AI-native, structured, source-anchored daily intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
 
 ---
 
@@ -10,6 +10,10 @@
 - **千元 / 万元 unit fix** — `raw_daily.amount` was historically read as 万元 in some aggregations and 千元 in others, producing 10× inflated 净流入 numbers. All sector-aggregation SQL has been audited and normalised to 万元 at the source, then scaled to 亿 at the render layer.
 - **PDF export** — Every report can now be printed to PDF. Use the `--generate-pdf` flag on any `ifa generate ...` command, or run `scripts/html_to_pdf.py` standalone (with `--all-today` batch mode).
 - **Version bumped to 2.1.0** in both `pyproject.toml` and `ifa/__init__.py`.
+
+### V2.1.1 patch
+
+- **SW L2 daily price ETL** — `raw_sw_daily` now covers all ~131 SW L2 indices (in addition to 31 L1). `market.fetch_main_lines` queries L2 OHLC directly, with member-stock aggregation as fallback. Backfill: `scripts/backfill_sw_l2_daily.py` (~3 min for 2021-today; supports `--recent-days N` for incremental top-up). Bumped to `2.1.1`.
 
 ---
 
@@ -224,10 +228,11 @@ The root `CLAUDE.md` is the engineering checklist for the in-progress SmartMoney
 | Track | Status |
 |---|---|
 | V2.1 release (SW unification, PDF, units fix) | Done |
+| V2.1.1 patch (SW L2 daily price ETL)          | Done |
 | SmartMoney A 阶段 (raw backfill 2021-01 → 2026) | Done |
 | SmartMoney B 阶段 (factor refactor onto SW) | In progress |
 | SmartMoney C 阶段 (compute / train / OOS validation) | Pending B |
-| V2.2 (planned) | SW L2 daily price ETL (`raw_sw_daily` currently L1 only); transition matrix LLM nudge; persistent param store v2026_05 |
+| V2.2 (planned) | Transition matrix LLM nudge; persistent param store v2026_05; drop legacy DC fallback in `factors/flow.py` |
 
 See `CLAUDE.md` for the live B1–B9 / C1–C6 task list.
 
