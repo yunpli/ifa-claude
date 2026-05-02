@@ -43,6 +43,30 @@
         </ul>
       </div>
       {% endif %}
+      {% if t.short_picks or t.long_picks %}
+      <div class="ifa-target-card__picks">
+        {% if t.short_picks %}
+        <div class="ifa-target-card__pick-row" data-bucket="short">
+          <span class="ifa-target-card__pick-label">短线（{{ t.short_picks[0].horizon }}）<em>{{ t.short_picks[0].algorithm }}</em></span>
+          <span class="ifa-target-card__pick-list">
+            {% for p in t.short_picks %}
+            <span class="ifa-target-card__pick"><strong>{{ p.name }}</strong> <span class="ifa-target-card__pick-code">{{ p.ts_code }}</span> <span class="{% if p.pct_chg_today and p.pct_chg_today > 0 %}up{% elif p.pct_chg_today and p.pct_chg_today < 0 %}down{% endif %}">{{ p.pct_chg_display }}</span></span>
+            {% endfor %}
+          </span>
+        </div>
+        {% endif %}
+        {% if t.long_picks %}
+        <div class="ifa-target-card__pick-row" data-bucket="long">
+          <span class="ifa-target-card__pick-label">中长线（{{ t.long_picks[0].horizon }}）<em>{{ t.long_picks[0].algorithm }}</em></span>
+          <span class="ifa-target-card__pick-list">
+            {% for p in t.long_picks %}
+            <span class="ifa-target-card__pick"><strong>{{ p.name }}</strong> <span class="ifa-target-card__pick-code">{{ p.ts_code }}</span> <span class="{% if p.pct_chg_today and p.pct_chg_today > 0 %}up{% elif p.pct_chg_today and p.pct_chg_today < 0 %}down{% endif %}">{{ p.pct_chg_display }}</span></span>
+            {% endfor %}
+          </span>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
@@ -66,5 +90,14 @@
 .ifa-target-card__lbl{font-size:10.5px;color:var(--ink-muted);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding-top:1px;}
 .ifa-target-card__list{margin:0;padding-left:16px;font-size:12.5px;color:var(--ink-2);}
 .ifa-target-card__list li{margin-bottom:2px;}
+.ifa-target-card__picks{margin-top:10px;padding-top:8px;border-top:1px dashed var(--rule-soft);}
+.ifa-target-card__pick-row{margin-bottom:4px;}
+.ifa-target-card__pick-row[data-bucket='short']{border-left:2px solid #c2410c;padding-left:8px;}
+.ifa-target-card__pick-row[data-bucket='long']{border-left:2px solid #1d4ed8;padding-left:8px;}
+.ifa-target-card__pick-label{font-size:10.5px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;display:block;margin-bottom:3px;}
+.ifa-target-card__pick-label em{font-style:normal;color:var(--accent);margin-left:6px;text-transform:none;}
+.ifa-target-card__pick-list{display:flex;gap:8px;flex-wrap:wrap;}
+.ifa-target-card__pick{font-size:11.5px;color:var(--ink-2);padding:1px 6px;background:var(--rule-soft);border-radius:2px;}
+.ifa-target-card__pick-code{font-family:var(--font-mono);font-size:10px;color:var(--ink-soft);margin:0 4px;}
 @media (max-width:720px){.ifa-targets{grid-template-columns:1fr;}}
 </style>

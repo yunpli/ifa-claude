@@ -670,12 +670,13 @@ def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
 # ─── E8: Tomorrow targets (LLM-driven) ────────────────────────────────────────
 
 def _build_e8_targets(ctx: SMEveningCtx) -> dict:
+    section_title = "下个交易日操作建议"
     if not ctx.target_pool:
         return {
-            "key": "smartmoney_evening.e8_targets", "title": "明日资金候选",
+            "key": "smartmoney_evening.e8_targets", "title": section_title,
             "order": 8, "type": "sm_tomorrow_targets",
             "content_json": {
-                "summary": "今日活跃板块池为空，明日候选不足以形成。",
+                "summary": "今日活跃板块池为空，下个交易日候选不足以形成。",
                 "targets": [],
                 "fallback_text": "—",
             },
@@ -720,8 +721,49 @@ def _build_e8_targets(ctx: SMEveningCtx) -> dict:
     if not isinstance(parsed, dict):
         parsed = {"summary": "LLM 输出不可用。", "targets": []}
         ctx.run.fallback_used = True
+
+    # B6g: enrich each LLM-selected target sector with candidate stocks from
+    # ctx.candidates, split into 短线(RF) / 中长线(XGB) buckets, plus tag with
+    # an algorithm attribution.  Match by sector_name (LLM keeps the same name
+    # we passed in) since it's stable; fall back to sector_code where available.
+    candidates_by_sector_name: dict[str, list[CandidateStock]] = {}
+    for cand in ctx.candidates:
+        if cand.primary_sector_name:
+            candidates_by_sector_name.setdefault(cand.primary_sector_name, []).append(cand)
+
+    targets = parsed.get("targets") or []
+    if isinstance(targets, list):
+        for t in targets:
+            if not isinstance(t, dict):
+                continue
+            sec_name = t.get("sector_name") or ""
+            sec_cands = candidates_by_sector_name.get(sec_name, [])
+            short_picks = [c for c in sec_cands if c.role == "补涨"][:3]
+            long_picks = [c for c in sec_cands if c.role == "趋势"][:3]
+            t["short_picks"] = [
+                {
+                    "ts_code": c.ts_code, "name": c.name or "—",
+                    "pct_chg_today": c.pct_chg_today,
+                    "pct_chg_display": _fmt_pct(c.pct_chg_today),
+                    "score": round(c.score, 3),
+                    "algorithm": "规则版（B8 后切换 RF）",
+                    "horizon": "1–3 日",
+                }
+                for c in short_picks
+            ]
+            t["long_picks"] = [
+                {
+                    "ts_code": c.ts_code, "name": c.name or "—",
+                    "pct_chg_today": c.pct_chg_today,
+                    "pct_chg_display": _fmt_pct(c.pct_chg_today),
+                    "score": round(c.score, 3),
+                    "algorithm": "规则版（B8 后切换 XGB）",
+                    "horizon": "1–2 月",
+                }
+                for c in long_picks
+            ]
     return {
-        "key": "smartmoney_evening.e8_targets", "title": "明日资金候选",
+        "key": "smartmoney_evening.e8_targets", "title": section_title,
         "order": 8, "type": "sm_tomorrow_targets",
         "content_json": parsed,
         "prompt_name": "smartmoney_evening.tomorrow_targets",
