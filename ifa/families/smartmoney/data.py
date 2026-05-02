@@ -214,15 +214,18 @@ def load_sector_flows(
         # to match downstream _fmt_amt which assumes 元 base unit.
         sql = text(f"""
             SELECT sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
-                   sw.pct_change,
+                   -- V2.1.2: prefer L2 own pct_change; L1 fallback for ~6 deprecated codes
+                   COALESCE(sw_l2.pct_change, sw_l1.pct_change) AS pct_change,
                    sf.net_amount * 10000 AS net_amount, NULL AS net_amount_rate,
                    CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
                         THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
                         ELSE NULL END AS elg_buy_rate,
                    ss.role, ss.cycle_phase
             FROM {SCHEMA}.sector_moneyflow_sw_daily sf
-            LEFT JOIN {SCHEMA}.raw_sw_daily sw
-                   ON sw.ts_code = sf.l1_code AND sw.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.raw_sw_daily sw_l2
+                   ON sw_l2.ts_code = sf.l2_code AND sw_l2.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.raw_sw_daily sw_l1
+                   ON sw_l1.ts_code = sf.l1_code AND sw_l1.trade_date = sf.trade_date
             LEFT JOIN {SCHEMA}.sector_state_daily ss
                    ON ss.sector_code = sf.l2_code
                   AND ss.sector_source = 'sw_l2'
@@ -309,7 +312,9 @@ def load_quality_flows(
             FROM (
                 SELECT DISTINCT ON (sf.l2_code)
                        sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
-                       sw.pct_change, sf.net_amount, NULL AS net_amount_rate,
+                       -- V2.1.2: prefer L2 own pct_change; L1 fallback
+                       COALESCE(sw_l2.pct_change, sw_l1.pct_change) AS pct_change,
+                       sf.net_amount, NULL AS net_amount_rate,
                        CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
                             THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
                             ELSE NULL END AS elg_buy_rate,
@@ -323,8 +328,10 @@ def load_quality_flows(
                       ON ss.sector_code = sf.l2_code
                      AND ss.sector_source = 'sw_l2'
                      AND ss.trade_date = sf.trade_date
-                LEFT JOIN {SCHEMA}.raw_sw_daily sw
-                       ON sw.ts_code = sf.l1_code AND sw.trade_date = sf.trade_date
+                LEFT JOIN {SCHEMA}.raw_sw_daily sw_l2
+                       ON sw_l2.ts_code = sf.l2_code AND sw_l2.trade_date = sf.trade_date
+                LEFT JOIN {SCHEMA}.raw_sw_daily sw_l1
+                       ON sw_l1.ts_code = sf.l1_code AND sw_l1.trade_date = sf.trade_date
                 WHERE sf.trade_date = :d
                   AND sf.net_amount >= 100000
                   AND (sf.buy_elg_amount + sf.sell_elg_amount) > 0
@@ -392,7 +399,8 @@ def load_crowded_sectors(
         # net_amount 万→元 conversion to keep _fmt_amt unit-consistent.
         sql = text(f"""
             SELECT sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
-                   sw.pct_change,
+                   -- V2.1.2: prefer L2 own pct_change; L1 fallback
+                   COALESCE(sw_l2.pct_change, sw_l1.pct_change) AS pct_change,
                    sf.net_amount * 10000 AS net_amount, NULL AS net_amount_rate,
                    CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
                         THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
@@ -403,8 +411,10 @@ def load_crowded_sectors(
                   ON fd.sector_code = sf.l2_code
                  AND fd.sector_source = 'sw_l2'
                  AND fd.trade_date = sf.trade_date
-            LEFT JOIN {SCHEMA}.raw_sw_daily sw
-                   ON sw.ts_code = sf.l1_code AND sw.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.raw_sw_daily sw_l2
+                   ON sw_l2.ts_code = sf.l2_code AND sw_l2.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.raw_sw_daily sw_l1
+                   ON sw_l1.ts_code = sf.l1_code AND sw_l1.trade_date = sf.trade_date
             LEFT JOIN {SCHEMA}.sector_state_daily ss
                   ON ss.sector_code = fd.sector_code
                  AND ss.sector_source = fd.sector_source

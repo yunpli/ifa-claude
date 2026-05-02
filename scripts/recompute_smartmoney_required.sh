@@ -1,29 +1,26 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# OPTIONAL — fresh SmartMoney compute + retrain + OOS validation.
+# REQUIRED for V2.1.2+ — fresh SmartMoney compute + retrain + OOS validation.
 #
-# WHY THIS IS OPTIONAL
-# --------------------
-# V2.1.1 added SW L2 daily prices to `raw_sw_daily`, but every smartmoney
-# factor SQL joins raw_sw_daily on `l1_code` (verified — see flow.py:521,
-# leader.py:484, data.py:224/326/406). The L2 backfill therefore does NOT
-# change any factor inputs, so the previously-trained model (v2026_05) and
-# pre-computed `factor_daily` / `sector_state_daily` / `stock_signals_daily`
-# rows remain valid.
+# WHY THIS IS NOW REQUIRED
+# ------------------------
+# V2.1.2 changed all 5 smartmoney factor SQL joins from `l1_code` to L2-with-
+# L1-fallback. The factor inputs (`pct_change` per L2 sector) now reflect
+# real L2 divergence instead of inheriting the L1 parent's value. Sample
+# 2026-04-30: 电子 L1's 6 children spread 5.73% — ML model previously saw
+# 0% spread. Re-compute + retrain is needed to pick up these new signals.
 #
-# Run this script ONLY if:
-#   · You have made code changes to factor/leader/candidate logic since the
-#     last compute, OR
-#   · You want to extend factor/state coverage to dates not yet computed, OR
-#   · You want a fresh train+OOS using current data
+# Earlier V2.1.0 / V2.1.1: this script was optional. As of V2.1.2 it is a
+# prerequisite for any fresh SmartMoney report run.
 #
 # WHAT IT DOES (in order)
 # -----------------------
 #   1. Recompute factor_daily / sector_state / leader / candidate for the
 #      training window (2021-01-04 → 2025-10-31) and OOS window
-#      (2025-11-01 → today).  Idempotent (UPSERT).
+#      (2025-11-01 → today). Idempotent (UPSERT) — overwrites stale L1-proxy
+#      values with V2.1.2 L2 values.
 #   2. Train RF (short, horizon=1d) + XGBoost (long, horizon=20d) on SW L2
-#      in-sample; evaluate on OOS.  Persists to
+#      in-sample; evaluate on OOS. Persists to
 #      ~/claude/ifaenv/models/smartmoney/<version>/.
 #   3. Print the OOS metric summary.
 #
@@ -32,9 +29,9 @@
 #
 # Usage:
 #   cd /Users/neoclaw/claude/ifa-claude
-#   bash scripts/recompute_smartmoney_optional.sh
-#   bash scripts/recompute_smartmoney_optional.sh --version v2026_05_v2
-#   bash scripts/recompute_smartmoney_optional.sh --skip-compute  # only retrain
+#   bash scripts/recompute_smartmoney_required.sh
+#   bash scripts/recompute_smartmoney_required.sh --version v2026_05_v2  # A/B
+#   bash scripts/recompute_smartmoney_required.sh --skip-compute         # only retrain
 # ─────────────────────────────────────────────────────────────────────────────
 set -u
 
@@ -95,5 +92,11 @@ echo "==========================================================================
 echo "Done at $(date)"                               | tee -a "$LOG"
 echo "Models : ~/claude/ifaenv/models/smartmoney/$VERSION/" | tee -a "$LOG"
 echo "Log    : $LOG"
+
+# Drop V2.1.2 prerequisite marker so run_smartmoney_5days.sh proceeds.
+PREREQ_MARKER="/tmp/.ifa_smartmoney_recompute_v2.1.2.done"
+date > "$PREREQ_MARKER"
+echo "Marker : $PREREQ_MARKER"
+
 echo ""
 echo "Next: run  bash scripts/run_smartmoney_5days.sh"

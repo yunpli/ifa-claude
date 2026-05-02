@@ -1,6 +1,6 @@
 # ifa-claude — iFA China Market Report System
 
-**Version 2.1.1** · AI-native, structured, source-anchored daily intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
+**Version 2.1.2** · AI-native, structured, source-anchored daily intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
 
 ---
 
@@ -14,6 +14,11 @@
 ### V2.1.1 patch
 
 - **SW L2 daily price ETL** — `raw_sw_daily` now covers all ~131 SW L2 indices (in addition to 31 L1). `market.fetch_main_lines` queries L2 OHLC directly, with member-stock aggregation as fallback. Backfill: `scripts/backfill_sw_l2_daily.py` (~3 min for 2021-today; supports `--recent-days N` for incremental top-up). Bumped to `2.1.1`.
+
+### V2.1.2 patch
+
+- **SmartMoney factors now use L2 pct_change** — Previously every L2 sector inherited its parent L1's pct_change as a proxy (e.g. 半导体 / 元件 / 消费电子 all read 电子's daily change). Now each L2 reads its own value from `raw_sw_daily` (V2.1.1 backfill) with L1 fallback for ~6 deprecated L2 codes. Restores L2-internal divergence to factor signal — sample 2026-04-30: 电子 L1 had spread of **5.73 percentage points** across its 6 L2 children that the old model couldn't see.
+- **Action required**: re-compute `factor_daily` / `sector_state_daily` and retrain RF + XGB before generating fresh SmartMoney reports. See `scripts/recompute_smartmoney_required.sh` (renamed from `_optional`). Bumped to `2.1.2`.
 
 ---
 
@@ -229,6 +234,7 @@ The root `CLAUDE.md` is the engineering checklist for the in-progress SmartMoney
 |---|---|
 | V2.1 release (SW unification, PDF, units fix) | Done |
 | V2.1.1 patch (SW L2 daily price ETL)          | Done |
+| V2.1.2 patch (SmartMoney L2 pct_change in factors; recompute+retrain required) | Done |
 | SmartMoney A 阶段 (raw backfill 2021-01 → 2026) | Done |
 | SmartMoney B 阶段 (factor refactor onto SW) | In progress |
 | SmartMoney C 阶段 (compute / train / OOS validation) | Pending B |

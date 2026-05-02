@@ -154,6 +154,43 @@ Daily incremental top-up: `uv run python scripts/backfill_sw_l2_daily.py --recen
 
 ---
 
+## V2.1.2 — SmartMoney factors use L2 pct_change
+
+Until V2.1.1, `raw_sw_daily` only carried L1 rows, so smartmoney factor SQL joined on `l1_code` and treated the parent L1 pct_change as a per-L2 proxy. With L2 daily prices now backfilled, all 5 join sites have been switched to:
+
+```sql
+LEFT JOIN raw_sw_daily sw_l2 ON sw_l2.ts_code = sf.l2_code AND sw_l2.trade_date = sf.trade_date
+LEFT JOIN raw_sw_daily sw_l1 ON sw_l1.ts_code = sf.l1_code AND sw_l1.trade_date = sf.trade_date
+... COALESCE(sw_l2.pct_change, sw_l1.pct_change) AS pct_change ...
+```
+
+Sites updated:
+- `factors/flow.py:_load_sw_l2_history` — feeds `_compute_sw_l2_factors` → `factor_daily.pct_change_z` and downstream momentum factors that train the ML models
+- `factors/leader.py` — sector_pct_map used for leader scoring
+- `data.py` (3 sites) — sector summary, high-quality flow, crowded sectors (display in evening report)
+
+**Why this is a strict improvement.** Sample 2026-04-30, the 6 L2 children of L1 电子:
+
+| L2 | pct_change |
+|---|---|
+| 半导体 | +4.71% |
+| 电子化学品Ⅱ | +1.06% |
+| 其他电子Ⅱ | +1.00% |
+| 元件 | -0.11% |
+| 光学光电子 | -0.39% |
+| 消费电子 | -1.02% |
+
+Spread 5.73 percentage points. Pre-V2.1.2 they all read 电子 L1's value (≈ +1%) — the model had zero signal for L2-internal divergence. Now it does.
+
+**Required follow-up — re-compute + retrain.** Because factor inputs changed:
+
+1. `uv run python -m ifa.cli smartmoney compute --start 2021-01-04 --end <today>` — overwrites `factor_daily` / `sector_state_daily` / `stock_signals_daily` with V2.1.2 values
+2. `uv run python -m ifa.cli smartmoney train --version v2026_05` — retrain RF + XGB with new factor distributions; persist over v2026_05 (or use a new tag for A/B compare)
+
+Convenience: `bash scripts/recompute_smartmoney_required.sh` runs both. Required before any new SmartMoney report generation.
+
+---
+
 ## V2.2 TODO
 
 - **Transition matrix LLM nudge.** `transition_matrix.py` (B5) will support a ±10% LLM hook to bias next-phase probabilities based on macro / news context.

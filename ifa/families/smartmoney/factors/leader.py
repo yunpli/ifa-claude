@@ -476,14 +476,19 @@ def compute_leaders_for_date(
             sector_pct_map[(code, "dc")] = float(pct) if pct is not None else 0.0
             sector_pct_map[(code, "kpl")] = 0.0
 
-    # SW L2: use L1 pct_change as proxy (same L1 → same proxy value within L1 group)
+    # SW L2: V2.1.2 — use L2's own pct_change from raw_sw_daily (backfilled
+    # in V2.1.1), with L1 fallback for the ~6 deprecated L2 codes lacking rows.
     if sw_codes:
         sql_sw_pct = text(f"""
-            SELECT sf.l2_code, sw.pct_change
+            SELECT sf.l2_code,
+                   COALESCE(sw_l2.pct_change, sw_l1.pct_change) AS pct_change
             FROM {SCHEMA}.sector_moneyflow_sw_daily sf
-            JOIN {SCHEMA}.raw_sw_daily sw
-                  ON sw.ts_code = sf.l1_code
-                 AND sw.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.raw_sw_daily sw_l2
+                  ON sw_l2.ts_code = sf.l2_code
+                 AND sw_l2.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.raw_sw_daily sw_l1
+                  ON sw_l1.ts_code = sf.l1_code
+                 AND sw_l1.trade_date = sf.trade_date
             WHERE sf.trade_date = :d AND sf.l2_code = ANY(:codes)
         """)
         with engine.connect() as conn:

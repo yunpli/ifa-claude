@@ -87,7 +87,7 @@ for d in "${DATES[@]}"; do
          --slot "$slot"
          --report-date "$d"
          --mode production
-         --triggered-by "v2.1.1-prod-batch"
+         --triggered-by "v2.1.2-prod-batch"
          --generate-pdf)
 
     echo ""                                             | tee -a "$LOG"

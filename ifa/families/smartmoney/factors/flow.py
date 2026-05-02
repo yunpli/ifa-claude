@@ -501,11 +501,12 @@ def _load_sw_l2_history(
     trade_date: dt.date,
     n_days: int,
 ) -> pd.DataFrame:
-    """Load sector_moneyflow_sw_daily + L1 pct_change proxy for n_days window.
+    """Load sector_moneyflow_sw_daily + L2 pct_change for n_days window.
 
     Returns columns: trade_date, ts_code (=l2_code), name (=l2_name),
     net_amount, buy_elg_amount, sell_elg_amount, stock_count,
-    pct_change (L1 proxy via raw_sw_daily), elg_net, buy_elg_rate.
+    pct_change (V2.1.2: actual L2 from raw_sw_daily; falls back to L1 for the
+    ~6 deprecated L2 codes with no raw_sw_daily row), elg_net, buy_elg_rate.
     """
     sql = f"""
         SELECT
@@ -516,11 +517,14 @@ def _load_sw_l2_history(
             sf.buy_elg_amount,
             sf.sell_elg_amount,
             sf.stock_count,
-            sw.pct_change
+            COALESCE(sw_l2.pct_change, sw_l1.pct_change) AS pct_change
         FROM {SCHEMA}.sector_moneyflow_sw_daily sf
-        LEFT JOIN {SCHEMA}.raw_sw_daily sw
-               ON sw.ts_code = sf.l1_code
-              AND sw.trade_date = sf.trade_date
+        LEFT JOIN {SCHEMA}.raw_sw_daily sw_l2
+               ON sw_l2.ts_code = sf.l2_code
+              AND sw_l2.trade_date = sf.trade_date
+        LEFT JOIN {SCHEMA}.raw_sw_daily sw_l1
+               ON sw_l1.ts_code = sf.l1_code
+              AND sw_l1.trade_date = sf.trade_date
         WHERE sf.trade_date <= :d
           AND sf.trade_date >= :start
         ORDER BY sf.trade_date ASC, sf.l2_code
@@ -551,7 +555,10 @@ def _compute_sw_l2_factors(
     """Compute 4 factors for SW L2 sectors from sector_moneyflow_sw_daily.
 
     Uses actual net_amount data (unlike the existing 'sw' source which uses
-    price/volume proxies from raw_sw_daily).  pct_change is L1-level proxy.
+    price/volume proxies from raw_sw_daily). V2.1.2: pct_change is now the
+    L2 sector's own value (via COALESCE in _load_sw_l2_history above), with
+    L1 fallback only for the ~6 deprecated L2 codes that lack raw_sw_daily
+    rows. This restores L2-internal divergence to the factor signal.
     """
     if df.empty:
         return []

@@ -8,24 +8,25 @@
 # Cost estimate: ~$5-15 in LLM calls
 # Time estimate: ~10-25 min wall time
 #
-# DOES THIS NEED A FRESH COMPUTE / RETRAIN FIRST?
-# -----------------------------------------------
-# No — verified. SmartMoney factor SQL joins raw_sw_daily on `l1_code`
-# (see ifa/families/smartmoney/factors/flow.py:521 and similar).
-# The V2.1.1 backfill only added L2 rows; L1 rows were already present and
-# unchanged. The persisted ML model (v2026_05) and `factor_daily` /
-# `sector_state_daily` rows produced under V2.1 remain valid under V2.1.1.
+# V2.1.2 PREREQUISITE
+# -------------------
+# V2.1.2 changed factor SQL to use L2-own pct_change (was L1 proxy), so
+# `factor_daily` / `sector_state_daily` and the persisted RF/XGB models need
+# to be regenerated before generating fresh reports.
 #
-# If you DO want a fresh compute (e.g. to pick up recent code changes that
-# you've made in the parallel CC CLI session), see
-#   scripts/recompute_smartmoney_optional.sh
-# but it is NOT a prerequisite for these report runs.
+# This script aborts unless either:
+#   · You've already run scripts/recompute_smartmoney_required.sh
+#     (manifest file at /tmp/.ifa_smartmoney_recompute_v2.1.2.done), OR
+#   · You pass --skip-prereq-check (use only if you know what you're doing)
 #
 # Usage:
 #   cd /Users/neoclaw/claude/ifa-claude
+#   bash scripts/recompute_smartmoney_required.sh   # ~30-90 min, RUN FIRST
 #   bash scripts/run_smartmoney_5days.sh
+#
 #   bash scripts/run_smartmoney_5days.sh --skip-existing
 #   bash scripts/run_smartmoney_5days.sh --dry-run
+#   bash scripts/run_smartmoney_5days.sh --skip-prereq-check   # bypass guard
 # ─────────────────────────────────────────────────────────────────────────────
 set -u
 
@@ -37,13 +38,37 @@ OUT_DIR="$HOME/claude/ifaenv/out/production"
 
 DRY_RUN=0
 SKIP_EXISTING=0
+SKIP_PREREQ=0
+PREREQ_MARKER="/tmp/.ifa_smartmoney_recompute_v2.1.2.done"
 for arg in "$@"; do
   case "$arg" in
-    --dry-run)        DRY_RUN=1 ;;
-    --skip-existing)  SKIP_EXISTING=1 ;;
+    --dry-run)             DRY_RUN=1 ;;
+    --skip-existing)       SKIP_EXISTING=1 ;;
+    --skip-prereq-check)   SKIP_PREREQ=1 ;;
     *) echo "Unknown arg: $arg"; exit 2 ;;
   esac
 done
+
+# V2.1.2 prerequisite guard
+if [[ $SKIP_PREREQ -eq 0 && $DRY_RUN -eq 0 ]]; then
+  if [[ ! -f "$PREREQ_MARKER" ]]; then
+    cat <<EOF >&2
+ERROR: V2.1.2 prerequisite not met.
+
+The factor SQL was changed in V2.1.2 to use per-L2 pct_change (was L1 proxy).
+You must run scripts/recompute_smartmoney_required.sh first, which will:
+  1. Recompute factor_daily / sector_state_daily / stock_signals for V2.1.2
+  2. Retrain RF + XGB models on the new factor distributions
+  3. Save a marker at $PREREQ_MARKER
+
+Run:
+  bash scripts/recompute_smartmoney_required.sh
+
+To bypass this guard (NOT recommended): pass --skip-prereq-check
+EOF
+    exit 3
+  fi
+fi
 
 echo "iFA SmartMoney evening production batch — $(date)" | tee "$LOG"
 echo "Dates : ${DATES[*]}"                                | tee -a "$LOG"
@@ -69,7 +94,7 @@ for d in "${DATES[@]}"; do
   cmd=(uv run python -m ifa.cli smartmoney evening
        --report-date "$d"
        --mode production
-       --triggered-by "v2.1.1-prod-batch"
+       --triggered-by "v2.1.2-prod-batch"
        --generate-pdf)
 
   echo ""                                              | tee -a "$LOG"
