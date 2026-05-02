@@ -112,7 +112,8 @@ def compute(
         try:
             snap = compute_market_state(engine, td, params=params)
             write_market_state(engine, snap)
-            console.print(f"  market_state: {snap.market_state}  (total {snap.total_amount:.0f}亿)")
+            # snap.total_amount is in 万元; /1e4 → 亿元 for display
+            console.print(f"  market_state: {snap.market_state}  (total {snap.total_amount / 1e4:.0f}亿)")
         except Exception as exc:
             console.print(f"  [yellow]market_state WARN:[/yellow] {exc}")
 

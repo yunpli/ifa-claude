@@ -64,7 +64,7 @@ from .morning import (
 )
 from .universe import INDUSTRY_CHAINS
 
-TEMPLATE_VERSION = "asset_evening_v0.1"
+TEMPLATE_VERSION = "asset_evening_v2.1.0"
 REPORT_FAMILY = "asset"
 REPORT_TYPE = "evening_long"
 SLOT = "evening"

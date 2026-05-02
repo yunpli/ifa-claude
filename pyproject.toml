@@ -1,6 +1,6 @@
 [project]
 name = "ifa-claude"
-version = "0.0.1"
+version = "2.1.0"
 description = "iFA China Market Report System — P0 Macro morning/evening report engine"
 requires-python = ">=3.12,<3.14"
 readme = "README.md"

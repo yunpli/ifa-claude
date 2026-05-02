@@ -150,9 +150,13 @@ def load_market_pulse(engine: Engine, trade_date: dt.date) -> MarketPulse:
 
     derived = row[13] if isinstance(row[13], dict) else (json.loads(row[13]) if row[13] else {})
 
-    # market_state_daily.total_amount is stored in 千元 (raw SUM from raw_daily)
-    # and is currently stale (constant bug). Override with fresh raw_daily aggregation.
-    # raw_daily.amount unit = 千元; store as 万元 in MarketPulse for downstream display.
+    # market_state_daily.total_amount unit history:
+    #   - Legacy rows (pre-V2.1): stored in 千元 (raw SUM from raw_daily, 10x bug).
+    #   - V2.1+ rows: stored in 万元 (factors/liquidity.py now divides by 10).
+    # Either way this query is the authoritative path: we re-aggregate raw_daily
+    # directly (the persisted column has historically been stale across days).
+    # raw_daily.amount unit = 千元 per TuShare; we divide by 10 to get 万元 for
+    # downstream display.
     with engine.connect() as conn:
         amt_rows = conn.execute(text(f"""
             SELECT trade_date, SUM(amount) / 10.0 AS amt_wan

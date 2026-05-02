@@ -8,7 +8,8 @@ Aggregates everything the morning/noon/evening reports need:
   - Dragon-tiger list with reason classification
   - North/South capital, margin balance
   - SW industry rotation (via sw_daily, since index_daily returns 0 rows for SW)
-  - Hot THS concept boards (主线候选)
+  - Main-line candidates: top SW L2 sectors by today's net inflow + price momentum
+    (V2.1 migration — replaced THS thematic boards with SW-only dynamic source)
   - News (broad market filter, BJT-tagged)
   - Three-aux summary read from DB (latest macro/asset/tech tone+headline+key)
   - Default focus enrichment (10 important + 20 regular, ALL — not tech-filtered)
@@ -29,7 +30,7 @@ from sqlalchemy.engine import Engine
 from ifa.core.report.timezones import BJT
 from ifa.core.tushare import TuShareClient
 
-from .universe import MAIN_LINE_CONCEPTS, MARKET_INDICES, SW_LEVEL1
+from .universe import MAIN_LINE_TOP_N, MARKET_INDICES, SW_LEVEL1
 
 
 # ─── Index family ─────────────────────────────────────────────────────────
@@ -277,36 +278,109 @@ def fetch_sw_rotation(client: TuShareClient, *, on_date: dt.date) -> list[Sector
     return out
 
 
-# ─── Hot concept boards (主线候选) ────────────────────────────────────────
+# ─── Main-line candidates (动态 SW L2，V2.1) ──────────────────────────────
 
-def fetch_main_line_concepts(client: TuShareClient, *, on_date: dt.date) -> list[SectorBar]:
-    end = on_date.strftime("%Y%m%d")
-    start = (on_date - dt.timedelta(days=8)).strftime("%Y%m%d")
-    # Names lookup
-    try:
-        names = {r.ts_code: r.name for r in client.call("ths_index").itertuples()}
-    except Exception:
-        names = {}
+def fetch_main_lines(engine: Engine, *, on_date: dt.date,
+                     top_n: int = MAIN_LINE_TOP_N) -> list[SectorBar]:
+    """Top-N SW L2 sectors representing today's "main lines".
+
+    V2.1 migration: replaces the fixed 15-element THS thematic-board list
+    with a dynamic SW-only selection. Strategy:
+
+    1. Primary — `smartmoney.sector_moneyflow_sw_daily` ordered by `net_amount DESC`
+       (only L2 rows where l2_code is non-null). Joined with `raw_sw_daily` to
+       attach `close` + `pct_change` for that L2 code on the same day.
+    2. Fallback — if the moneyflow table has no rows for `on_date`, rank
+       SW L2 directly by `raw_sw_daily.pct_change DESC` (codes with prefix
+       8011/8012/8017/8018/8019, excluding L1 which are 80101x/80103x style).
+
+    Returns a list of SectorBar with rank populated; SW-derived close/pct_change
+    so the same downstream display code keeps working.
+    """
     out: list[SectorBar] = []
-    for code in MAIN_LINE_CONCEPTS:
+    # Primary path: net_amount-based ranking from sector_moneyflow_sw_daily.
+    # raw_sw_daily only carries SW L1 codes, so for L2 close/pct_change we
+    # aggregate from member stocks via sw_member_monthly + raw_daily.
+    sql_primary = text("""
+        WITH ranked AS (
+            SELECT l2_code, l2_name, net_amount
+              FROM smartmoney.sector_moneyflow_sw_daily
+             WHERE trade_date = :td
+               AND l2_code IS NOT NULL
+               AND net_amount IS NOT NULL
+             ORDER BY net_amount DESC
+             LIMIT :n
+        ),
+        agg AS (
+            SELECT s.l2_code,
+                   AVG(d.pct_chg) AS pct_change,
+                   AVG(d.close)   AS close
+              FROM smartmoney.sw_member_monthly s
+              JOIN smartmoney.raw_daily d
+                ON d.ts_code = s.ts_code
+               AND d.trade_date = :td
+             WHERE s.snapshot_month = :sm
+               AND s.l2_code IN (SELECT l2_code FROM ranked)
+             GROUP BY s.l2_code
+        )
+        SELECT r.l2_code, r.l2_name, r.net_amount,
+               a.close, a.pct_change
+          FROM ranked r
+          LEFT JOIN agg a USING (l2_code)
+         ORDER BY r.net_amount DESC
+    """)
+    snapshot_month = on_date.replace(day=1)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(sql_primary, {"td": on_date, "n": top_n, "sm": snapshot_month}).all()
+        for r in rows:
+            out.append(SectorBar(
+                code=r.l2_code, name=r.l2_name or r.l2_code,
+                close=_f(r.close),
+                pct_change=_f(r.pct_change),
+                trade_date=on_date,
+            ))
+    except Exception:
+        out = []
+
+    # Fallback: rank SW L2 by pct_change directly from raw_sw_daily
+    if not out:
+        sql_fb = text("""
+            SELECT ts_code, name, close, pct_change
+              FROM smartmoney.raw_sw_daily
+             WHERE trade_date = :td
+               AND pct_change IS NOT NULL
+               AND (
+                    ts_code LIKE '8011%' OR ts_code LIKE '8012%' OR
+                    ts_code LIKE '8017%' OR ts_code LIKE '8018%' OR
+                    ts_code LIKE '8019%'
+               )
+             ORDER BY pct_change DESC
+             LIMIT :n
+        """)
         try:
-            df = client.call("ths_daily", ts_code=code, start_date=start, end_date=end)
+            with engine.connect() as conn:
+                rows = conn.execute(sql_fb, {"td": on_date, "n": top_n}).all()
+            for r in rows:
+                out.append(SectorBar(
+                    code=r.ts_code, name=str(r.name) if r.name else r.ts_code,
+                    close=_f(r.close),
+                    pct_change=_f(r.pct_change),
+                    trade_date=on_date,
+                ))
         except Exception:
-            out.append(SectorBar(code, names.get(code, code), None, None, None)); continue
-        if df is None or df.empty:
-            out.append(SectorBar(code, names.get(code, code), None, None, None)); continue
-        df = df.sort_values("trade_date")
-        row = df.iloc[-1]
-        out.append(SectorBar(
-            code=code, name=names.get(code, str(row.get("name", code))),
-            close=_f(row.get("close")),
-            pct_change=_f(row.get("pct_change")),
-            trade_date=_d(str(row["trade_date"])),
-        ))
+            pass
+
+    # Rank for display ordering: prefer pct_change desc; if all missing, keep
+    # the upstream net_amount order (rank by position).
     valid = [s for s in out if s.pct_change is not None]
-    valid.sort(key=lambda s: s.pct_change or 0, reverse=True)
-    for i, s in enumerate(valid):
-        s.rank = i + 1
+    if valid:
+        valid.sort(key=lambda s: s.pct_change or 0, reverse=True)
+        for i, s in enumerate(valid):
+            s.rank = i + 1
+    else:
+        for i, s in enumerate(out):
+            s.rank = i + 1
     return out
 
 

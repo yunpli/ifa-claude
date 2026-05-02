@@ -58,7 +58,7 @@ from ._common import (
     prefetch_market_data,
 )
 
-TEMPLATE_VERSION = "market_noon_v0.1"
+TEMPLATE_VERSION = "market_noon_v2.1.0"
 REPORT_FAMILY = "main"
 REPORT_TYPE = "midday_long"
 SLOT = "noon"

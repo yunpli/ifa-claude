@@ -53,7 +53,7 @@ from .data import (
 )
 from .universe import CHINA_ASSET_UNIVERSE, INDUSTRY_CHAINS
 
-TEMPLATE_VERSION = "asset_morning_v0.1"
+TEMPLATE_VERSION = "asset_morning_v2.1.0"
 REPORT_FAMILY = "asset"
 REPORT_TYPE = "morning_long"
 SLOT = "morning"

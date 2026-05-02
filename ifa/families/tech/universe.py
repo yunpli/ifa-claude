@@ -1,20 +1,26 @@
 """Tech report universe — Jensen Huang's AI Five-Layer Cake mapping.
 
-Layer model:
-  L1 Energy / Power / Physical Base   电力、储能、液冷、温控、特高压、数据中心供电
-  L2 Chips / Semiconductors           AI 芯片、存储、设备、材料、封测、国产替代
-  L3 Infrastructure / Data Center     光模块、CPO、PCB、服务器、IDC、液冷服务器
-  L4 Models / AI Platforms            大模型、数据要素、AI 中台、网络安全、操作系统
-  L5 Applications / Agents / Robotics AI 应用、智能体、机器人、智能驾驶、端侧 AI
+V2.1: Migrated from THS to SW. Five-layer thematic structure preserved;
+SW L2 sectors substituted as the sole data source. THS concept boards
+(885xxx/886xxx/881xxx) and `ths_daily`/`ths_member` calls have been
+removed from the primary data path. Where a thematic concept (e.g.
+"CPO", "液冷服务器", "数据要素") has no exact SW analog, the closest
+SW L2 industry that *contains* those names is used.
 
-Each layer maps to a curated list of 同花顺概念板块 (THS concepts) — selected
-from the live audit on 2026-04-30 (`pro.ths_index()` matched against keyword
-patterns). We prefer 885xxx / 886xxx concept boards over 700xxx 行业分类
-because concept boards are tighter to AI thematics.
+Layer model (五层蛋糕):
+  energy  L1 Energy / Power / Cooling      电力设备（电池/电网/光伏/风电）
+  chips   L2 Chips / Semiconductors        电子（半导体/元件/电子化学品）
+  infra   L3 Infrastructure / Connectivity 通信（通信设备/通信服务）+ 计算机设备
+  models  L4 Models / Software / Platforms 计算机（软件开发/IT 服务）
+  apps    L5 Applications / Devices        消费电子 + 光学光电子 + 传媒（数字媒体/游戏）
+                                            + 汽车（智能驾驶/零部件）
+
+Each layer maps to a curated list of 申万二级行业代码 (SW L2 codes).
+SW codes are verified against `smartmoney.raw_sw_member`.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -23,8 +29,8 @@ class LayerSpec:
     layer_name: str             # 中文名
     layer_en: str               # 英文名
     narrative: str              # 一句话叙事
-    ths_board_codes: list[str]  # THS 概念板块代码（ts_code），按相关性排序
-    sw_l2_codes: list[str]      # 申万二级行业代码（作为补充与回退）
+    sw_l2_codes: list[str]      # 申万二级行业代码（PIT 通过 sw_member_monthly 解析）
+    sw_l2_names: list[str] = field(default_factory=list)  # 与 sw_l2_codes 一一对应的中文名（展示用）
 
 
 AI_LAYERS: list[LayerSpec] = [
@@ -32,93 +38,68 @@ AI_LAYERS: list[LayerSpec] = [
         layer_id="energy",
         layer_name="Energy / 电力与算力基建",
         layer_en="Energy · Power · Cooling",
-        narrative="AI 算力扩张的物理基础——电力、电网、储能、液冷、UPS、数据中心供电与温控。",
-        ths_board_codes=[
-            "885311.TI",   # 智能电网
-            "885425.TI",   # 特高压
-            "885461.TI",   # 充电桩
-            "885531.TI",   # 光伏概念
-            "885571.TI",   # 核电
-            "885641.TI",   # 风电
-            "885823.TI",   # 氢能源
-            "885921.TI",   # 储能
-            "885935.TI",   # 抽水蓄能
-            "886044.TI",   # 液冷服务器（横跨 energy + infra）
-            "861289.TI",   # 数据中心 REIT
+        narrative="AI 算力扩张的物理基础——电网、电池、光伏/风电、温控与数据中心供电（液冷电源以电力设备 L2 为代理）。",
+        sw_l2_codes=[
+            "801738.SI",   # 电网设备（特高压/UPS）
+            "801737.SI",   # 电池（储能）
+            "801735.SI",   # 光伏设备
+            "801736.SI",   # 风电设备
+            "801733.SI",   # 其他电源设备Ⅱ
+            "801731.SI",   # 电机Ⅱ
         ],
-        sw_l2_codes=["801160.SI"],  # 公用事业（含电力）
+        sw_l2_names=["电网设备", "电池", "光伏设备", "风电设备", "其他电源设备Ⅱ", "电机Ⅱ"],
     ),
     LayerSpec(
         layer_id="chips",
         layer_name="Chips / 半导体与算力芯片",
         layer_en="Chips · Semiconductors",
-        narrative="AI 算力的核心——GPU/ASIC/CPU/存储芯片、半导体设备、材料、EDA、封测、国产替代。",
-        ths_board_codes=[
-            "881121.TI",   # 半导体
-            "884229.TI",   # 半导体设备
-            "884091.TI",   # 半导体材料
-            "884228.TI",   # 集成电路封测
-            "861100.TI",   # 半导体产品与设备 Ⅱ
-            "885925.TI",   # MCU 芯片
+        narrative="AI 算力的核心——半导体（GPU/ASIC/存储/设备/材料/封测）、元件、电子化学品。",
+        sw_l2_codes=[
+            "801081.SI",   # 半导体
+            "801083.SI",   # 元件
+            "801086.SI",   # 电子化学品Ⅱ
+            "801082.SI",   # 其他电子Ⅱ
         ],
-        sw_l2_codes=["801080.SI"],  # 电子（含半导体）
+        sw_l2_names=["半导体", "元件", "电子化学品Ⅱ", "其他电子Ⅱ"],
     ),
     LayerSpec(
         layer_id="infra",
         layer_name="Infrastructure / 算力基础设施",
         layer_en="Infrastructure · Data Center · Cloud",
-        narrative="AI 数据中心的连接层——光模块、CPO、PCB、服务器、液冷、IDC、算力租赁、5G/6G。",
-        ths_board_codes=[
-            "885957.TI",   # 东数西算（算力）
-            "886033.TI",   # 共封装光学 CPO
-            "886044.TI",   # 液冷服务器
-            "886050.TI",   # 算力租赁
-            "885959.TI",   # PCB 概念
-            "885362.TI",   # 云计算
-            "884262.TI",   # 通信网络设备及器件
-            "885556.TI",   # 5G
-            "885998.TI",   # F5G 概念
-            "886037.TI",   # 6G 概念
-            "885574.TI",   # 卫星导航
+        narrative="AI 数据中心的连接层——通信设备（光模块/CPO/PCB 由通信设备 L2 代理）、通信服务、服务器（计算机设备）。"
+                   " # TODO V2.2: needs SW L3 or RPS-based theme detection for CPO/液冷服务器/算力租赁等细分主题。",
+        sw_l2_codes=[
+            "801102.SI",   # 通信设备
+            "801223.SI",   # 通信服务
+            "801101.SI",   # 计算机设备（服务器/IDC 设备）
         ],
-        sw_l2_codes=["801770.SI"],  # 通信
+        sw_l2_names=["通信设备", "通信服务", "计算机设备"],
     ),
     LayerSpec(
         layer_id="models",
         layer_name="Models / 模型与软件基础设施",
         layer_en="Models · AI Platforms · Software",
-        narrative="AI 能力载体——大模型、数据要素、AI 中台、操作系统、数据库、网络安全、工业互联网、区块链。",
-        ths_board_codes=[
-            "886041.TI",   # 数据要素
-            "885844.TI",   # 国产操作系统
-            "885459.TI",   # 网络安全
-            "885757.TI",   # 区块链
-            "885783.TI",   # 工业互联网
+        narrative="AI 能力载体——大模型、操作系统、数据库、网络安全、行业软件、AI 中台（软件开发 + IT 服务 L2 代理）。",
+        sw_l2_codes=[
+            "801104.SI",   # 软件开发
+            "801103.SI",   # IT服务Ⅱ
         ],
-        sw_l2_codes=["801750.SI"],  # 计算机
+        sw_l2_names=["软件开发", "IT服务Ⅱ"],
     ),
     LayerSpec(
         layer_id="apps",
         layer_name="Applications / AI 应用与端侧",
         layer_en="Applications · Agents · Robotics",
-        narrative="AI 落地的需求侧——AI 应用、智能体、机器人、智能驾驶、端侧 AI、消费电子、医疗 AI、游戏。",
-        ths_board_codes=[
-            "886108.TI",   # AI 应用
-            "886099.TI",   # AI 智能体
-            "886069.TI",   # 人形机器人
-            "885517.TI",   # 机器人概念
-            "885736.TI",   # 无人驾驶
-            "886047.TI",   # 脑机接口
-            "885934.TI",   # 元宇宙
-            "885402.TI",   # 智能医疗
-            "885765.TI",   # 互联网医疗
-            "881124.TI",   # 消费电子
-            "884098.TI",   # 消费电子零部件及组装
-            "885603.TI",   # 网络游戏
-            "885874.TI",   # 云游戏
-            "884218.TI",   # 机器人
+        narrative="AI 落地的需求侧——消费电子、光学光电子（AR/VR/显示）、数字媒体/游戏（AIGC 应用）、汽车智能驾驶。",
+        sw_l2_codes=[
+            "801085.SI",   # 消费电子
+            "801084.SI",   # 光学光电子
+            "801767.SI",   # 数字媒体
+            "801764.SI",   # 游戏Ⅱ
+            "801093.SI",   # 汽车零部件（智能驾驶/三电）
+            "801095.SI",   # 乘用车（新能源车/智能驾驶整车）
         ],
-        sw_l2_codes=["801760.SI"],  # 传媒
+        sw_l2_names=["消费电子", "光学光电子", "数字媒体", "游戏Ⅱ", "汽车零部件", "乘用车"],
     ),
 ]
 
@@ -130,18 +111,43 @@ def layer_by_id(layer_id: str) -> LayerSpec | None:
     return None
 
 
-def all_tech_board_codes() -> list[str]:
+def all_tech_sector_codes() -> list[str]:
+    """Return every SW L2 code referenced by the 5 layers, dedup'd, in order."""
     out: list[str] = []
     for l in AI_LAYERS:
-        out.extend(l.ths_board_codes)
-    # dedupe while preserving order
+        out.extend(l.sw_l2_codes)
     seen: set[str] = set()
     return [c for c in out if not (c in seen or seen.add(c))]
 
 
-def board_to_layer() -> dict[str, str]:
+def sector_to_layer() -> dict[str, str]:
+    """SW L2 code -> layer_id reverse map."""
     out: dict[str, str] = {}
     for l in AI_LAYERS:
-        for c in l.ths_board_codes:
+        for c in l.sw_l2_codes:
             out[c] = l.layer_id
     return out
+
+
+def sector_name(code: str) -> str:
+    """Display name for a SW L2 code (best effort)."""
+    for l in AI_LAYERS:
+        for c, n in zip(l.sw_l2_codes, l.sw_l2_names):
+            if c == code:
+                return n
+    return code
+
+
+# ─── Backward-compatibility shims (deprecated) ─────────────────────────────
+# The morning/evening orchestrators historically called these names. They
+# now resolve to SW-based equivalents so consumers do not break.
+
+def all_tech_board_codes() -> list[str]:  # pragma: no cover - shim
+    """Deprecated: use all_tech_sector_codes(). Retained so consumers built
+    against the THS naming continue to work after the V2.1 SW migration."""
+    return all_tech_sector_codes()
+
+
+def board_to_layer() -> dict[str, str]:  # pragma: no cover - shim
+    """Deprecated: use sector_to_layer()."""
+    return sector_to_layer()

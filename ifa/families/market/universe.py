@@ -1,5 +1,8 @@
 """A-share main report universe — index codes, sector taxonomy, sentiment caps.
 
+V2.1: Migrated from fixed THS thematic boards to dynamic top SW L2 sectors.
+Main-line themes derived from real-time SW data.
+
 The main report uses these as the *fixed display universe*. We never let the
 LLM choose indices or sectors; data is pre-fetched against this list and the
 LLM only writes commentary.
@@ -53,24 +56,11 @@ SW_LEVEL1: list[tuple[str, str]] = [
 ]
 
 
-# ── 主线候选（高权重热门 THS 概念，用于板块轮动 & 主线候选检测） ─────────
-MAIN_LINE_CONCEPTS: list[str] = [
-    "885957.TI",   # 东数西算
-    "886033.TI",   # CPO
-    "886044.TI",   # 液冷服务器
-    "885959.TI",   # PCB 概念
-    "881121.TI",   # 半导体
-    "884229.TI",   # 半导体设备
-    "886108.TI",   # AI 应用
-    "886099.TI",   # AI 智能体
-    "886069.TI",   # 人形机器人
-    "885517.TI",   # 机器人概念
-    "885425.TI",   # 特高压
-    "885921.TI",   # 储能
-    "885531.TI",   # 光伏概念
-    "881124.TI",   # 消费电子
-    "885736.TI",   # 无人驾驶
-]
+# ── 主线候选（动态：今日 SW L2 资金流 + 涨幅 top-N） ─────────────────────
+# V2.1: 取代固定 THS 概念列表。实际选择逻辑见
+# `data.fetch_main_lines()` —— 优先按 sector_moneyflow_sw_daily.net_amount
+# 排序，fallback 到 raw_sw_daily.pct_change。
+MAIN_LINE_TOP_N: int = 10
 
 # ── 短线情绪指标阈值 ─────────────────────────────────────────────────────
 # Used by `detect_market_temperature` heuristic before LLM commentary.

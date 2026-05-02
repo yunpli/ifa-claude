@@ -62,7 +62,7 @@ from ifa.families.macro.morning import (
     _safe_chat_json,
 )
 
-TEMPLATE_VERSION = "macro_evening_v0.1"
+TEMPLATE_VERSION = "macro_evening_v2.1.0"
 REPORT_FAMILY = "macro"
 REPORT_TYPE = "evening_long"
 SLOT = "evening"

@@ -66,7 +66,7 @@ from .morning import (
     _fmt_pct,
 )
 
-TEMPLATE_VERSION = "tech_evening_v0.1"
+TEMPLATE_VERSION = "tech_evening_v2.1.0"
 REPORT_FAMILY = "tech"
 REPORT_TYPE = "evening_long"
 SLOT = "evening"
@@ -208,7 +208,7 @@ def _build_e4_review(ctx: TechCtx, morning_hypotheses: list[dict]) -> dict:
         for i, h in enumerate(morning_hypotheses)
     )
     user = f"""
-=== 今日 5 层板块 (THS 概念，按层聚合) ===
+=== 今日 5 层板块 (SW L2 行业，按层聚合) ===
 {chr(10).join(layer_blob)}
 
 === 涨停 tech 个股数 ===
@@ -414,10 +414,10 @@ def run_tech_evening(
     on_log(f"[run {str(run.report_run_id)[:8]}] starting Tech evening report for {report_date} user={user}")
 
     try:
-        on_log("fetching THS board performance for tech 5 layers (today)…")
+        on_log("fetching SW L2 sector performance for tech 5 layers (today)…")
         boards_by_layer = data.fetch_board_performance(tushare, on_date=report_date, history_days=10)
-        on_log("resolving tech board members…")
-        tech_members = data.resolve_tech_members(tushare)
+        on_log("resolving tech sector members (SW PIT)…")
+        tech_members = data.resolve_tech_members(tushare, engine, trade_date=report_date)
         on_log("fetching limit-up tech stocks (today)…")
         limit_up = data.fetch_limit_up_tech(tushare, on_date=report_date, tech_members=tech_members)
         on_log(f"  {len(limit_up)} limit-up tech stocks today")

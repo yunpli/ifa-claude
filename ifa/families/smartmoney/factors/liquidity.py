@@ -64,9 +64,16 @@ class MarketStateSnapshot:
 # ── Data loading ──────────────────────────────────────────────────────────────
 
 def _load_amount_history(engine: Engine, trade_date: dt.date, n_days: int) -> list[float]:
-    """Load total daily amount for the last n_days from raw_daily."""
+    """Load total daily amount for the last n_days from raw_daily, returned as 万元.
+
+    NOTE: raw_daily.amount is in 千元 per TuShare convention; we divide by 10 here
+    so that all downstream values (MarketStateSnapshot.total_amount, amount_10d_avg,
+    and the persisted market_state_daily rows) are in 万元 as documented on the
+    MarketStateSnapshot dataclass. Previously this returned 千元, producing a 10x
+    error in heat/attack/defense thresholds and in any displayed totals.
+    """
     sql = f"""
-        SELECT trade_date, SUM(amount) AS total_amount
+        SELECT trade_date, SUM(amount) / 10.0 AS total_amount_wan
         FROM {SCHEMA}.raw_daily
         WHERE trade_date <= :d
         GROUP BY trade_date

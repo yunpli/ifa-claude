@@ -59,7 +59,7 @@ from .data import (
 from .focus import FocusStock, get_focus_for, tech_only
 from .universe import AI_LAYERS, layer_by_id
 
-TEMPLATE_VERSION = "tech_morning_v0.1"
+TEMPLATE_VERSION = "tech_morning_v2.1.0"
 REPORT_FAMILY = "tech"
 REPORT_TYPE = "morning_long"
 SLOT = "morning"
@@ -780,10 +780,10 @@ def run_tech_morning(
 
     try:
         prev_day = report_date - dt.timedelta(days=1)
-        on_log("fetching THS board performance for tech 5 layers…")
+        on_log("fetching SW L2 sector performance for tech 5 layers…")
         boards_by_layer = data.fetch_board_performance(tushare, on_date=prev_day, history_days=10)
-        on_log("resolving tech board members…")
-        tech_members = data.resolve_tech_members(tushare)
+        on_log("resolving tech sector members (SW PIT)…")
+        tech_members = data.resolve_tech_members(tushare, engine, trade_date=prev_day)
         on_log(f"  {sum(len(v) for v in tech_members.values())} member rows across {len(tech_members)} boards")
         on_log("fetching limit-up tech stocks…")
         limit_up = data.fetch_limit_up_tech(tushare, on_date=prev_day, tech_members=tech_members)

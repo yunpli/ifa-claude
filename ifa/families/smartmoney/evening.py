@@ -82,7 +82,7 @@ from .ml.persistence import load_model
 
 log = logging.getLogger(__name__)
 
-TEMPLATE_VERSION = "smartmoney_evening_v0.1"
+TEMPLATE_VERSION = "smartmoney_evening_v2.1.0"
 
 
 # ── LLM Aug context ───────────────────────────────────────────────────────────

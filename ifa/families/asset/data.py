@@ -37,7 +37,7 @@ class CommoditySnapshot:
     high: float | None = None
     low: float | None = None
     volume: float | None = None
-    amount: float | None = None
+    amount: float | None = None  # 万元 (TuShare fut_daily.amount); currently unused downstream
     open_interest: float | None = None
     oi_change: float | None = None
     trade_date: dt.date | None = None

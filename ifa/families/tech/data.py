@@ -1,8 +1,10 @@
 """Tech report data layer.
 
-Fetches THS concept board performance, member-level leader candidates,
-limit-up tech stocks, fund-flow leaders, US tech overnight prices, tech-
-relevant news, and resolves the user focus list to live data.
+V2.1: Migrated from THS to SW. Sector-board snapshots use `sw_daily`
+against SW L2 indices; sector membership uses `sw_member_monthly`
+(point-in-time correct, snapshot_month = first day of trade_date's
+month). All `ths_daily` / `ths_member` calls have been removed from
+the primary path.
 """
 from __future__ import annotations
 
@@ -12,12 +14,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
 
 from ifa.core.report.timezones import BJT
 from ifa.core.tushare import TuShareClient
 
 from .focus import FocusStock, get_focus_for, tech_only
-from .universe import AI_LAYERS, all_tech_board_codes, board_to_layer
+from .universe import (
+    AI_LAYERS,
+    all_tech_sector_codes,
+    sector_name,
+    sector_to_layer,
+)
 
 
 # ─── Layer-level board snapshot ────────────────────────────────────────────
@@ -39,31 +48,26 @@ class BoardSnapshot:
 def fetch_board_performance(
     client: TuShareClient, *, on_date: dt.date, history_days: int = 10
 ) -> dict[str, list[BoardSnapshot]]:
-    """For each AI layer, pull the curated THS boards' daily bars over ~10 days,
-    keyed by layer_id."""
+    """For each AI layer, pull the SW L2 indices' daily bars over ~10 days,
+    keyed by layer_id. Uses `sw_daily` (note: returns `pct_change` not
+    `pct_chg`)."""
     out: dict[str, list[BoardSnapshot]] = {l.layer_id: [] for l in AI_LAYERS}
-    layer_lookup = board_to_layer()
+    layer_lookup = sector_to_layer()
     end = on_date.strftime("%Y%m%d")
     start = (on_date - dt.timedelta(days=history_days * 2 + 5)).strftime("%Y%m%d")
 
-    # Resolve names
-    try:
-        names_df = client.call("ths_index")
-        name_by_code = {r.ts_code: r.name for r in names_df.itertuples()}
-    except Exception:
-        name_by_code = {}
-
-    for code in all_tech_board_codes():
+    for code in all_tech_sector_codes():
         layer_id = layer_lookup.get(code)
         if layer_id is None:
             continue
+        name = sector_name(code)
         try:
-            df = client.call("ths_daily", ts_code=code, start_date=start, end_date=end)
+            df = client.call("sw_daily", ts_code=code, start_date=start, end_date=end)
         except Exception:
-            continue
+            df = None
         if df is None or df.empty:
             out[layer_id].append(BoardSnapshot(
-                ts_code=code, name=name_by_code.get(code, code), layer_id=layer_id,
+                ts_code=code, name=name, layer_id=layer_id,
                 close=None, pct_change=None, volume=None, turnover_rate=None,
                 trade_date=None,
             ))
@@ -72,10 +76,10 @@ def fetch_board_performance(
         latest = df.iloc[-1]
         snap = BoardSnapshot(
             ts_code=code,
-            name=name_by_code.get(code, str(latest.get("name", code))),
+            name=name,
             layer_id=layer_id,
             close=_f(latest.get("close")),
-            pct_change=_f(latest.get("pct_change")),
+            pct_change=_f(latest.get("pct_change")),  # sw_daily uses pct_change
             volume=_f(latest.get("vol")),
             turnover_rate=_f(latest.get("turnover_rate")),
             trade_date=_d(str(latest.get("trade_date"))),
@@ -96,7 +100,7 @@ class StockMover:
     amount: float | None         # 元
     turnover_rate: float | None
     layer_id: str | None
-    board_hits: list[str] = field(default_factory=list)  # which tech boards it belongs to
+    board_hits: list[str] = field(default_factory=list)  # which SW L2 sectors it belongs to
     limit_status: str | None = None      # 'U' / 'D' / 'Z' from limit_list_d
     moneyflow_net: float | None = None   # 主力资金净流入 (元)
     role: str | None = None              # 'leader' | 'mid' | 'breakout' | 'laggard' | 'limit_up'
@@ -104,9 +108,9 @@ class StockMover:
 
 def fetch_limit_up_tech(
     client: TuShareClient, *, on_date: dt.date,
-    tech_members: dict[str, set[str]],  # board_code -> set(stock ts_codes)
+    tech_members: dict[str, set[str]],  # sector_code -> set(stock ts_codes)
 ) -> list[StockMover]:
-    """Fetch limit-up list and tag tech-board members."""
+    """Fetch limit-up list and tag tech-sector members."""
     end = on_date.strftime("%Y%m%d")
     try:
         df = client.call("limit_list_d", trade_date=end)
@@ -115,9 +119,9 @@ def fetch_limit_up_tech(
     if df is None or df.empty:
         return []
     code_to_layers: dict[str, list[str]] = {}
-    layer_lookup = board_to_layer()
-    for board_code, members in tech_members.items():
-        layer_id = layer_lookup.get(board_code, "")
+    layer_lookup = sector_to_layer()
+    for sector_code, members in tech_members.items():
+        layer_id = layer_lookup.get(sector_code, "")
         for ts_code in members:
             code_to_layers.setdefault(ts_code, []).append(layer_id)
     movers: list[StockMover] = []
@@ -144,7 +148,7 @@ def fetch_top_movers_in_tech(
     tech_members: dict[str, set[str]],
     top_n: int = 30,
 ) -> list[StockMover]:
-    """Filter the day's `daily` table to tech-board members and return top movers."""
+    """Filter the day's `daily` table to tech-sector members and return top movers."""
     end = on_date.strftime("%Y%m%d")
     try:
         df = client.call("daily", trade_date=end)
@@ -152,16 +156,14 @@ def fetch_top_movers_in_tech(
         return []
     if df is None or df.empty:
         return []
-    # Build code->layers map
-    layer_lookup = board_to_layer()
+    layer_lookup = sector_to_layer()
     code_to_layer: dict[str, str] = {}
     code_to_boards: dict[str, list[str]] = {}
-    for board_code, members in tech_members.items():
-        layer_id = layer_lookup.get(board_code, "")
+    for sector_code, members in tech_members.items():
+        layer_id = layer_lookup.get(sector_code, "")
         for ts_code in members:
             code_to_layer.setdefault(ts_code, layer_id)
-            code_to_boards.setdefault(ts_code, []).append(board_code)
-    # Filter
+            code_to_boards.setdefault(ts_code, []).append(sector_code)
     df = df[df["ts_code"].isin(code_to_layer.keys())].copy()
     if df.empty:
         return []
@@ -200,42 +202,61 @@ def fetch_money_flow_top(
     return {r.ts_code: _f(r.net_mf_amount) for r in df.itertuples() if r.net_mf_amount is not None}
 
 
-# ─── Tech-board membership resolution ──────────────────────────────────────
+# ─── Tech-sector membership resolution (PIT via SW monthly snapshot) ───────
 
-def resolve_tech_members(client: TuShareClient) -> dict[str, set[str]]:
-    """For each curated tech THS board, fetch its members."""
-    out: dict[str, set[str]] = {}
-    for code in all_tech_board_codes():
+def resolve_tech_members(
+    client: TuShareClient,
+    engine: Engine | None = None,
+    *,
+    trade_date: dt.date | None = None,
+) -> dict[str, set[str]]:
+    """For each curated tech SW L2 sector, fetch its members from
+    `smartmoney.sw_member_monthly` at the snapshot_month corresponding
+    to `trade_date` (defaults to today). Point-in-time correct.
+
+    The `client` argument is unused (kept for backward-compat with old
+    THS-based callers); membership is resolved purely from the DB.
+    """
+    if engine is None:
+        # Lazy import so module can still be imported without DB config.
+        from ifa.core.db import get_engine
+        engine = get_engine()
+    if trade_date is None:
+        trade_date = dt.date.today()
+    snapshot_month = trade_date.replace(day=1)
+    codes = all_tech_sector_codes()
+    if not codes:
+        return {}
+    out: dict[str, set[str]] = {c: set() for c in codes}
+    sql = text("""
+        SELECT l2_code, ts_code
+          FROM smartmoney.sw_member_monthly
+         WHERE snapshot_month = :sm
+           AND l2_code = ANY(:codes)
+    """)
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(sql, {"sm": snapshot_month, "codes": codes}).all()
+    except Exception:
+        rows = []
+    for l2_code, ts_code in rows:
+        if l2_code in out and ts_code:
+            out[l2_code].add(str(ts_code))
+    # Fallback: if requested month has no rows, take most recent <= snapshot_month
+    if not any(out.values()):
         try:
-            df = client.call("ths_member", ts_code=code)
+            with engine.connect() as conn:
+                latest = conn.execute(text(
+                    "SELECT MAX(snapshot_month) FROM smartmoney.sw_member_monthly "
+                    "WHERE snapshot_month <= :sm"
+                ), {"sm": snapshot_month}).scalar()
+                if latest is not None and latest != snapshot_month:
+                    rows = conn.execute(sql, {"sm": latest, "codes": codes}).all()
+                    for l2_code, ts_code in rows:
+                        if l2_code in out and ts_code:
+                            out[l2_code].add(str(ts_code))
         except Exception:
-            continue
-        if df is None or df.empty:
-            continue
-        col = "code" if "code" in df.columns else ("con_code" if "con_code" in df.columns else None)
-        if col is None:
-            continue
-        members: set[str] = set()
-        for v in df[col].dropna().astype(str):
-            # ths_member returns codes like "300308" (without .SZ); we need the
-            # exchange suffix to match `daily.ts_code`. Heuristic: 6/3-prefix
-            # → SZ; 0/4-/9- → SH (for 60xxxx) or BJ (for 8/4); standard:
-            #   60xxxx / 68xxxx → SH
-            #   00xxxx / 30xxxx / 002xxx → SZ
-            #   8xxxxx / 4xxxxx → BJ
-            v = v.strip()
-            if not v:
-                continue
-            if "." in v:
-                members.add(v)
-            else:
-                if v.startswith(("60", "68")):
-                    members.add(f"{v}.SH")
-                elif v.startswith(("00", "30")):
-                    members.add(f"{v}.SZ")
-                elif v.startswith(("8", "4")):
-                    members.add(f"{v}.BJ")
-        out[code] = members
+            pass
     return out
 
 
@@ -284,7 +305,6 @@ def fetch_us_tech_overnight(client: TuShareClient, *, ref_date: dt.date) -> list
         row = df.iloc[-1]
         snap.close = _f(row.get("close"))
         snap.pct_change = _f(row.get("pct_change"))
-        # Fallback compute
         if snap.pct_change is None and len(df) >= 2:
             prev = _f(df.iloc[-2].get("close"))
             if prev and snap.close:
@@ -428,7 +448,6 @@ def enrich_focus(
                               pe=_f(getattr(db, "pe_ttm", None) or getattr(db, "pe", None)) if db else None,
                               pb=_f(getattr(db, "pb", None)) if db else None,
                               moneyflow_net=by_code_mf.get(spec.ts_code))
-        # history
         try:
             hd = client.call("daily", ts_code=spec.ts_code,
                              start_date=start_history, end_date=end)
@@ -447,7 +466,7 @@ def enrich_focus(
     return imp_snaps, reg_snaps
 
 
-# ─── A-share tech sector daily (SW industry) ──────────────────────────────
+# ─── A-share tech sector daily (SW L1, broad TMT reference) ───────────────
 
 SW_TECH_INDEXES: dict[str, str] = {
     "801080.SI": "电子",

@@ -69,7 +69,7 @@ from ifa.families.macro.data import (
 
 log = logging.getLogger(__name__)
 
-TEMPLATE_VERSION = "macro_morning_v0.1"
+TEMPLATE_VERSION = "macro_morning_v2.1.0"
 REPORT_FAMILY = "macro"
 REPORT_TYPE = "morning_long"
 SLOT = "morning"
