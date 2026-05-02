@@ -229,7 +229,7 @@ wheels = [
 
 [[package]]
 name = "ifa-claude"
-version = "2.1.1"
+version = "2.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

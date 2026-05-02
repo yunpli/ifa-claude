@@ -874,8 +874,8 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
         "sections": sections,
     }
     html = renderer.render(report=report)
-    out_root = settings.output_root / run.run_mode.value
-    out_root.mkdir(parents=True, exist_ok=True)
+    from ifa.core.report.output import output_dir_for_run
+    out_root = output_dir_for_run(settings, run)
     bjt_now = to_bjt(utc_now())
     fname = f"CN_tech_morning_{user}_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
     out_path = out_root / fname
