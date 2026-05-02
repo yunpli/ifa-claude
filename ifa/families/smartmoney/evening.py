@@ -1454,6 +1454,8 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings) -> Path:
     renderer = HtmlRenderer()
     cutoff_bjt_str = fmt_bjt(run.data_cutoff_at)
     generated_bjt_str = fmt_bjt(utc_now(), "%Y-%m-%d %H:%M")
+    # B9: badge is independent of run_mode; reads IFA_REPORT_RUN_BADGE env var first,
+    # then infers from pg_host (localhost → test), then falls back to run_mode value.
     report = {
         "title": f"中国 SmartMoney 晚盘报告 · {run.report_date.strftime('%Y年%m月%d日')}",
         "subtitle_en": "China A-Share Smart Money Evening Briefing — Lindenwood Management LLC",
@@ -1461,7 +1463,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings) -> Path:
         "data_cutoff_bjt": cutoff_bjt_str,
         "generated_at_bjt": generated_bjt_str,
         "template_version": TEMPLATE_VERSION,
-        "run_mode": run.run_mode.value,
+        "run_mode": settings.report_badge,
         "report_run_id_short": str(run.report_run_id)[:8],
         "sections": sections,
     }

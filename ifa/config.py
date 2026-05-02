@@ -79,6 +79,26 @@ class Settings(BaseSettings):
         """Pick the DB name based on the run mode (test → ifavr_test)."""
         return self.pg_db_test if self.run_mode == RunMode.test else self.pg_db_production
 
+    @property
+    def report_badge(self) -> str:
+        """Badge label shown in the HTML report header.
+
+        Priority:
+          1. IFA_REPORT_RUN_BADGE env var (explicit override)
+          2. DB host inference: localhost / 127.0.0.1 → 'test'; else 'production'
+          3. Falls back to IFA_RUN_MODE value
+
+        Decouples the visual badge from the DB profile — lets you run against
+        production data but still mark a report as 'manual', for example.
+        """
+        explicit = os.environ.get("IFA_REPORT_RUN_BADGE", "").strip().lower()
+        if explicit in ("test", "manual", "production"):
+            return explicit
+        local_hosts = {"localhost", "127.0.0.1", "::1"}
+        if self.pg_host.lower() in local_hosts:
+            return "test"
+        return self.run_mode.value
+
     def database_url(self, *, db: str | None = None, driver: str = "psycopg") -> str:
         name = db or self.active_database
         pwd = self.pg_password.get_secret_value()
