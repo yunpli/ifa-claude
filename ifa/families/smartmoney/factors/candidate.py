@@ -18,8 +18,8 @@ Filtering rules (P0 conservative):
     (sector role ∈ {主线, 中军, 轮动, 催化}).
   - Must not already be tagged as 龙头/中军/情绪先锋 by leader.py (those have
     already moved; we want the next layer down).
-  - Liquidity gate: amount >= candidate.min_amount (default 5e7 = 5000万).
-  - Market cap gate: circ_mv >= candidate.min_circ_mv (default 2e9 = 20亿).
+  - Liquidity gate: amount >= candidate.min_amount (default 50000 千元 = 5000万元).
+  - Market cap gate: circ_mv >= candidate.min_circ_mv (default 200000 万元 = 20亿元).
 
 补涨 score components (today only):
   - room_score   ── 1 − (pct_chg / 9.9), clipped to [0, 1]: how much room left

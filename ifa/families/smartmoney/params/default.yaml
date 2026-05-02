@@ -96,8 +96,8 @@ leader:
 
 # ── Candidate stock pool (used by candidate.py) ──────────────────────────────
 candidate:
-  min_amount: 50000000           # 5000 万 minimum trading amount
-  min_circ_mv: 2000000000        # 20 亿 minimum circulating market cap
+  min_amount: 50000              # 5000 万 minimum trading amount (raw_daily.amount 单位=千元)
+  min_circ_mv: 200000            # 20 亿 minimum circulating market cap (raw_daily_basic.circ_mv 单位=万元)
   fillers_per_sector: 3          # top 补涨 stocks per active sector
   trending_top_n: 15             # global top 趋势 stocks
 
