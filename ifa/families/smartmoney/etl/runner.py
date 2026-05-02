@@ -26,6 +26,7 @@ from ifa.core.tushare import TuShareClient
 
 from ..universe import MAIN_INDEXES, SW_L1_SEED
 from . import raw_fetchers as rf
+from .sector_flow_sw_l2 import aggregate_sector_flow_sw_for_date
 
 log = logging.getLogger(__name__)
 SCHEMA = "smartmoney"
@@ -168,6 +169,23 @@ def run_etl_for_date(
         _update_watermark(engine, table="raw_index_daily", trade_date=trade_date,
                           rows=n, run_mode=settings.run_mode)
         on_log(f"  [raw_index_daily] {n} rows in {elapsed:.1f}s")
+
+    # SW L2 sector moneyflow aggregation (depends on raw_moneyflow being loaded)
+    t0 = time.monotonic()
+    try:
+        n = aggregate_sector_flow_sw_for_date(engine, trade_date)
+        elapsed = time.monotonic() - t0
+        stats.tables.append(TableStats(table="sector_moneyflow_sw_daily",
+                                        rows_loaded=n, seconds=elapsed))
+        stats.total_rows += n
+        if n:
+            on_log(f"  [sector_moneyflow_sw_daily] {n} rows in {elapsed:.1f}s")
+    except Exception as exc:  # noqa: BLE001
+        elapsed = time.monotonic() - t0
+        stats.tables.append(TableStats(table="sector_moneyflow_sw_daily",
+                                        rows_loaded=0, seconds=elapsed,
+                                        error=f"{type(exc).__name__}: {exc}"))
+        on_log(f"  [sector_moneyflow_sw_daily] FAIL {exc}")
 
     # cyq_chips (per-stock; gated to active stocks; can be skipped during heavy backfill)
     if not skip_chips:
