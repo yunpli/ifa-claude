@@ -20,6 +20,7 @@
           <strong>{{ r.sector_name }}</strong>
           <span class="ifa-cycle-traj__src">{{ r.sector_source }}</span>
           {% if r.leader_name %}<span class="ifa-cycle-traj__leader">▶ {{ r.leader_name }}</span>{% endif %}
+          {% if r.cluster_name %}<span class="ifa-cycle-traj__cluster">◆ {{ r.cluster_name }}</span>{% endif %}
         </td>
         <td><span class="ifa-flow-table__tag tag-role" data-role="{{ r.role }}">{{ r.role }}</span></td>
         {% for ph in r.phase_history %}
@@ -55,6 +56,7 @@
 .ifa-cycle-traj__sector{min-width:140px;font-size:12.5px;}
 .ifa-cycle-traj__src{font-family:var(--font-mono);font-size:10px;color:var(--ink-muted);margin-left:4px;}
 .ifa-cycle-traj__leader{display:block;font-size:10.5px;color:var(--accent);font-weight:600;letter-spacing:0.02em;margin-top:1px;}
+.ifa-cycle-traj__cluster{display:block;font-size:10px;color:var(--ink-muted);letter-spacing:0.02em;margin-top:1px;font-style:italic;}
 .ifa-cycle-traj__cell{text-align:center;font-size:11.5px;font-weight:600;color:#fff;background:#94a3b8;border-radius:2px;padding:3px 4px;min-width:38px;letter-spacing:0.05em;}
 .ifa-cycle-traj__cell[data-phase='—']{background:transparent;color:var(--ink-muted);font-weight:400;}
 .ifa-cycle-traj__cell[data-phase='未识别']{background:#cbd5e1;color:var(--ink-muted);}

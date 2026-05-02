@@ -58,6 +58,13 @@ from ifa.core.report.run import (
 from ifa.families.macro.morning import _safe_chat_json
 
 from . import data, prompts
+from .llm_aug import (
+    concept_cluster as _aug_cc,
+    regime_classifier as _aug_rc,
+    hypothesis_grader as _aug_hg,
+    policy_polarity as _aug_pp,
+    counterfactual as _aug_cf,
+)
 from .data import (
     CandidateStock,
     CycleGridRow,
@@ -72,6 +79,18 @@ from .transition_matrix import PHASES, TransitionMatrixModel
 log = logging.getLogger(__name__)
 
 TEMPLATE_VERSION = "smartmoney_evening_v0.1"
+
+
+# ── LLM Aug context ───────────────────────────────────────────────────────────
+
+@dataclass
+class LLMAugContext:
+    """Pre-computed LLM augmentation results; each field is None on failure."""
+    regime: Any = None          # RegimeState from regime_classifier
+    clusters: Any = None        # list[ConceptCluster] from concept_cluster
+    policy: Any = None          # PolicyPolarity from policy_polarity
+    cf_analyses: Any = None     # list[CounterfactualAnalysis] from counterfactual
+    grader_summary: Any = None  # GraderSummary from hypothesis_grader
 REPORT_FAMILY = "smartmoney"
 REPORT_TYPE = "evening_long"
 SLOT = "evening"
@@ -94,6 +113,7 @@ class SMEveningCtx:
     cycle_trajectory: list[CycleTrajectoryRow]
     transition_model: TransitionMatrixModel | None
     pulse_series: dict[str, Any]
+    llm_aug: LLMAugContext
     target_pool: list[TomorrowTarget]
     structures: list[SectorStructureRow]
     candidates: list[CandidateStock]
@@ -225,6 +245,62 @@ def _svg_dual_line(
     )
 
 
+# ── LLM Aug runner ───────────────────────────────────────────────────────────
+
+def _run_llm_aug(
+    engine: Engine,
+    llm: "LLMClient",
+    trade_date: "dt.date",
+    on_log: "Callable[[str], None]",
+) -> LLMAugContext:
+    """Run all daily LLM aug modules; failures are isolated and logged.
+
+    backtest_forensics is excluded (requires an explicit backtest_run_id
+    and is only meaningful post-C4/C5; trigger it manually via CLI instead).
+    """
+    ctx = LLMAugContext()
+
+    # Ensure all tables exist (idempotent CREATE TABLE IF NOT EXISTS)
+    for mod in (_aug_rc, _aug_cc, _aug_pp, _aug_cf, _aug_hg):
+        try:
+            mod.ensure_table(engine)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[llm_aug] ensure_table %s failed: %s", mod.__name__, exc)
+
+    for name, runner, setter in [
+        ("regime_classifier",
+         lambda: _aug_rc.run_regime_classifier(
+             engine, trade_date=trade_date, llm_client=llm, on_log=on_log),
+         lambda r: setattr(ctx, "regime", r)),
+        ("concept_cluster",
+         lambda: _aug_cc.run_concept_cluster(
+             engine, trade_date=trade_date, llm_client=llm, on_log=on_log),
+         lambda r: setattr(ctx, "clusters", r)),
+        ("policy_polarity",
+         lambda: _aug_pp.run_policy_polarity(
+             engine, trade_date=trade_date, llm_client=llm, on_log=on_log),
+         lambda r: setattr(ctx, "policy", r)),
+        ("counterfactual",
+         lambda: _aug_cf.run_counterfactual(
+             engine, trade_date=trade_date, llm_client=llm, on_log=on_log),
+         lambda r: setattr(ctx, "cf_analyses", r)),
+        ("hypothesis_grader",
+         lambda: _aug_hg.run_hypothesis_grader(
+             engine, as_of_date=trade_date, llm_client=llm, on_log=on_log),
+         lambda r: setattr(ctx, "grader_summary", r.summary if hasattr(r, "summary") else r)),
+    ]:
+        try:
+            on_log(f"  [llm_aug] running {name}…")
+            result = runner()
+            setter(result)
+            on_log(f"  [llm_aug] {name} done")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[llm_aug] %s failed: %s", name, exc)
+            on_log(f"  [llm_aug] {name} FAILED: {exc}")
+
+    return ctx
+
+
 # ── Section builders ─────────────────────────────────────────────────────────
 
 # ─── E1: Tone card ────────────────────────────────────────────────────────────
@@ -251,11 +327,36 @@ def _build_e1_tone(ctx: SMEveningCtx) -> dict:
         for st in ctx.structures[:5]
     ) or "  (无活跃板块结构数据)"
 
+    # B7: inject regime + cluster context if available
+    aug_bloc = ""
+    if ctx.llm_aug.regime:
+        r = ctx.llm_aug.regime
+        aug_bloc += (
+            f"\n=== 市场体制（LLM 推断）===\n"
+            f"体制标签: {r.regime_label}  置信度: {r.confidence:.2f}  "
+            f"转换风险: {r.transition_risk}\n"
+            f"{r.regime_narrative}\n"
+        )
+    if ctx.llm_aug.clusters:
+        top_cl = sorted(ctx.llm_aug.clusters, key=lambda c: c.composite_score_avg, reverse=True)[:3]
+        cl_lines = "\n".join(
+            f"  - {c.cluster_name} ({c.momentum_signal}): {c.narrative[:80]}…"
+            for c in top_cl
+        )
+        aug_bloc += f"\n=== 主题概念聚类（Top 3）===\n{cl_lines}\n"
+    if ctx.llm_aug.policy:
+        p = ctx.llm_aug.policy
+        aug_bloc += (
+            f"\n=== 政策极性 ===\n"
+            f"政策立场: {p.policy_stance}  置信度: {p.confidence:.2f}\n"
+            f"{p.polarity_narrative[:120]}…\n"
+        )
+
     user = f"""
 === 今日报告 ===
 报告日期: {ctx.run.report_date} (北京时间)
 slot: {SLOT}
-
+{aug_bloc}
 === 市场水位 ===
 总成交额 {_fmt_amt(ctx.pulse.total_amount)}; 10 日均 {_fmt_amt(ctx.pulse.amount_10d_avg)};
 60 日分位 {ctx.pulse.amount_percentile_60d:.2f};
@@ -339,6 +440,11 @@ def _build_e2_pulse(ctx: SMEveningCtx) -> dict:
         "mini_chart_dates": [d.strftime("%m-%d") for d in series_dates],
         "mini_chart_amount_today": amt_series[-1] if amt_series else None,
         "mini_chart_north_today": north_series[-1] if north_series else None,
+        # B7: regime aug
+        "regime_label": ctx.llm_aug.regime.regime_label if ctx.llm_aug.regime else None,
+        "regime_confidence": round(ctx.llm_aug.regime.confidence, 2) if ctx.llm_aug.regime else None,
+        "regime_transition_risk": ctx.llm_aug.regime.transition_risk if ctx.llm_aug.regime else None,
+        "regime_narrative": ctx.llm_aug.regime.regime_narrative if ctx.llm_aug.regime else None,
     }
     return {
         "key": "smartmoney_evening.e2_pulse", "title": "市场资金水位",
@@ -622,6 +728,14 @@ def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
             if stocks and sn not in leader_by_name:
                 leader_by_name[sn] = stocks[0]["name"]
 
+    # B7: build sector_name → cluster_name lookup from concept_cluster aug
+    sector_to_cluster: dict[str, str] = {}
+    if ctx.llm_aug.clusters:
+        for cl in ctx.llm_aug.clusters:
+            for m in (cl.members or []):
+                if m.sector_name:
+                    sector_to_cluster[m.sector_name] = cl.cluster_name
+
     rows: list[dict[str, Any]] = []
     for traj in ctx.cycle_trajectory:
         # Predict next phase using B5 transition matrix
@@ -650,6 +764,7 @@ def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
             "leader_name": leader_by_name.get(traj.sector_name, ""),
             "heat_score": round(traj.heat_score, 3) if traj.heat_score is not None else None,
             "next_top": next_top,
+            "cluster_name": sector_to_cluster.get(traj.sector_name, ""),  # B7
         })
 
     trade_dates_disp = [td.strftime("%m-%d") for td in (ctx.cycle_trajectory[0].trade_dates if ctx.cycle_trajectory else [])]
@@ -880,6 +995,28 @@ def _build_e11_strategy(ctx: SMEveningCtx) -> dict:
     ) or "(无活跃周期)"
     flow_in_top = ", ".join(s.sector_name for s in ctx.flow_in[:5]) or "(无)"
 
+    # B7: policy polarity + regime context for strategy prompt
+    policy_bloc = ""
+    if ctx.llm_aug.policy:
+        p = ctx.llm_aug.policy
+        impl_str = "; ".join(
+            f"{si.sector_name}={si.direction}" for si in (p.sector_implications or [])[:4]
+        )
+        policy_bloc = (
+            f"\n=== 政策极性（LLM推断）===\n"
+            f"立场={p.policy_stance}  置信={p.confidence:.2f}\n"
+            f"{p.polarity_narrative}\n"
+            f"板块含义: {impl_str or '无'}\n"
+            f"推荐倾向: {p.recommended_tilt}\n"
+        )
+    if ctx.llm_aug.regime:
+        r = ctx.llm_aug.regime
+        policy_bloc += (
+            f"\n=== 市场体制 ===\n"
+            f"体制={r.regime_label}  转换风险={r.transition_risk}  "
+            f"持续估计={r.regime_duration_est}天\n"
+        )
+
     user = f"""
 === 市场水位 ===
 {market_blob}
@@ -895,7 +1032,7 @@ def _build_e11_strategy(ctx: SMEveningCtx) -> dict:
 
 === 资金流入 Top ===
 {flow_in_top}
-
+{policy_bloc}
 === 任务 ===
 {prompts.STRATEGY_VIEW_INSTRUCTIONS}
 
@@ -1068,10 +1205,17 @@ def _build_e13_review(ctx: SMEveningCtx) -> dict:
                 "lesson": r.get("lesson", ""),
             })
 
+    # B7: append hypothesis_grader accuracy stats if available
+    grader_stats = None
+    if ctx.llm_aug.grader_summary is not None:
+        gs = ctx.llm_aug.grader_summary
+        grader_stats = gs.to_dict() if hasattr(gs, "to_dict") else gs
+
     return {
         "key": "smartmoney_evening.e13_review", "title": "昨日假设复盘",
         "order": 13, "type": "review_table",
-        "content_json": {"rows": rows, "summary": summary_text},
+        "content_json": {"rows": rows, "summary": summary_text,
+                         "grader_stats": grader_stats},
         "prompt_name": "smartmoney_evening.hypothesis_review",
         "model_output_id": moid,
     }
@@ -1193,12 +1337,17 @@ def run_smartmoney_evening(
             on_log(f"  ⚠️ transition_matrix.fit failed: {exc}")
             transition_model = None
 
+        # B7: run LLM aug modules (all isolated — failures don't abort the report)
+        on_log("running LLM aug modules…")
+        llm_aug = _run_llm_aug(engine, llm, used_td, on_log)
+
         ctx = SMEveningCtx(
             engine=engine, llm=llm, run=run,
             pulse=pulse, flow_in=flow_in, flow_out=flow_out,
             quality=quality, crowded=crowded, cycle_rows=cycle_rows,
             cycle_trajectory=cycle_trajectory, transition_model=transition_model,
             pulse_series=pulse_series,
+            llm_aug=llm_aug,
             target_pool=target_pool, structures=structures, candidates=candidates,
             yesterday_hypotheses=yesterday, today_outcome=outcome,
             used_trade_date=used_td, on_log=on_log,

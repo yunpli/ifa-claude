@@ -25,4 +25,19 @@
   {% else %}
   <div class="ifa-empty">{{ c.fallback_text or '今日无早盘判断需要复盘。' }}</div>
   {% endif %}
+  {% if c.grader_stats and c.grader_stats.graded > 0 %}
+  <div class="ifa-grader-stats">
+    <span class="ifa-grader-stats__lbl">假设评分器（B7）</span>
+    <span>已评: <strong>{{ c.grader_stats.graded }}</strong></span>
+    <span class="up">正确: {{ c.grader_stats.correct }}</span>
+    <span>部分: {{ c.grader_stats.partial }}</span>
+    <span class="down">错误: {{ c.grader_stats.incorrect }}</span>
+    <span>准确率: <strong>{{ '%.0f'|format((c.grader_stats.accuracy or 0)*100) }}%</strong></span>
+    <span>带分准确率: <strong>{{ '%.0f'|format((c.grader_stats.partial_credit or 0)*100) }}%</strong></span>
+  </div>
+  {% endif %}
 </section>
+<style>
+.ifa-grader-stats{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:10px;padding:8px 14px;background:var(--paper-tint);border:1px solid var(--rule);font-size:12px;color:var(--ink-2);}
+.ifa-grader-stats__lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;color:var(--ink-muted);margin-right:4px;}
+</style>
