@@ -76,6 +76,21 @@ class CycleGridRow:
 
 
 @dataclass
+class CycleTrajectoryRow:
+    """One sector's cycle-phase trajectory over the last N trading days."""
+    sector_code: str
+    sector_source: str
+    sector_name: str
+    role: str
+    role_confidence: str | None
+    current_phase: str
+    phase_history: list[str]              # length = n_days, oldest → newest (=today)
+    trade_dates: list[dt.date]            # parallel to phase_history
+    leader_name: str | None = None
+    heat_score: float | None = None
+
+
+@dataclass
 class TomorrowTarget:
     """A sector picked as a tomorrow-watch candidate."""
     sector_code: str
@@ -439,6 +454,98 @@ def load_cycle_grid(
         )
         for r in rows
     ]
+
+
+def load_cycle_trajectory(
+    engine: Engine,
+    trade_date: dt.date,
+    *,
+    n_days: int = 5,
+    top_n: int = 18,
+    sources: tuple[str, ...] = ("sw_l2", "sw", "dc"),
+) -> list[CycleTrajectoryRow]:
+    """Per-sector cycle-phase history over the last n_days trade dates.
+
+    Selects the top_n active sectors (role ∈ {主线/中军/轮动/催化}) ranked by
+    today's heat_score, then loads each one's phase on each of the last
+    n_days trading days (oldest → newest, today inclusive).
+    """
+    placeholders = ", ".join(f"'{s}'" for s in sources)
+
+    # 1. Pick active sectors today, ordered by heat
+    pick_sql = text(f"""
+        SELECT ss.sector_code, ss.sector_source, ss.sector_name,
+               ss.role, ss.role_confidence, ss.cycle_phase,
+               fd.heat_score
+        FROM {SCHEMA}.sector_state_daily ss
+        JOIN {SCHEMA}.factor_daily fd
+              ON fd.sector_code = ss.sector_code
+             AND fd.sector_source = ss.sector_source
+             AND fd.trade_date = ss.trade_date
+        WHERE ss.trade_date = :d
+          AND ss.role IN ('主线','中军','轮动','催化')
+          AND ss.sector_source IN ({placeholders})
+          AND ss.cycle_phase NOT IN ('未识别','冷')
+        ORDER BY fd.heat_score DESC NULLS LAST
+        LIMIT :n
+    """)
+    with engine.connect() as conn:
+        active = conn.execute(pick_sql, {"d": trade_date, "n": top_n}).fetchall()
+    if not active:
+        return []
+
+    # 2. The N trade dates we'll show: today + n_days-1 prior trading days
+    cal_sql = text(f"""
+        SELECT DISTINCT trade_date
+        FROM {SCHEMA}.sector_state_daily
+        WHERE trade_date <= :d
+        ORDER BY trade_date DESC
+        LIMIT :n
+    """)
+    with engine.connect() as conn:
+        cal_rows = conn.execute(cal_sql, {"d": trade_date, "n": n_days}).fetchall()
+    trade_dates: list[dt.date] = sorted(r[0] for r in cal_rows)
+    if not trade_dates:
+        return []
+
+    # 3. Bulk load phase per (sector, date) for selected sectors over the window
+    sector_keys = [(r[0], r[1]) for r in active]
+    codes = list({k[0] for k in sector_keys})
+    srcs = list({k[1] for k in sector_keys})
+    hist_sql = text(f"""
+        SELECT trade_date, sector_code, sector_source, cycle_phase
+        FROM {SCHEMA}.sector_state_daily
+        WHERE trade_date >= :start
+          AND trade_date <= :end
+          AND sector_code = ANY(:codes)
+          AND sector_source = ANY(:srcs)
+    """)
+    with engine.connect() as conn:
+        hist_rows = conn.execute(hist_sql, {
+            "start": trade_dates[0], "end": trade_dates[-1],
+            "codes": codes, "srcs": srcs,
+        }).fetchall()
+    phase_map: dict[tuple[str, str, dt.date], str] = {
+        (r[1], r[2], r[0]): (r[3] or "未识别") for r in hist_rows
+    }
+
+    out: list[CycleTrajectoryRow] = []
+    for r in active:
+        code, src = r[0], r[1]
+        history = [phase_map.get((code, src, td), "—") for td in trade_dates]
+        out.append(CycleTrajectoryRow(
+            sector_code=code,
+            sector_source=src,
+            sector_name=r[2] or "",
+            role=r[3] or "未识别",
+            role_confidence=r[4],
+            current_phase=r[5] or "未识别",
+            phase_history=history,
+            trade_dates=list(trade_dates),
+            leader_name=None,
+            heat_score=float(r[6]) if r[6] is not None else None,
+        ))
+    return out
 
 
 def load_tomorrow_target_pool(

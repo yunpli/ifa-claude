@@ -61,11 +61,13 @@ from . import data, prompts
 from .data import (
     CandidateStock,
     CycleGridRow,
+    CycleTrajectoryRow,
     MarketPulse,
     SectorFlowRow,
     SectorStructureRow,
     TomorrowTarget,
 )
+from .transition_matrix import PHASES, TransitionMatrixModel
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +91,8 @@ class SMEveningCtx:
     quality: list[SectorFlowRow]
     crowded: list[SectorFlowRow]
     cycle_rows: list[CycleGridRow]
+    cycle_trajectory: list[CycleTrajectoryRow]
+    transition_model: TransitionMatrixModel | None
     target_pool: list[TomorrowTarget]
     structures: list[SectorStructureRow]
     candidates: list[CandidateStock]
@@ -461,43 +465,66 @@ def _build_e6_crowding(ctx: SMEveningCtx) -> dict:
 # ─── E7: Cycle grid ──────────────────────────────────────────────────────────
 
 def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
-    # Build leader lookup: sector_name → leader name (from structures, match by name)
+    """7×N phase-trajectory matrix with next-day transition probabilities.
+
+    Each row is one active sector; columns are the last N trading days plus
+    a 『下个交易日』 prediction column populated from the B5 transition matrix.
+    """
+    # Leader lookup: sector_name → leader stock name (best effort)
     leader_by_name: dict[str, str] = {}
     for st in ctx.structures:
         top = (st.leader or st.vanguard or
                (st.core_troops[0] if st.core_troops else None))
         if top and st.sector_name:
             leader_by_name[st.sector_name] = top.get("name", "")
-
-    # Also annotate cycle sectors that aren't in structures, using kpl fallback
-    cycle_sector_names = [c.sector_name for c in ctx.cycle_rows
-                          if c.sector_name not in leader_by_name]
-    if cycle_sector_names and ctx.used_trade_date:
+    trajectory_names = [t.sector_name for t in ctx.cycle_trajectory
+                         if t.sector_name not in leader_by_name]
+    if trajectory_names and ctx.used_trade_date:
         from .data import _load_kpl_stocks_for_sectors
-        kpl_map = _load_kpl_stocks_for_sectors(ctx.engine, ctx.used_trade_date, cycle_sector_names)
+        kpl_map = _load_kpl_stocks_for_sectors(ctx.engine, ctx.used_trade_date, trajectory_names)
         for sn, stocks in kpl_map.items():
             if stocks and sn not in leader_by_name:
                 leader_by_name[sn] = stocks[0]["name"]
 
-    rows = [
-        {
-            "sector_name": c.sector_name,
-            "sector_source": c.sector_source,
-            "role": c.role, "cycle_phase": c.cycle_phase,
-            "role_confidence": c.role_confidence,
-            "phase_confidence": c.phase_confidence,
-            "heat_score": round(c.heat_score, 3) if c.heat_score is not None else None,
-            "persistence_score": round(c.persistence_score, 3) if c.persistence_score is not None else None,
-            "crowding_score": round(c.crowding_score, 3) if c.crowding_score is not None else None,
-            "leader_name": leader_by_name.get(c.sector_name, ""),
-        }
-        for c in ctx.cycle_rows
-    ]
+    rows: list[dict[str, Any]] = []
+    for traj in ctx.cycle_trajectory:
+        # Predict next phase using B5 transition matrix
+        next_top: list[dict[str, Any]] = []
+        if ctx.transition_model is not None:
+            pred = ctx.transition_model.predict(
+                sector_code=traj.sector_code,
+                sector_source=traj.sector_source,
+                current_phase=traj.current_phase,
+            )
+            ranked = sorted(pred.distribution.items(), key=lambda kv: -kv[1])
+            for phase, prob in ranked[:3]:
+                if prob > 0.005:  # filter near-zero noise
+                    next_top.append({
+                        "phase": phase,
+                        "prob": round(prob, 3),
+                        "prob_pct": round(prob * 100, 1),
+                    })
+
+        rows.append({
+            "sector_name": traj.sector_name,
+            "sector_source": traj.sector_source,
+            "role": traj.role,
+            "current_phase": traj.current_phase,
+            "phase_history": traj.phase_history,
+            "leader_name": leader_by_name.get(traj.sector_name, ""),
+            "heat_score": round(traj.heat_score, 3) if traj.heat_score is not None else None,
+            "next_top": next_top,
+        })
+
+    trade_dates_disp = [td.strftime("%m-%d") for td in (ctx.cycle_trajectory[0].trade_dates if ctx.cycle_trajectory else [])]
+
     return {
-        "key": "smartmoney_evening.e7_cycle", "title": "板块情绪周期一览",
+        "key": "smartmoney_evening.e7_cycle", "title": "板块情绪周期轨迹",
         "order": 7, "type": "sm_cycle_grid",
         "content_json": {
-            "intro": "冷 → 点火 → 确认 → 扩散 → 高潮 → 分歧 → 退潮。仅展示活跃阶段（非『冷』/『未识别』）。",
+            "intro": "活跃板块过去 N 个交易日的相位轨迹；最右列为下个交易日的转移概率（B5 经验矩阵 + 板块 Bayes 后验）。",
+            "phases": PHASES,
+            "trade_dates_disp": trade_dates_disp,
             "rows": rows,
             "fallback_text": "今日无活跃情绪周期信号。",
         },
@@ -899,16 +926,27 @@ def run_smartmoney_evening(
         quality = data.load_quality_flows(engine, used_td, top_n=8)
         crowded = data.load_crowded_sectors(engine, used_td, top_n=6)
         cycle_rows = data.load_cycle_grid(engine, used_td, top_n=25)
+        cycle_trajectory = data.load_cycle_trajectory(engine, used_td, n_days=5, top_n=18)
         target_pool = data.load_tomorrow_target_pool(engine, used_td, top_n=8)
         structures = data.load_sector_structures(engine, used_td, top_n_sectors=6)
         candidates = data.load_candidate_pool(engine, used_td, fillers_n=12, trending_n=12)
         yesterday = data.load_yesterday_hypotheses(engine, report_date=report_date)
         outcome = data.load_today_outcome_for_review(engine, used_td)
 
+        # Fit the B5 transition matrix once for reuse across §07 predictions
+        try:
+            transition_model = TransitionMatrixModel.fit(
+                engine, lookback_days=180, end_date=used_td,
+            )
+        except Exception as exc:  # noqa: BLE001
+            on_log(f"  ⚠️ transition_matrix.fit failed: {exc}")
+            transition_model = None
+
         ctx = SMEveningCtx(
             engine=engine, llm=llm, run=run,
             pulse=pulse, flow_in=flow_in, flow_out=flow_out,
             quality=quality, crowded=crowded, cycle_rows=cycle_rows,
+            cycle_trajectory=cycle_trajectory, transition_model=transition_model,
             target_pool=target_pool, structures=structures, candidates=candidates,
             yesterday_hypotheses=yesterday, today_outcome=outcome,
             used_trade_date=used_td, on_log=on_log,
