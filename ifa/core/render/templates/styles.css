@@ -16,10 +16,10 @@
   --accent:     #8a1c20;        /* deep institutional crimson */
   --accent-2:   #c4892a;        /* heritage gold */
   --accent-soft:#fbf3f4;
-  --up:         #166534;
-  --down:       #991b1b;
-  --up-soft:    #ecfdf5;
-  --down-soft:  #fef2f2;
+  --up:         #991b1b;        /* 涨 = 红（中国惯例） */
+  --down:       #166534;        /* 跌 = 绿（中国惯例） */
+  --up-soft:    #fef2f2;
+  --down-soft:  #ecfdf5;
 
   --font-serif: "Source Serif 4", "Charter", "Iowan Old Style", "Source Serif Pro",
                 "Times New Roman", "Songti SC", "STZhongsong", serif;
