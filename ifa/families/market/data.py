@@ -103,7 +103,7 @@ def fetch_breadth(client: TuShareClient, *, on_date: dt.date) -> BreadthSnap:
     try:
         df = client.call("daily", trade_date=end)
         if df is not None and not df.empty:
-            snap.total_amount = float(df["amount"].sum()) / 1e8 / 1e4   # 千元→亿→万亿
+            snap.total_amount = float(df["amount"].sum()) / 1e5 / 1e4   # 千元→亿→万亿 (1万亿=1e9千元)
             snap.up_count = int((df["pct_chg"] > 0).sum())
             snap.down_count = int((df["pct_chg"] < 0).sum())
             snap.flat_count = int((df["pct_chg"] == 0).sum())
@@ -116,7 +116,7 @@ def fetch_breadth(client: TuShareClient, *, on_date: dt.date) -> BreadthSnap:
         try:
             df_prev = client.call("daily", trade_date=prev_end)
             if df_prev is not None and not df_prev.empty:
-                snap.total_amount_prev = float(df_prev["amount"].sum()) / 1e8 / 1e4
+                snap.total_amount_prev = float(df_prev["amount"].sum()) / 1e5 / 1e4
                 break
         except Exception:
             continue

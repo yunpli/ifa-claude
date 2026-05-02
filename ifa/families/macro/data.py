@@ -430,7 +430,7 @@ def fetch_market_day(client: TuShareClient, *, on_date: dt.date) -> MarketDay:
     try:
         df = client.call("daily", trade_date=end)
         if df is not None and not df.empty:
-            md.total_amount = float(df["amount"].sum()) / 1e8 / 1e4  # 千元→亿→万亿
+            md.total_amount = float(df["amount"].sum()) / 1e5 / 1e4  # 千元→亿→万亿 (1万亿=1e9千元)
             md.up_count = int((df["pct_chg"] > 0).sum())
             md.down_count = int((df["pct_chg"] < 0).sum())
             md.flat_count = int((df["pct_chg"] == 0).sum())
@@ -440,7 +440,7 @@ def fetch_market_day(client: TuShareClient, *, on_date: dt.date) -> MarketDay:
         prev_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d")
         df_prev = client.call("daily", trade_date=prev_end)
         if df_prev is not None and not df_prev.empty:
-            md.total_amount_prev = float(df_prev["amount"].sum()) / 1e8 / 1e4
+            md.total_amount_prev = float(df_prev["amount"].sum()) / 1e5 / 1e4
     except Exception:
         pass
 
