@@ -23,6 +23,10 @@ app.add_typer(generate_app, name="generate")
 from ifa.cli.smartmoney import app as sm_app  # noqa: E402
 app.add_typer(sm_app, name="smartmoney")
 
+# Ningbo short-term strategy module (independent from SmartMoney)
+from ifa.cli.ningbo import app as ningbo_app  # noqa: E402
+app.add_typer(ningbo_app, name="ningbo")
+
 
 if __name__ == "__main__":
     app()
