@@ -1,7 +1,7 @@
 {% set c = s.content_json %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
-  <p class="ifa-section__intro">蓄势待发候选——板块强势但个股尚未充分表现的观察对象。仅供盘中观察 / 验证假设使用，不构成买卖建议。</p>
+  <p class="ifa-section__intro">蓄势待发候选——板块强势但个股尚未充分表现的观察对象。仅供盘中观察 / 验证假设使用，不构成买卖建议。<em>⚠ 所有标的：样本较小，需配合主板块共振验证；ML 预测基于 SW L2 板块因子，不构成投资建议。</em></p>
   {% if c.pools %}
     {% for pool in c.pools %}
     <div class="ifa-cand-pool" data-pool="{{ pool.label }}">
@@ -25,7 +25,6 @@
           <div class="ifa-cand-card__row"><span class="ifa-cand-card__lbl">蓄势逻辑</span><span>{{ r.setup_logic or '—' }}</span></div>
           <div class="ifa-cand-card__row up"><span class="ifa-cand-card__lbl">触发条件</span><span>{{ r.trigger_condition or '—' }}</span></div>
           <div class="ifa-cand-card__row down"><span class="ifa-cand-card__lbl">失效条件</span><span>{{ r.failure_condition or '—' }}</span></div>
-          <div class="ifa-cand-card__row"><span class="ifa-cand-card__lbl">风险</span><span>{{ r.risk_note or '—' }}</span></div>
           <div class="ifa-cand-card__strength">信号强度 · {{ r.signal_strength or '—' }}</div>
         </div>
         {% endfor %}

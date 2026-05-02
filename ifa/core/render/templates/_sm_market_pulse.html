@@ -21,9 +21,6 @@
   <div class="ifa-pulse-mini">
     <div class="ifa-pulse-mini__title">10 日资金面水位（成交 vs 北向）</div>
     <div class="ifa-pulse-mini__svg">{{ c.mini_chart_svg | safe }}</div>
-    <div class="ifa-pulse-mini__axis">
-      {% for d in c.mini_chart_dates %}<span>{{ d }}</span>{% endfor %}
-    </div>
   </div>
   {% endif %}
   <div class="ifa-pulse-grid">

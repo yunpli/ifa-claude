@@ -167,108 +167,136 @@ def _svg_dual_line(
     *,
     series_a: list[float],
     series_b: list[float],
-    width: int = 420,
-    height: int = 90,
+    dates: list[str] | None = None,
+    width: int = 460,
+    height: int = 115,
     color_a: str = "#1d4ed8",
     color_b: str = "#c2410c",
     label_a: str = "成交(亿)",
     label_b: str = "北向(亿)",
 ) -> str:
-    """Inline SVG for two series with independent dual Y-axes.
+    """Inline SVG — dual Y-axes with date labels positioned at exact data-point x-coords.
 
-    Left axis: series_a (成交额).  Right axis: series_b (北向资金).
-    Each series is independently min-max normalized; axis tick labels show
-    actual values at min/mid/max on the respective left/right sides.
+    Left Y-axis: series_a (成交额).   Right Y-axis: series_b (北向资金).
+    X-axis: date labels rendered inside SVG directly below each data point so
+    they are always in perfect alignment regardless of data density.
     """
-    if not series_a or len(series_a) < 2:
+    n = len(series_a)
+    if n < 2:
         return ""
 
-    # Layout constants
-    left_pad = 52    # left axis labels
-    right_pad = 52   # right axis labels
-    top_pad = 18     # legend
-    bottom_pad = 6
-    inner_w = width - left_pad - right_pad
-    inner_h = height - top_pad - bottom_pad
     font = "-apple-system,BlinkMacSystemFont,sans-serif"
 
-    def _normalize(series: list[float]) -> tuple[list[tuple[float, float]], float, float]:
+    # Padding: left for 成交 ticks + label; right for 北向 ticks + label; bottom for dates
+    left_pad = 56
+    right_pad = 56
+    top_pad = 22     # legend + top margin
+    bottom_pad = 20  # x-axis date labels
+    inner_w = width - left_pad - right_pad
+    inner_h = height - top_pad - bottom_pad
+
+    def _pts(series: list[float]) -> tuple[list[tuple[float, float]], float, float]:
         smin, smax = min(series), max(series)
         rng = (smax - smin) or 1.0
         pts = []
         for i, v in enumerate(series):
-            x = left_pad + inner_w * i / (len(series) - 1)
+            x = left_pad + inner_w * i / (n - 1)
             y = top_pad + inner_h * (1.0 - (v - smin) / rng)
             pts.append((x, y))
         return pts, smin, smax
 
-    pts_a, a_min, a_max = _normalize(series_a)
-    pts_b, b_min, b_max = (_normalize(series_b) if series_b and len(series_b) == len(series_a)
-                           else ([], 0.0, 0.0))
+    pts_a, a_min, a_max = _pts(series_a)
+    has_b = bool(series_b and len(series_b) == n)
+    pts_b, b_min, b_max = _pts(series_b) if has_b else ([], 0.0, 0.0)
 
-    def _path_str(pts: list[tuple[float, float]]) -> str:
+    def _path(pts: list[tuple[float, float]]) -> str:
         return "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
 
-    def _circles(pts: list[tuple[float, float]], color: str, r: float = 1.8) -> str:
-        return "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r}" fill="{color}"/>' for x, y in pts)
+    def _dots(pts: list[tuple[float, float]], color: str) -> str:
+        return "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="2" fill="{color}"/>'
+                       for x, y in pts)
 
-    def _y_ticks(y_min: float, y_max: float, x_pos: float, color: str,
-                  anchor: str = "end") -> str:
-        mid = (y_min + y_max) / 2
-        ticks = [(y_min, top_pad + inner_h), (mid, top_pad + inner_h / 2), (y_max, top_pad)]
+    def _yticks(vmin: float, vmax: float, x: float, color: str, anchor: str) -> str:
         out = ""
-        for val, y_svg in ticks:
-            fmt = f"{val:,.0f}" if abs(val) >= 100 else f"{val:+.0f}" if y_min < 0 else f"{val:.0f}"
-            out += (f'<text x="{x_pos:.1f}" y="{y_svg + 3:.1f}" '
-                    f'fill="{color}" text-anchor="{anchor}" '
-                    f'font-family="{font}" font-size="9">{fmt}</text>')
+        for v, frac in [(vmax, 0.0), ((vmin + vmax) / 2, 0.5), (vmin, 1.0)]:
+            y = top_pad + inner_h * frac
+            fmt = f"{v:,.0f}" if abs(v) >= 100 else (f"{v:+.1f}" if vmin < 0 else f"{v:.1f}")
+            out += (f'<text x="{x:.1f}" y="{y + 3:.1f}" fill="{color}" '
+                    f'font-family="{font}" font-size="8.5" text-anchor="{anchor}">{fmt}</text>')
         return out
 
-    # Grid line at y-midpoint
-    grid_y = top_pad + inner_h / 2
-    grid = f'<line x1="{left_pad}" y1="{grid_y:.1f}" x2="{left_pad + inner_w}" y2="{grid_y:.1f}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3,2"/>'
+    # Axis ticks
+    left_ticks = _yticks(a_min, a_max, left_pad - 4, color_a, "end")
+    right_ticks = _yticks(b_min, b_max, left_pad + inner_w + 4, color_b, "start") if has_b else ""
 
-    # Left axis ticks (series_a)
-    left_ticks = _y_ticks(a_min, a_max, left_pad - 3, color_a, anchor="end")
-
-    # Right axis ticks (series_b)
-    right_ticks = ""
-    if pts_b:
-        right_ticks = _y_ticks(b_min, b_max, left_pad + inner_w + 3, color_b, anchor="start")
+    # Left/right Y-axis label (rotated)
+    ym = top_pad + inner_h / 2
+    left_label = (f'<text x="8" y="{ym:.1f}" fill="{color_a}" font-family="{font}" '
+                  f'font-size="8.5" text-anchor="middle" '
+                  f'transform="rotate(-90 8 {ym:.1f})">{label_a}</text>')
+    right_label = ""
+    if has_b:
+        rx_lbl = width - 8
+        right_label = (f'<text x="{rx_lbl}" y="{ym:.1f}" fill="{color_b}" font-family="{font}" '
+                       f'font-size="8.5" text-anchor="middle" '
+                       f'transform="rotate(90 {rx_lbl} {ym:.1f})">{label_b}</text>')
 
     # Axis lines
-    axis_left = (f'<line x1="{left_pad}" y1="{top_pad}" x2="{left_pad}" y2="{top_pad + inner_h}" '
-                 f'stroke="{color_a}" stroke-width="1" opacity="0.4"/>')
-    axis_right = ""
-    if pts_b:
+    ax_l = (f'<line x1="{left_pad}" y1="{top_pad}" x2="{left_pad}" y2="{top_pad + inner_h}" '
+            f'stroke="{color_a}" stroke-width="0.8" opacity="0.5"/>')
+    ax_r = ""
+    if has_b:
         rx = left_pad + inner_w
-        axis_right = (f'<line x1="{rx}" y1="{top_pad}" x2="{rx}" y2="{top_pad + inner_h}" '
-                      f'stroke="{color_b}" stroke-width="1" opacity="0.4"/>')
+        ax_r = (f'<line x1="{rx}" y1="{top_pad}" x2="{rx}" y2="{top_pad + inner_h}" '
+                f'stroke="{color_b}" stroke-width="0.8" opacity="0.5"/>')
 
-    # Legend at top
+    # Horizontal grid line at midpoint
+    gy = top_pad + inner_h / 2
+    grid = (f'<line x1="{left_pad}" y1="{gy:.1f}" x2="{left_pad + inner_w}" y2="{gy:.1f}" '
+            f'stroke="#e2e8f0" stroke-width="0.8" stroke-dasharray="3,2"/>')
+
+    # X-axis date labels — positioned at EXACT x-coordinate of each data point
+    x_labels = ""
+    if dates and len(dates) == n:
+        # Show every other label if crowded (n > 8)
+        step = 2 if n > 8 else 1
+        for i, (dx, _) in enumerate(pts_a):
+            if i % step == 0 or i == n - 1:
+                x_labels += (
+                    f'<text x="{dx:.1f}" y="{top_pad + inner_h + 13:.1f}" '
+                    f'fill="#94a3b8" font-family="{font}" font-size="8.5" '
+                    f'text-anchor="middle">{dates[i]}</text>'
+                )
+
+    # Legend at very top
     legend = (
-        f'<g font-family="{font}" font-size="9.5">'
-        f'<rect x="{left_pad}" y="3" width="8" height="8" fill="{color_a}" rx="1"/>'
-        f'<text x="{left_pad + 11}" y="11" fill="{color_a}">{label_a}</text>'
-        f'<rect x="{left_pad + 80}" y="3" width="8" height="8" fill="{color_b}" rx="1"/>'
-        f'<text x="{left_pad + 91}" y="11" fill="{color_b}">{label_b}</text>'
-        f'</g>'
+        f'<g font-family="{font}" font-size="9">'
+        f'<rect x="{left_pad}" y="4" width="7" height="7" fill="{color_a}" rx="1"/>'
+        f'<text x="{left_pad + 10}" y="11" fill="{color_a}">{label_a}</text>'
     )
+    if has_b:
+        legend += (
+            f'<line x1="{left_pad + 72}" y1="8" x2="{left_pad + 79}" y2="8" '
+            f'stroke="{color_b}" stroke-width="1.5" stroke-dasharray="3,2"/>'
+            f'<circle cx="{left_pad + 75}" cy="8" r="2" fill="{color_b}"/>'
+            f'<text x="{left_pad + 84}" y="11" fill="{color_b}">{label_b}</text>'
+        )
+    legend += '</g>'
 
     svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
         f'viewBox="0 0 {width} {height}" role="img" aria-label="10日资金面折线图">'
-        f'{grid}{axis_left}{axis_right}'
-        f'<path d="{_path_str(pts_a)}" fill="none" stroke="{color_a}" stroke-width="1.5"/>'
-        f'{_circles(pts_a, color_a)}'
-        f'{left_ticks}'
-        f'{legend}'
+        f'{grid}{ax_l}{ax_r}'
+        f'<path d="{_path(pts_a)}" fill="none" stroke="{color_a}" stroke-width="1.5"/>'
+        f'{_dots(pts_a, color_a)}'
+        f'{left_ticks}{left_label}{legend}{x_labels}'
     )
-    if pts_b:
+    if has_b:
         svg += (
-            f'<path d="{_path_str(pts_b)}" fill="none" stroke="{color_b}" stroke-width="1.5" stroke-dasharray="4,2"/>'
-            f'{_circles(pts_b, color_b)}'
-            f'{right_ticks}'
+            f'<path d="{_path(pts_b)}" fill="none" stroke="{color_b}" stroke-width="1.5" '
+            f'stroke-dasharray="5,3"/>'
+            f'{_dots(pts_b, color_b)}'
+            f'{right_ticks}{right_label}'
         )
     svg += '</svg>'
     return svg
@@ -541,11 +569,13 @@ def _build_e2_pulse(ctx: SMEveningCtx) -> dict:
 
     mini_chart_svg = ""
     if amt_series and len(amt_series) >= 2:
+        date_labels = [d.strftime("%m-%d") for d in series_dates] if series_dates else None
         mini_chart_svg = _svg_dual_line(
             series_a=amt_series,
-            series_b=north_series if north_series and len(north_series) == len(amt_series) else amt_series,
+            series_b=north_series if north_series and len(north_series) == len(amt_series) else [],
+            dates=date_labels,
             label_a="成交(亿)",
-            label_b="北向(亿)" if north_series else "成交(亿)",
+            label_b="北向(亿)",
         )
 
     content = {
