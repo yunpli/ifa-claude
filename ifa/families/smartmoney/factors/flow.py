@@ -490,6 +490,153 @@ def _compute_kpl_factors(
     return rows
 
 
+# ── SW L2 moneyflow factors (actual net_amount from sector_moneyflow_sw_daily) ──
+
+def _load_sw_l2_history(
+    engine: Engine,
+    trade_date: dt.date,
+    n_days: int,
+) -> pd.DataFrame:
+    """Load sector_moneyflow_sw_daily + L1 pct_change proxy for n_days window.
+
+    Returns columns: trade_date, ts_code (=l2_code), name (=l2_name),
+    net_amount, buy_elg_amount, sell_elg_amount, stock_count,
+    pct_change (L1 proxy via raw_sw_daily), elg_net, buy_elg_rate.
+    """
+    sql = f"""
+        SELECT
+            sf.trade_date,
+            sf.l2_code     AS ts_code,
+            sf.l2_name     AS name,
+            sf.net_amount,
+            sf.buy_elg_amount,
+            sf.sell_elg_amount,
+            sf.stock_count,
+            sw.pct_change
+        FROM {SCHEMA}.sector_moneyflow_sw_daily sf
+        LEFT JOIN {SCHEMA}.raw_sw_daily sw
+               ON sw.ts_code = sf.l1_code
+              AND sw.trade_date = sf.trade_date
+        WHERE sf.trade_date <= :d
+          AND sf.trade_date >= :start
+        ORDER BY sf.trade_date ASC, sf.l2_code
+    """
+    start = trade_date - dt.timedelta(days=n_days * 2)
+    with engine.connect() as conn:
+        rows = conn.execute(text(sql), {"d": trade_date, "start": start}).fetchall()
+    if not rows:
+        return pd.DataFrame()
+    df = pd.DataFrame(rows, columns=[
+        "trade_date", "ts_code", "name",
+        "net_amount", "buy_elg_amount", "sell_elg_amount",
+        "stock_count", "pct_change",
+    ])
+    df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
+    for col in ["net_amount", "buy_elg_amount", "sell_elg_amount", "stock_count", "pct_change"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["elg_net"] = df["buy_elg_amount"].fillna(0) - df["sell_elg_amount"].fillna(0)
+    total_elg = df["buy_elg_amount"].fillna(0) + df["sell_elg_amount"].fillna(0)
+    df["buy_elg_rate"] = (df["buy_elg_amount"].fillna(0) / total_elg.replace(0, np.nan)).fillna(0.5)
+    return df
+
+
+def _compute_sw_l2_factors(
+    df: pd.DataFrame,
+    trade_date: dt.date,
+    params: dict[str, Any],
+) -> list[FactorRow]:
+    """Compute 4 factors for SW L2 sectors from sector_moneyflow_sw_daily.
+
+    Uses actual net_amount data (unlike the existing 'sw' source which uses
+    price/volume proxies from raw_sw_daily).  pct_change is L1-level proxy.
+    """
+    if df.empty:
+        return []
+
+    fp = params.get("factors", {})
+    short_win = int(fp.get("short_window", 10))
+    persist_win = int(fp.get("persistence_window", 5))
+    consist_win = int(fp.get("trend", {}).get("consistency_window", 5))
+
+    today_df = df[df["trade_date"] == trade_date].copy()
+    if today_df.empty:
+        return []
+    hist_df = df[df["trade_date"] < trade_date]
+
+    today_df["net_amount_rank"] = cross_sectional_rank(today_df["net_amount"].fillna(0))
+    today_df["elg_rate_norm"] = minmax_normalize(today_df["buy_elg_rate"].fillna(0))
+    today_df["pct_rank"] = cross_sectional_rank(today_df["pct_change"].fillna(0))
+
+    rows: list[FactorRow] = []
+    for _, row in today_df.iterrows():
+        code = row["ts_code"]
+        name = row.get("name")
+
+        hist = hist_df[hist_df["ts_code"] == code].sort_values("trade_date")
+        net_hist = hist["net_amount"].tolist()
+        pct_hist = hist["pct_change"].tolist()
+
+        # ── heat_score ───────────────────────────────────────────────────────
+        net_avg = rolling_mean(net_hist, short_win) if net_hist else float("nan")
+        if net_avg and abs(net_avg) > 1e-6:
+            amount_vs_avg = (float(row["net_amount"] or 0) - net_avg) / abs(net_avg)
+            amount_vs_avg_norm = min(max((amount_vs_avg + 2) / 4, 0), 1)
+        else:
+            amount_vs_avg_norm = 0.5
+
+        heat_score = (
+            float(row["net_amount_rank"]) * 0.55
+            + float(row["elg_rate_norm"]) * 0.30
+            + amount_vs_avg_norm * 0.15
+        )
+
+        # ── trend_score ───────────────────────────────────────────────────────
+        pct_consistency = positive_ratio(pct_hist, consist_win) if pct_hist else 0.5
+        if isinstance(pct_consistency, float) and np.isnan(pct_consistency):
+            pct_consistency = 0.5
+        net_consistency = positive_ratio(net_hist, consist_win) if net_hist else 0.5
+        if isinstance(net_consistency, float) and np.isnan(net_consistency):
+            net_consistency = 0.5
+
+        trend_score = (
+            float(row["pct_rank"]) * 0.45
+            + pct_consistency * 0.30
+            + net_consistency * 0.25
+        )
+
+        # ── persistence_score ─────────────────────────────────────────────────
+        persist_ratio = positive_ratio(net_hist, persist_win)
+        if isinstance(persist_ratio, float) and np.isnan(persist_ratio):
+            persistence_score = None
+        else:
+            persistence_score = float(persist_ratio)
+
+        # ── crowding_score ────────────────────────────────────────────────────
+        crowding_score = float(row["net_amount_rank"]) * (1.0 - float(row["pct_rank"]))
+
+        derived = {
+            "net_amount": round(float(row["net_amount"] or 0), 2),
+            "buy_elg_rate": round(float(row["buy_elg_rate"] or 0), 4),
+            "elg_net": round(float(row["elg_net"] or 0), 2),
+            "pct_change": round(float(row["pct_change"] or 0), 4) if row["pct_change"] == row["pct_change"] else None,
+            "stock_count": int(row["stock_count"] or 0),
+            "consec_positive_days": consecutive_positive(net_hist),
+        }
+
+        rows.append(FactorRow(
+            trade_date=trade_date,
+            sector_code=code,
+            sector_source="sw_l2",
+            sector_name=name,
+            heat_score=round(heat_score, 4),
+            trend_score=round(trend_score, 4),
+            persistence_score=round(persistence_score, 4) if persistence_score is not None else None,
+            crowding_score=round(crowding_score, 4),
+            derived=derived,
+        ))
+    return rows
+
+
 # ── DB write ──────────────────────────────────────────────────────────────────
 
 def write_factor_daily(engine: Engine, rows: list[FactorRow]) -> int:
@@ -560,7 +707,7 @@ def compute_factors_for_date(
         dict mapping source → number of rows written.
     """
     if sources is None:
-        sources = ["dc", "sw", "ths", "kpl"]
+        sources = ["dc", "sw", "ths", "kpl", "sw_l2"]
 
     history_days = int(params.get("factors", {}).get("history_days", 60))
     written: dict[str, int] = {}
@@ -592,5 +739,12 @@ def compute_factors_for_date(
         n = write_factor_daily(engine, rows)
         written["kpl"] = n
         log.info("[flow] kpl factors: %d rows for %s", n, trade_date)
+
+    if "sw_l2" in sources:
+        df = _load_sw_l2_history(engine, trade_date, history_days)
+        rows = _compute_sw_l2_factors(df, trade_date, params)
+        n = write_factor_daily(engine, rows)
+        written["sw_l2"] = n
+        log.info("[flow] sw_l2 factors: %d rows for %s", n, trade_date)
 
     return written
