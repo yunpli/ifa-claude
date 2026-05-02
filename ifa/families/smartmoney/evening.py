@@ -1178,7 +1178,7 @@ def _build_e11_strategy(ctx: SMEveningCtx) -> dict:
     if ctx.llm_aug.policy:
         p = ctx.llm_aug.policy
         impl_str = "; ".join(
-            f"{si.sector_name}={si.direction}" for si in (p.sector_implications or [])[:4]
+            f"{si.sector_theme}={si.expected_impact}" for si in (p.sector_implications or [])[:4]
         )
         policy_bloc = (
             f"\n=== 政策极性（LLM推断）===\n"
