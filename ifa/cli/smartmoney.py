@@ -222,6 +222,87 @@ def backfill(
     console.print(f"\n[bold green]Backfill done.[/bold green] {len(days)} days loaded.")
 
 
+# ─── ML Training (B8) ─────────────────────────────────────────────────────────
+
+@app.command("train")
+def train(
+    in_sample_start: str = typer.Option("2021-01-04", "--in-sample-start"),
+    in_sample_end: str = typer.Option("2025-10-31", "--in-sample-end"),
+    oos_start: str = typer.Option("2025-11-01", "--oos-start"),
+    oos_end: str = typer.Option("2026-04-30", "--oos-end"),
+    version: str = typer.Option("v2026_05", "--version", help="Model version tag"),
+    short_horizon: int = typer.Option(1, "--short-horizon",
+                                       help="RF prediction horizon in trading days"),
+    long_horizon: int = typer.Option(20, "--long-horizon",
+                                      help="XGB prediction horizon in trading days"),
+    source: str = typer.Option("sw_l2", "--source"),
+    mode: str | None = typer.Option(None, "--mode"),
+) -> None:
+    """B8: train RF (short) + XGB (long) on SW L2 in-sample, evaluate OOS, persist.
+
+    Outputs models to ~/claude/ifaenv/models/smartmoney/ with the version tag.
+    """
+    _override_mode(mode)
+    from ifa.families.smartmoney.ml.train import train_and_persist
+    import datetime as _dt
+
+    iss = _dt.datetime.strptime(in_sample_start, "%Y-%m-%d").date()
+    ise = _dt.datetime.strptime(in_sample_end, "%Y-%m-%d").date()
+    oos = _dt.datetime.strptime(oos_start, "%Y-%m-%d").date()
+    ooe = _dt.datetime.strptime(oos_end, "%Y-%m-%d").date()
+
+    console.print(f"[bold]SmartMoney Train · {version}[/bold]")
+    console.print(f"  in-sample: {iss} → {ise}  ({(ise-iss).days} days)")
+    console.print(f"  OOS:       {oos} → {ooe}  ({(ooe-oos).days} days)")
+    console.print(f"  RF horizon = {short_horizon}d  ·  XGB horizon = {long_horizon}d")
+    console.print(f"  source     = {source}")
+
+    engine = _engine()
+    rf_res, xgb_res = train_and_persist(
+        engine,
+        in_sample_start=iss, in_sample_end=ise,
+        oos_start=oos, oos_end=ooe,
+        version_tag=version,
+        source=source,
+        short_horizon=short_horizon,
+        long_horizon=long_horizon,
+        on_log=lambda m: console.print(f"  {m}"),
+    )
+
+    # Print summary
+    t = Table(title=f"Training Results · {version}")
+    t.add_column("model", style="cyan")
+    t.add_column("horizon", justify="right")
+    t.add_column("train rows", justify="right")
+    t.add_column("OOS rows", justify="right")
+    t.add_column("in-sample AUC", justify="right")
+    t.add_column("OOS AUC", justify="right")
+    t.add_column("OOS prec.", justify="right")
+    t.add_column("OOS recall", justify="right")
+    t.add_column("seconds", justify="right")
+
+    for r in (rf_res, xgb_res):
+        t.add_row(
+            r.model_name,
+            f"{r.horizon_days}d",
+            f"{r.in_sample_n:,}",
+            f"{r.oos_n:,}",
+            f"{r.in_sample_metrics.get('val_auc', 'NaN')}",
+            f"{r.oos_metrics.get('val_auc', 'NaN')}",
+            f"{r.oos_metrics.get('val_precision', 'NaN')}",
+            f"{r.oos_metrics.get('val_recall', 'NaN')}",
+            f"{r.train_seconds:.0f}s",
+        )
+    console.print(t)
+
+    console.print("\n[dim]Top features (RF):[/dim]")
+    for n, v in rf_res.top_features[:10]:
+        console.print(f"  {n:35s} {v:.4f}")
+    console.print("\n[dim]Top features (XGB):[/dim]")
+    for n, v in xgb_res.top_features[:10]:
+        console.print(f"  {n:35s} {v:.4f}")
+
+
 # ─── Backtest ─────────────────────────────────────────────────────────────────
 
 @app.command("backtest")
