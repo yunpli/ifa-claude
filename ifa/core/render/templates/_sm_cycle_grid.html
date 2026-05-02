@@ -1,8 +1,53 @@
 {% set c = s.content_json %}
+{% set SOURCE_LABELS = {'sw_l2': '申万 L2', 'sw': '申万 L1', 'dc': '东财概念', 'kpl': 'KPL概念', 'ths': '同花顺'} %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
   {% if c.intro %}<p class="ifa-section__intro" style="font-size:12px;color:var(--ink-muted);">{{ c.intro }}</p>{% endif %}
-  {% if c.rows %}
+  {% if c.grouped %}
+    {% for grp in c.grouped %}
+    {% if grp.rows %}
+    <div class="ifa-cycle-src-group">
+      <div class="ifa-cycle-src-label">{{ SOURCE_LABELS.get(grp.source, grp.source) }}</div>
+      <div class="ifa-cycle-traj-wrap">
+      <table class="ifa-cycle-traj">
+        <thead>
+          <tr>
+            <th class="ifa-cycle-traj__sector">板块</th>
+            <th class="ifa-cycle-traj__role">角色</th>
+            {% for d in c.trade_dates_disp %}<th class="ifa-cycle-traj__date">{{ d }}</th>{% endfor %}
+            <th class="ifa-cycle-traj__pred">下个交易日（top 概率）</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in grp.rows %}
+          <tr>
+            <td class="ifa-cycle-traj__sector">
+              <strong>{{ r.sector_name }}</strong>
+              {% if r.leader_name %}<span class="ifa-cycle-traj__leader">▶ {{ r.leader_name }}</span>{% endif %}
+              {% if r.cluster_name %}<span class="ifa-cycle-traj__cluster">◆ {{ r.cluster_name }}</span>{% endif %}
+            </td>
+            <td><span class="ifa-flow-table__tag tag-role" data-role="{{ r.role }}">{{ r.role }}</span></td>
+            {% for ph in r.phase_history %}
+            <td class="ifa-cycle-traj__cell" data-phase="{{ ph }}">{{ ph }}</td>
+            {% endfor %}
+            <td class="ifa-cycle-traj__pred">
+              {% if r.next_top %}
+                {% for n in r.next_top %}
+                <span class="ifa-cycle-traj__chip" data-phase="{{ n.phase }}">{{ n.phase }} <em>{{ '%.1f'|format(n.prob_pct) }}%</em></span>
+                {% endfor %}
+              {% else %}
+                <span class="ifa-empty-inline">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+  {% elif c.rows %}
   <div class="ifa-cycle-traj-wrap">
   <table class="ifa-cycle-traj">
     <thead>
@@ -16,45 +61,36 @@
     <tbody>
       {% for r in c.rows %}
       <tr>
-        <td class="ifa-cycle-traj__sector">
-          <strong>{{ r.sector_name }}</strong>
-          <span class="ifa-cycle-traj__src">{{ r.sector_source }}</span>
-          {% if r.leader_name %}<span class="ifa-cycle-traj__leader">▶ {{ r.leader_name }}</span>{% endif %}
-          {% if r.cluster_name %}<span class="ifa-cycle-traj__cluster">◆ {{ r.cluster_name }}</span>{% endif %}
-        </td>
+        <td class="ifa-cycle-traj__sector"><strong>{{ r.sector_name }}</strong></td>
         <td><span class="ifa-flow-table__tag tag-role" data-role="{{ r.role }}">{{ r.role }}</span></td>
-        {% for ph in r.phase_history %}
-        <td class="ifa-cycle-traj__cell" data-phase="{{ ph }}">{{ ph }}</td>
-        {% endfor %}
+        {% for ph in r.phase_history %}<td class="ifa-cycle-traj__cell" data-phase="{{ ph }}">{{ ph }}</td>{% endfor %}
         <td class="ifa-cycle-traj__pred">
-          {% if r.next_top %}
-            {% for n in r.next_top %}
-            <span class="ifa-cycle-traj__chip" data-phase="{{ n.phase }}">{{ n.phase }} <em>{{ '%.1f'|format(n.prob_pct) }}%</em></span>
-            {% endfor %}
-          {% else %}
-            <span class="ifa-empty-inline">—</span>
-          {% endif %}
+          {% if r.next_top %}{% for n in r.next_top %}<span class="ifa-cycle-traj__chip" data-phase="{{ n.phase }}">{{ n.phase }} <em>{{ '%.1f'|format(n.prob_pct) }}%</em></span>{% endfor %}
+          {% else %}<span class="ifa-empty-inline">—</span>{% endif %}
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   </div>
-  <div class="ifa-cycle-legend">
-    {% for ph in c.phases %}<span class="ifa-cycle-traj__cell" data-phase="{{ ph }}" style="display:inline-block;padding:1px 8px;margin:0 4px 4px 0;font-size:11px;">{{ ph }}</span>{% endfor %}
-  </div>
   {% else %}
   <div class="ifa-empty">{{ c.fallback_text or '暂无活跃周期数据。' }}</div>
   {% endif %}
+  {% if c.phases %}
+  <div class="ifa-cycle-legend">
+    {% for ph in c.phases %}<span class="ifa-cycle-traj__cell" data-phase="{{ ph }}" style="display:inline-block;padding:1px 8px;margin:0 4px 4px 0;font-size:11px;">{{ ph }}</span>{% endfor %}
+  </div>
+  {% endif %}
 </section>
 <style>
+.ifa-cycle-src-group{margin-bottom:18px;}
+.ifa-cycle-src-label{font-size:11.5px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid var(--rule-soft);}
 .ifa-cycle-traj-wrap{overflow-x:auto;}
 .ifa-cycle-traj{width:100%;border-collapse:collapse;font-size:12px;}
 .ifa-cycle-traj th{text-align:left;border-bottom:1px solid var(--rule);padding:6px 8px;color:var(--ink-muted);font-size:10.5px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
 .ifa-cycle-traj th.ifa-cycle-traj__date{text-align:center;font-family:var(--font-mono);}
 .ifa-cycle-traj td{padding:5px 6px;border-bottom:1px solid var(--rule-soft);vertical-align:middle;}
 .ifa-cycle-traj__sector{min-width:140px;font-size:12.5px;}
-.ifa-cycle-traj__src{font-family:var(--font-mono);font-size:10px;color:var(--ink-muted);margin-left:4px;}
 .ifa-cycle-traj__leader{display:block;font-size:10.5px;color:var(--accent);font-weight:600;letter-spacing:0.02em;margin-top:1px;}
 .ifa-cycle-traj__cluster{display:block;font-size:10px;color:var(--ink-muted);letter-spacing:0.02em;margin-top:1px;font-style:italic;}
 .ifa-cycle-traj__cell{text-align:center;font-size:11.5px;font-weight:600;color:#fff;background:#94a3b8;border-radius:2px;padding:3px 4px;min-width:38px;letter-spacing:0.05em;}
@@ -75,7 +111,6 @@
 .ifa-cycle-traj__chip[data-phase='退潮']{border-left:2px solid #64748b;}
 .ifa-cycle-traj__chip[data-phase='确认']{border-left:2px solid #1d4ed8;}
 .ifa-cycle-traj__chip[data-phase='点火']{border-left:2px solid #c2410c;}
-.ifa-cycle-traj__chip[data-phase='冷']{border-left:2px solid #475569;}
 .ifa-cycle-traj__chip em{font-style:normal;font-family:var(--font-mono);color:var(--ink);}
 .ifa-cycle-legend{margin-top:10px;padding-top:8px;border-top:1px dashed var(--rule-soft);}
 .ifa-empty-inline{color:var(--ink-muted);font-size:11px;}

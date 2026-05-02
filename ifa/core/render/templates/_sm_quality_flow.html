@@ -19,14 +19,36 @@
     <tbody>
       {% for r in c.rows %}
       <tr>
-        <td><strong>{{ r.sector_name }}</strong> <span class="ifa-flow-table__src">{{ r.sector_code }}</span></td>
+        <td><strong>{{ r.sector_name }}</strong></td>
         <td class="{% if r.pct_change and r.pct_change > 0 %}up{% elif r.pct_change and r.pct_change < 0 %}down{% endif %}">{{ r.pct_change_display }}</td>
         <td class="ifa-flow-table__amt">{{ r.net_amount_display }}</td>
-        {% if c.kind == 'quality' %}<td>{% if r.elg_buy_rate is not none %}{{ '%.1f'|format(r.elg_buy_rate) }}%{% else %}—{% endif %}</td>{% endif %}
+        {% if c.kind == 'quality' %}<td>{% if r.elg_buy_rate is not none %}{{ '%.1f'|format(r.elg_buy_rate * 100) if r.elg_buy_rate <= 1 else '%.1f'|format(r.elg_buy_rate) }}%{% else %}—{% endif %}</td>{% endif %}
         <td><span class="ifa-flow-table__tag tag-role" data-role="{{ r.role }}">{{ r.role }}</span></td>
         <td><span class="ifa-flow-table__tag tag-cycle" data-cycle="{{ r.cycle_phase }}">{{ r.cycle_phase }}</span></td>
         {% if c.kind == 'quality' %}<td class="ifa-quality-table__cmt">{{ r.commentary or '' }}</td>{% endif %}
       </tr>
+      {% if c.kind == 'quality' and r.top_members %}
+      <tr class="ifa-quality-drill">
+        <td colspan="7">
+          <details>
+            <summary>板块内 Top {{ r.top_members | length }} 个股</summary>
+            <table class="ifa-flow-drill">
+              <thead><tr><th>股票</th><th>代码</th><th>涨跌幅</th><th>主力净流入</th></tr></thead>
+              <tbody>
+                {% for m in r.top_members %}
+                <tr>
+                  <td>{{ m.name }}</td>
+                  <td class="ifa-flow-drill__code">{{ m.ts_code }}</td>
+                  <td class="{% if m.pct_chg and m.pct_chg > 0 %}up{% elif m.pct_chg and m.pct_chg < 0 %}down{% endif %}">{{ m.pct_chg_display }}</td>
+                  <td class="ifa-flow-drill__amt">{% if m.net_mf_yi is not none %}{{ '%+.2f'|format(m.net_mf_yi) }}亿{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </details>
+        </td>
+      </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>
@@ -61,6 +83,14 @@
 .ifa-quality-table th{text-align:left;border-bottom:1px solid var(--rule);padding:6px 8px;color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
 .ifa-quality-table td{padding:7px 8px;border-bottom:1px solid var(--rule-soft);}
 .ifa-quality-table__cmt{color:var(--ink-2);font-size:12px;max-width:220px;line-height:1.45;}
+.ifa-quality-drill td{background:var(--paper-tint);padding:6px 12px;}
+.ifa-quality-drill details{margin:0;}
+.ifa-quality-drill summary{cursor:pointer;font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;padding:2px 0;}
+.ifa-flow-drill{margin-top:6px;width:100%;font-size:12px;border-collapse:collapse;}
+.ifa-flow-drill th{text-align:left;padding:4px 8px;font-size:10px;color:var(--ink-muted);font-weight:600;border-bottom:1px solid var(--rule-soft);}
+.ifa-flow-drill td{padding:4px 8px;border-bottom:1px dashed var(--rule-soft);}
+.ifa-flow-drill__code{font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);}
+.ifa-flow-drill__amt{font-family:var(--font-mono);font-weight:500;}
 .ifa-risk-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px;}
 .ifa-risk-table th{text-align:left;border-bottom:1px solid var(--rule);padding:6px 8px;color:var(--ink-muted);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;background:var(--paper-tint);}
 .ifa-risk-table td{padding:7px 8px;border-bottom:1px solid var(--rule-soft);vertical-align:top;}

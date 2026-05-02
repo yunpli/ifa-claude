@@ -4,7 +4,17 @@
   <div class="ifa-pulse-state" data-state="{{ c.market_state }}">
     <span class="ifa-pulse-state__label">市场状态</span>
     <span class="ifa-pulse-state__value">{{ c.market_state }}</span>
-    {% if c.regime_label %}<span class="ifa-pulse-state__regime" data-risk="{{ c.regime_transition_risk }}">体制 · {{ c.regime_label }} <em>{{ '%.0f'|format((c.regime_confidence or 0)*100) }}%</em></span>{% endif %}
+    {% if c.regime_label %}
+  {% set REGIME_ZH = {
+    'bull_trending': '趋势牛市', 'bull_consolidating': '牛市整理', 'consolidation': '震荡整理',
+    'bear_trending': '趋势熊市', 'bear_recovery': '熊市反弹', 'risk_off': '避险防御',
+    'rotation': '板块轮动', 'breakout': '突破上行', 'breakdown': '下行破位'
+  } %}
+  <span class="ifa-pulse-state__regime" data-risk="{{ c.regime_transition_risk }}">
+    体制 · {{ REGIME_ZH.get(c.regime_label, c.regime_label) }}
+    <em>置信 {{ '%.0f'|format((c.regime_confidence or 0)*100) }}%</em>
+  </span>
+  {% endif %}
     <span class="ifa-pulse-state__date">{{ c.trade_date or '—' }}</span>
   </div>
   {% if c.mini_chart_svg %}

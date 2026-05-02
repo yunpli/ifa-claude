@@ -20,7 +20,7 @@
     <tbody>
       {% for r in c.rows %}
       <tr>
-        <td><span class="ifa-flow-table__name">{{ r.sector_name }}</span><span class="ifa-flow-table__src">{{ r.sector_source }}</span></td>
+        <td><span class="ifa-flow-table__name">{{ r.sector_name }}</span>{% if r.sector_source != 'sw_l2' %}<span class="ifa-flow-table__src">{{ r.sector_source }}</span>{% endif %}</td>
         <td class="{% if r.pct_change and r.pct_change > 0 %}up{% elif r.pct_change and r.pct_change < 0 %}down{% endif %}">{{ r.pct_change_display }}</td>
         <td class="ifa-flow-table__amt {% if c.direction == 'in' %}up{% else %}down{% endif %}">{{ r.net_amount_display }}</td>
         <td>{% if r.elg_buy_rate is not none %}{{ '%.1f'|format(r.elg_buy_rate) }}%{% else %}—{% endif %}</td>

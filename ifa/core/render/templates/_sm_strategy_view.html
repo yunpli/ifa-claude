@@ -1,6 +1,14 @@
 {% set c = s.content_json %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
+  <div class="ifa-stance-legend">
+    <strong>策略模式说明</strong>
+    <span data-stance="主线延续">主线延续 — 强势板块资金持续流入，保持当前主线持仓或跟随进场</span>
+    <span data-stance="分歧修复">分歧修复 — 高潮后出现分歧信号，等待板块回调确认后再参与</span>
+    <span data-stance="高低切">高低切 — 主线强板块高位，资金向低位补涨板块轮动，换仓时机</span>
+    <span data-stance="防守切换">防守切换 — 市场整体资金退潮，切换至防御性板块或现金</span>
+    <span data-stance="缩量观望">缩量观望 — 成交量萎缩、信号不明，保持低仓观察</span>
+  </div>
   {% if c.stances %}
   <div class="ifa-stance-grid">
     {% for st in c.stances %}
@@ -46,5 +54,14 @@
 .ifa-stance-card__row ul{margin:0;padding-left:16px;}
 .ifa-stance-card__row li{margin-bottom:3px;}
 .ifa-closing-note{margin-top:14px;background:var(--paper-tint);border:1px solid var(--rule);border-left:3px solid var(--ink);padding:12px 16px;font-family:var(--font-serif);font-size:13.5px;color:var(--ink);font-style:italic;}
+.ifa-stance-legend{background:var(--paper-tint);border:1px solid var(--rule-soft);padding:8px 14px;margin-bottom:12px;font-size:11px;color:var(--ink-2);display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;}
+.ifa-stance-legend strong{font-size:10.5px;text-transform:uppercase;letter-spacing:0.06em;color:var(--ink-muted);margin-right:6px;white-space:nowrap;}
+.ifa-stance-legend span{white-space:nowrap;}
+.ifa-stance-legend span::before{content:"●";margin-right:4px;}
+.ifa-stance-legend span[data-stance="主线延续"]::before{color:#16a34a;}
+.ifa-stance-legend span[data-stance="分歧修复"]::before{color:#ca8a04;}
+.ifa-stance-legend span[data-stance="高低切"]::before{color:#1d4ed8;}
+.ifa-stance-legend span[data-stance="防守切换"]::before{color:#475569;}
+.ifa-stance-legend span[data-stance="缩量观望"]::before{color:#94a3b8;}
 @media (max-width:720px){.ifa-stance-grid{grid-template-columns:1fr;}}
 </style>

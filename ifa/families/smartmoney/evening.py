@@ -167,87 +167,111 @@ def _svg_dual_line(
     *,
     series_a: list[float],
     series_b: list[float],
-    width: int = 320,
-    height: int = 64,
-    pad_x: int = 4,
-    pad_y: int = 6,
+    width: int = 420,
+    height: int = 90,
     color_a: str = "#1d4ed8",
     color_b: str = "#c2410c",
-    label_a: str = "成交",
-    label_b: str = "北向",
+    label_a: str = "成交(亿)",
+    label_b: str = "北向(亿)",
 ) -> str:
-    """Inline SVG for two parallel normalized line series.
+    """Inline SVG for two series with independent dual Y-axes.
 
-    Each series is min-max normalized independently (different units).  Empty
-    inputs return ''. Series are padded with circle markers at each datapoint
-    and a baseline ruler at y=midpoint.
+    Left axis: series_a (成交额).  Right axis: series_b (北向资金).
+    Each series is independently min-max normalized; axis tick labels show
+    actual values at min/mid/max on the respective left/right sides.
     """
-    n = max(len(series_a), len(series_b))
-    if n < 2:
+    if not series_a or len(series_a) < 2:
         return ""
 
-    inner_w = width - 2 * pad_x
-    inner_h = height - 2 * pad_y
+    # Layout constants
+    left_pad = 52    # left axis labels
+    right_pad = 52   # right axis labels
+    top_pad = 18     # legend
+    bottom_pad = 6
+    inner_w = width - left_pad - right_pad
+    inner_h = height - top_pad - bottom_pad
+    font = "-apple-system,BlinkMacSystemFont,sans-serif"
 
-    def _path(series: list[float], color: str) -> tuple[str, list[tuple[float, float]]]:
-        if not series or len(series) < 2:
-            return "", []
+    def _normalize(series: list[float]) -> tuple[list[tuple[float, float]], float, float]:
         smin, smax = min(series), max(series)
         rng = (smax - smin) or 1.0
-        pts: list[tuple[float, float]] = []
+        pts = []
         for i, v in enumerate(series):
-            x = pad_x + (inner_w * i / (len(series) - 1))
-            # Higher value → smaller y (flip)
-            y = pad_y + inner_h * (1.0 - (v - smin) / rng)
+            x = left_pad + inner_w * i / (len(series) - 1)
+            y = top_pad + inner_h * (1.0 - (v - smin) / rng)
             pts.append((x, y))
-        d = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
-        return d, pts
+        return pts, smin, smax
 
-    path_a, pts_a = _path(series_a, color_a)
-    path_b, pts_b = _path(series_b, color_b)
+    pts_a, a_min, a_max = _normalize(series_a)
+    pts_b, b_min, b_max = (_normalize(series_b) if series_b and len(series_b) == len(series_a)
+                           else ([], 0.0, 0.0))
 
-    circles_a = "".join(
-        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="1.6" fill="{color_a}" />'
-        for x, y in pts_a
-    )
-    circles_b = "".join(
-        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="1.6" fill="{color_b}" />'
-        for x, y in pts_b
-    )
+    def _path_str(pts: list[tuple[float, float]]) -> str:
+        return "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
 
+    def _circles(pts: list[tuple[float, float]], color: str, r: float = 1.8) -> str:
+        return "".join(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r}" fill="{color}"/>' for x, y in pts)
+
+    def _y_ticks(y_min: float, y_max: float, x_pos: float, color: str,
+                  anchor: str = "end") -> str:
+        mid = (y_min + y_max) / 2
+        ticks = [(y_min, top_pad + inner_h), (mid, top_pad + inner_h / 2), (y_max, top_pad)]
+        out = ""
+        for val, y_svg in ticks:
+            fmt = f"{val:,.0f}" if abs(val) >= 100 else f"{val:+.0f}" if y_min < 0 else f"{val:.0f}"
+            out += (f'<text x="{x_pos:.1f}" y="{y_svg + 3:.1f}" '
+                    f'fill="{color}" text-anchor="{anchor}" '
+                    f'font-family="{font}" font-size="9">{fmt}</text>')
+        return out
+
+    # Grid line at y-midpoint
+    grid_y = top_pad + inner_h / 2
+    grid = f'<line x1="{left_pad}" y1="{grid_y:.1f}" x2="{left_pad + inner_w}" y2="{grid_y:.1f}" stroke="#e2e8f0" stroke-width="1" stroke-dasharray="3,2"/>'
+
+    # Left axis ticks (series_a)
+    left_ticks = _y_ticks(a_min, a_max, left_pad - 3, color_a, anchor="end")
+
+    # Right axis ticks (series_b)
+    right_ticks = ""
+    if pts_b:
+        right_ticks = _y_ticks(b_min, b_max, left_pad + inner_w + 3, color_b, anchor="start")
+
+    # Axis lines
+    axis_left = (f'<line x1="{left_pad}" y1="{top_pad}" x2="{left_pad}" y2="{top_pad + inner_h}" '
+                 f'stroke="{color_a}" stroke-width="1" opacity="0.4"/>')
+    axis_right = ""
+    if pts_b:
+        rx = left_pad + inner_w
+        axis_right = (f'<line x1="{rx}" y1="{top_pad}" x2="{rx}" y2="{top_pad + inner_h}" '
+                      f'stroke="{color_b}" stroke-width="1" opacity="0.4"/>')
+
+    # Legend at top
     legend = (
-        f'<g font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="9.5">'
-        f'<text x="{pad_x}" y="{pad_y + 8}" fill="{color_a}">●&#160;{label_a}</text>'
-        f'<text x="{pad_x + 56}" y="{pad_y + 8}" fill="{color_b}">●&#160;{label_b}</text>'
+        f'<g font-family="{font}" font-size="9.5">'
+        f'<rect x="{left_pad}" y="3" width="8" height="8" fill="{color_a}" rx="1"/>'
+        f'<text x="{left_pad + 11}" y="11" fill="{color_a}">{label_a}</text>'
+        f'<rect x="{left_pad + 80}" y="3" width="8" height="8" fill="{color_b}" rx="1"/>'
+        f'<text x="{left_pad + 91}" y="11" fill="{color_b}">{label_b}</text>'
         f'</g>'
     )
 
-    # End-of-series labels (latest values)
-    end_labels = ""
-    if pts_a:
-        last_v = series_a[-1]
-        end_labels += (
-            f'<text x="{pts_a[-1][0]+3:.1f}" y="{pts_a[-1][1]+3:.1f}" fill="{color_a}" '
-            f'font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="9">{last_v:.0f}</text>'
-        )
-    if pts_b:
-        last_v = series_b[-1]
-        end_labels += (
-            f'<text x="{pts_b[-1][0]+3:.1f}" y="{pts_b[-1][1]+10:.1f}" fill="{color_b}" '
-            f'font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="9">{last_v:+.0f}</text>'
-        )
-
-    return (
+    svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-        f'viewBox="0 0 {width} {height}" role="img" aria-label="10日资金面迷你折线图">'
-        f'<path d="{path_a}" fill="none" stroke="{color_a}" stroke-width="1.4" />'
-        f'{circles_a}'
-        f'<path d="{path_b}" fill="none" stroke="{color_b}" stroke-width="1.4" />'
-        f'{circles_b}'
+        f'viewBox="0 0 {width} {height}" role="img" aria-label="10日资金面折线图">'
+        f'{grid}{axis_left}{axis_right}'
+        f'<path d="{_path_str(pts_a)}" fill="none" stroke="{color_a}" stroke-width="1.5"/>'
+        f'{_circles(pts_a, color_a)}'
+        f'{left_ticks}'
         f'{legend}'
-        f'{end_labels}'
-        f'</svg>'
     )
+    if pts_b:
+        svg += (
+            f'<path d="{_path_str(pts_b)}" fill="none" stroke="{color_b}" stroke-width="1.5" stroke-dasharray="4,2"/>'
+            f'{_circles(pts_b, color_b)}'
+            f'{right_ticks}'
+        )
+    svg += '</svg>'
+    return svg
 
 
 # ── ML candidate runner (B8.4) ───────────────────────────────────────────────
@@ -527,8 +551,8 @@ def _build_e2_pulse(ctx: SMEveningCtx) -> dict:
     content = {
         "trade_date": str(p.trade_date) if p.trade_date else None,
         "market_state": p.market_state,
-        "total_amount_yi": round(p.total_amount / 1e4, 2),         # 亿元
-        "amount_10d_avg_yi": round(p.amount_10d_avg / 1e4, 2),
+        "total_amount_yi": round(p.total_amount / 1e4, 0),         # 万元 ÷ 1e4 = 亿元
+        "amount_10d_avg_yi": round(p.amount_10d_avg / 1e4, 0),
         "amount_percentile_60d": round(p.amount_percentile_60d, 4),
         "amount_ratio_10d": round(p.amount_ratio_10d, 3),
         "up_count": p.up_count, "down_count": p.down_count, "flat_count": p.flat_count,
@@ -577,7 +601,7 @@ def _build_flow_section(
             },
         }
 
-    # Pre-load top-5 member stocks for each sector (drill-down)
+    # Pre-load top-5 member stocks for each sector (drill-down); also used by §05
     top_members: dict[tuple[str, str], list[dict[str, Any]]] = {}
     if ctx.used_trade_date:
         try:
@@ -588,6 +612,7 @@ def _build_flow_section(
             )
         except Exception as exc:  # noqa: BLE001
             log.warning("[flow] load_sector_top_members failed: %s", exc)
+    top_members_ref = top_members  # captured for §05 use
 
     # Build LLM input for batch commentary
     candidates_blob = "\n".join(
@@ -674,6 +699,18 @@ def _build_flow_section(
 # ─── E5: Quality flow ────────────────────────────────────────────────────────
 
 def _build_e5_quality(ctx: SMEveningCtx) -> dict:
+    # Pre-load top-5 member stocks for quality sectors (same drill as §03/§04)
+    quality_top_members: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    if ctx.used_trade_date and ctx.quality:
+        try:
+            quality_top_members = data.load_sector_top_members(
+                ctx.engine, ctx.used_trade_date,
+                sectors=[(s.sector_code, s.sector_source) for s in ctx.quality],
+                top_n=5,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[e5] top_members failed: %s", exc)
+
     rows = [
         {
             "sector_name": s.sector_name, "sector_code": s.sector_code,
@@ -682,6 +719,16 @@ def _build_e5_quality(ctx: SMEveningCtx) -> dict:
             "net_amount_display": _fmt_amt(s.net_amount),
             "elg_buy_rate": s.elg_buy_rate,
             "role": s.role or "—", "cycle_phase": s.cycle_phase or "—",
+            "top_members": [
+                {
+                    "ts_code": m["ts_code"], "name": m["name"],
+                    "pct_chg": m["pct_chg"],
+                    "pct_chg_display": _fmt_pct(m["pct_chg"]),
+                    "net_mf_yi": round(float(m["net_mf_amount"] or 0) / 1e4, 2)
+                                 if m["net_mf_amount"] is not None else None,
+                }
+                for m in quality_top_members.get((s.sector_code, s.sector_source), [])
+            ],
         }
         for s in ctx.quality
     ]
@@ -870,6 +917,20 @@ def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
 
     trade_dates_disp = [td.strftime("%m-%d") for td in (ctx.cycle_trajectory[0].trade_dates if ctx.cycle_trajectory else [])]
 
+    # Group rows by source (SW L2 first, then sw, dc, kpl, ths)
+    SOURCE_ORDER = ["sw_l2", "sw", "dc", "kpl", "ths"]
+    source_groups: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        src = r.get("sector_source", "other")
+        source_groups.setdefault(src, []).append(r)
+    grouped = [
+        {"source": s, "rows": source_groups[s]}
+        for s in SOURCE_ORDER if s in source_groups
+    ]
+    for s in source_groups:
+        if s not in SOURCE_ORDER:
+            grouped.append({"source": s, "rows": source_groups[s]})
+
     return {
         "key": "smartmoney_evening.e7_cycle", "title": "板块情绪周期轨迹",
         "order": 7, "type": "sm_cycle_grid",
@@ -877,7 +938,8 @@ def _build_e7_cycle(ctx: SMEveningCtx) -> dict:
             "intro": "活跃板块过去 N 个交易日的相位轨迹；最右列为下个交易日的转移概率（B5 经验矩阵 + 板块 Bayes 后验）。",
             "phases": PHASES,
             "trade_dates_disp": trade_dates_disp,
-            "rows": rows,
+            "rows": rows,           # flat list kept for backwards compat
+            "grouped": grouped,     # grouped by source for display
             "fallback_text": "今日无活跃情绪周期信号。",
         },
     }
@@ -1292,12 +1354,21 @@ def _build_e12_validation(ctx: SMEveningCtx) -> tuple[dict, list[dict[str, Any]]
         for h in parsed.get("hypotheses", []) or []:
             if not isinstance(h, dict):
                 continue
+            # Derive observation window from horizon
+            hz = h.get("horizon", "next_day")
+            obs_window = {"next_day": "次个交易日", "next_2d": "2个交易日", "next_3d": "3个交易日",
+                          "1week": "1周", "next_week": "1周"}.get(hz, hz)
+            target = h.get("target", "")
             items.append({
                 "hypothesis": h.get("hypothesis_text", ""),
-                "related": h.get("target", ""),
+                "related": target,
                 "review_rule": h.get("validation_method", ""),
                 "confidence": h.get("confidence", "medium"),
-                "horizon": h.get("horizon", "next_day"),
+                "horizon": hz,
+                # Fields used by _hypotheses_list.html template
+                "validation_method": h.get("validation_method", ""),
+                "observation_window": obs_window,
+                "related_markets_or_sectors": [t.strip() for t in target.split(",") if t.strip()] if target else [],
             })
             hyps_for_db.append({
                 "judgment_text": h.get("hypothesis_text", ""),

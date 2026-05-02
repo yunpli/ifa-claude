@@ -149,12 +149,30 @@ def load_market_pulse(engine: Engine, trade_date: dt.date) -> MarketPulse:
         return MarketPulse(trade_date=trade_date)
 
     derived = row[13] if isinstance(row[13], dict) else (json.loads(row[13]) if row[13] else {})
+
+    # market_state_daily.total_amount is stored in 千元 (raw SUM from raw_daily)
+    # and is currently stale (constant bug). Override with fresh raw_daily aggregation.
+    # raw_daily.amount unit = 千元; store as 万元 in MarketPulse for downstream display.
+    with engine.connect() as conn:
+        amt_rows = conn.execute(text(f"""
+            SELECT trade_date, SUM(amount) / 10.0 AS amt_wan
+            FROM {SCHEMA}.raw_daily
+            WHERE trade_date <= :d
+              AND trade_date >= :start
+            GROUP BY trade_date ORDER BY trade_date DESC LIMIT 10
+        """), {"d": trade_date, "start": trade_date - dt.timedelta(days=20)}).fetchall()
+
+    daily_totals = sorted(amt_rows, key=lambda r: r[0])
+    total_wan = float(daily_totals[-1][1]) if daily_totals else float(row[1] or 0)
+    avg_10d_wan = sum(float(r[1]) for r in daily_totals) / len(daily_totals) if daily_totals else total_wan
+    amount_ratio = total_wan / avg_10d_wan if avg_10d_wan > 0 else 1.0
+
     return MarketPulse(
         trade_date=row[0],
-        total_amount=float(row[1] or 0),
-        amount_10d_avg=float(row[2] or 0),
+        total_amount=total_wan,          # 万元
+        amount_10d_avg=avg_10d_wan,      # 万元
         amount_percentile_60d=float(row[3] or 0.5),
-        amount_ratio_10d=float(derived.get("amount_ratio_10d", 1.0)),
+        amount_ratio_10d=amount_ratio,
         up_count=int(row[4] or 0),
         down_count=int(row[5] or 0),
         flat_count=int(row[6] or 0),
@@ -787,7 +805,7 @@ def load_tomorrow_target_pool(
              AND fd.trade_date = ss.trade_date
         WHERE ss.trade_date = :d
           AND ss.role IN ('主线','中军','轮动','催化')
-          AND ss.sector_source IN ('dc','sw')
+          AND ss.sector_source IN ('sw_l2','dc','sw','kpl')
         ORDER BY
           (COALESCE(fd.heat_score,0) * 0.40
            + COALESCE(fd.trend_score,0) * 0.35
@@ -901,6 +919,8 @@ def load_sector_structures(
     Restricted to top N active sectors (by heat) to keep the table compact.
     Falls back to kpl_list-based stock matching when stock_signals_daily is empty.
     """
+    # Prioritise sw_l2 sectors (have member data and ML predictions).
+    # Fall back to dc/kpl if sw_l2 has no active sectors for the date.
     sql_sec = text(f"""
         SELECT ss.sector_code, ss.sector_source, ss.sector_name,
                ss.role, ss.cycle_phase
@@ -910,7 +930,8 @@ def load_sector_structures(
              AND fd.sector_source = ss.sector_source
              AND fd.trade_date = ss.trade_date
         WHERE ss.trade_date = :d
-          AND ss.role IN ('主线','中军','轮动','催化')
+          AND ss.sector_source = 'sw_l2'
+          AND ss.cycle_phase NOT IN ('未识别','冷')
         ORDER BY fd.heat_score DESC NULLS LAST
         LIMIT :n
     """)
