@@ -185,6 +185,7 @@ def evening(
     cutoff_time: str = typer.Option("18:00", "--cutoff-time"),
     triggered_by: str | None = typer.Option(None, "--triggered-by"),
     mode: str | None = typer.Option(None, "--mode"),
+    generate_pdf: bool = typer.Option(False, "--generate-pdf", help="Also render a PDF alongside the HTML."),
 ) -> None:
     """Render a SmartMoney evening report and save HTML."""
     _override_mode(mode)
@@ -198,6 +199,10 @@ def evening(
         on_log=lambda m: console.print(f"  {m}"),
     )
     console.print(f"\n[bold green]Report saved:[/bold green] {path}")
+    if generate_pdf:
+        from ifa.core.render.pdf import html_to_pdf
+        pdf_path = html_to_pdf(path)
+        console.print(f"[bold green]PDF saved:[/bold green] {pdf_path}")
 
 
 # ─── Multi-day ETL backfill ───────────────────────────────────────────────────

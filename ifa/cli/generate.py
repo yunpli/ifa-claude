@@ -27,6 +27,7 @@ def macro(
         help="HH:MM Beijing time. Default 08:45 for morning, 17:30 for evening."),
     triggered_by: str | None = typer.Option(None, "--triggered-by"),
     mode: str | None = typer.Option(None, "--mode", help="test|manual|production"),
+    generate_pdf: bool = typer.Option(False, "--generate-pdf", help="Also render a PDF alongside the HTML."),
 ) -> None:
     """Render a Macro report end-to-end and save HTML to the output directory."""
     _override_mode(mode)
@@ -56,6 +57,10 @@ def macro(
         raise typer.BadParameter(f"slot must be 'morning' or 'evening' (got {slot})")
 
     console.print(f"\n[bold green]Report saved:[/bold green] {path}")
+    if generate_pdf:
+        from ifa.core.render.pdf import html_to_pdf
+        pdf_path = html_to_pdf(path)
+        console.print(f"[bold green]PDF saved:[/bold green] {pdf_path}")
 
 
 @app.command("tech")
@@ -68,6 +73,7 @@ def tech(
         help="HH:MM Beijing time. Default 09:10 for morning, 18:00 for evening."),
     triggered_by: str | None = typer.Option(None, "--triggered-by"),
     mode: str | None = typer.Option(None, "--mode", help="test|manual|production"),
+    generate_pdf: bool = typer.Option(False, "--generate-pdf", help="Also render a PDF alongside the HTML."),
 ) -> None:
     """Render a Tech (AI Five-Layer Cake) report and save HTML."""
     _override_mode(mode)
@@ -95,6 +101,10 @@ def tech(
         raise typer.BadParameter(f"slot must be 'morning' or 'evening' (got {slot})")
 
     console.print(f"\n[bold green]Report saved:[/bold green] {path}")
+    if generate_pdf:
+        from ifa.core.render.pdf import html_to_pdf
+        pdf_path = html_to_pdf(path)
+        console.print(f"[bold green]PDF saved:[/bold green] {pdf_path}")
 
 
 @app.command("market")
@@ -107,6 +117,7 @@ def market(
         help="HH:MM Beijing time. Default 09:10 (morning) / 12:15 (noon) / 18:00 (evening)."),
     triggered_by: str | None = typer.Option(None, "--triggered-by"),
     mode: str | None = typer.Option(None, "--mode"),
+    generate_pdf: bool = typer.Option(False, "--generate-pdf", help="Also render a PDF alongside the HTML."),
 ) -> None:
     """Render the A-share Main report (总指挥型) and save HTML."""
     _override_mode(mode)
@@ -132,6 +143,10 @@ def market(
     else:
         raise typer.BadParameter(f"slot must be 'morning' | 'noon' | 'evening' (got {slot})")
     console.print(f"\n[bold green]Report saved:[/bold green] {path}")
+    if generate_pdf:
+        from ifa.core.render.pdf import html_to_pdf
+        pdf_path = html_to_pdf(path)
+        console.print(f"[bold green]PDF saved:[/bold green] {pdf_path}")
 
 
 @app.command("asset")
@@ -143,6 +158,7 @@ def asset(
         help="HH:MM Beijing time. Default 08:50 for morning, 17:30 for evening."),
     triggered_by: str | None = typer.Option(None, "--triggered-by"),
     mode: str | None = typer.Option(None, "--mode", help="test|manual|production"),
+    generate_pdf: bool = typer.Option(False, "--generate-pdf", help="Also render a PDF alongside the HTML."),
 ) -> None:
     """Render an Asset (cross-asset transmission) report and save HTML."""
     _override_mode(mode)
@@ -172,3 +188,7 @@ def asset(
         raise typer.BadParameter(f"slot must be 'morning' or 'evening' (got {slot})")
 
     console.print(f"\n[bold green]Report saved:[/bold green] {path}")
+    if generate_pdf:
+        from ifa.core.render.pdf import html_to_pdf
+        pdf_path = html_to_pdf(path)
+        console.print(f"[bold green]PDF saved:[/bold green] {pdf_path}")
