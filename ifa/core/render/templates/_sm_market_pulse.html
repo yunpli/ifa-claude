@@ -6,6 +6,15 @@
     <span class="ifa-pulse-state__value">{{ c.market_state }}</span>
     <span class="ifa-pulse-state__date">{{ c.trade_date or '—' }}</span>
   </div>
+  {% if c.mini_chart_svg %}
+  <div class="ifa-pulse-mini">
+    <div class="ifa-pulse-mini__title">10 日资金面水位（成交 vs 北向）</div>
+    <div class="ifa-pulse-mini__svg">{{ c.mini_chart_svg | safe }}</div>
+    <div class="ifa-pulse-mini__axis">
+      {% for d in c.mini_chart_dates %}<span>{{ d }}</span>{% endfor %}
+    </div>
+  </div>
+  {% endif %}
   <div class="ifa-pulse-grid">
     <div class="ifa-pulse-cell">
       <div class="ifa-pulse-cell__lbl">总成交额</div>
@@ -48,5 +57,10 @@
 .ifa-pulse-cell__val .up{color:var(--up);}.ifa-pulse-cell__val .down{color:var(--down);}
 .ifa-pulse-cell__unit{font-size:11px;color:var(--ink-muted);font-weight:400;}
 .ifa-pulse-cell__sub{font-size:11px;color:var(--ink-soft);margin-top:4px;}
+.ifa-pulse-mini{margin-bottom:10px;border:1px solid var(--rule);background:var(--paper-tint);padding:8px 12px;}
+.ifa-pulse-mini__title{font-size:10.5px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;margin-bottom:4px;}
+.ifa-pulse-mini__svg{display:flex;justify-content:center;}
+.ifa-pulse-mini__svg svg{max-width:100%;height:auto;}
+.ifa-pulse-mini__axis{display:flex;justify-content:space-between;font-family:var(--font-mono);font-size:9.5px;color:var(--ink-muted);padding:0 6px;margin-top:2px;}
 @media (max-width:720px){.ifa-pulse-grid{grid-template-columns:repeat(2,1fr);}}
 </style>

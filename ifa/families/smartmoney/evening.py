@@ -93,6 +93,7 @@ class SMEveningCtx:
     cycle_rows: list[CycleGridRow]
     cycle_trajectory: list[CycleTrajectoryRow]
     transition_model: TransitionMatrixModel | None
+    pulse_series: dict[str, Any]
     target_pool: list[TomorrowTarget]
     structures: list[SectorStructureRow]
     candidates: list[CandidateStock]
@@ -135,6 +136,93 @@ def _fmt_amt(v: float | None, *, scale: float = 1e8, suffix: str = "亿") -> str
 
 def _fmt_pct(v: float | None) -> str:
     return f"{v:+.2f}%" if v is not None else "—"
+
+
+def _svg_dual_line(
+    *,
+    series_a: list[float],
+    series_b: list[float],
+    width: int = 320,
+    height: int = 64,
+    pad_x: int = 4,
+    pad_y: int = 6,
+    color_a: str = "#1d4ed8",
+    color_b: str = "#c2410c",
+    label_a: str = "成交",
+    label_b: str = "北向",
+) -> str:
+    """Inline SVG for two parallel normalized line series.
+
+    Each series is min-max normalized independently (different units).  Empty
+    inputs return ''. Series are padded with circle markers at each datapoint
+    and a baseline ruler at y=midpoint.
+    """
+    n = max(len(series_a), len(series_b))
+    if n < 2:
+        return ""
+
+    inner_w = width - 2 * pad_x
+    inner_h = height - 2 * pad_y
+
+    def _path(series: list[float], color: str) -> tuple[str, list[tuple[float, float]]]:
+        if not series or len(series) < 2:
+            return "", []
+        smin, smax = min(series), max(series)
+        rng = (smax - smin) or 1.0
+        pts: list[tuple[float, float]] = []
+        for i, v in enumerate(series):
+            x = pad_x + (inner_w * i / (len(series) - 1))
+            # Higher value → smaller y (flip)
+            y = pad_y + inner_h * (1.0 - (v - smin) / rng)
+            pts.append((x, y))
+        d = "M " + " L ".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        return d, pts
+
+    path_a, pts_a = _path(series_a, color_a)
+    path_b, pts_b = _path(series_b, color_b)
+
+    circles_a = "".join(
+        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="1.6" fill="{color_a}" />'
+        for x, y in pts_a
+    )
+    circles_b = "".join(
+        f'<circle cx="{x:.1f}" cy="{y:.1f}" r="1.6" fill="{color_b}" />'
+        for x, y in pts_b
+    )
+
+    legend = (
+        f'<g font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="9.5">'
+        f'<text x="{pad_x}" y="{pad_y + 8}" fill="{color_a}">●&#160;{label_a}</text>'
+        f'<text x="{pad_x + 56}" y="{pad_y + 8}" fill="{color_b}">●&#160;{label_b}</text>'
+        f'</g>'
+    )
+
+    # End-of-series labels (latest values)
+    end_labels = ""
+    if pts_a:
+        last_v = series_a[-1]
+        end_labels += (
+            f'<text x="{pts_a[-1][0]+3:.1f}" y="{pts_a[-1][1]+3:.1f}" fill="{color_a}" '
+            f'font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="9">{last_v:.0f}</text>'
+        )
+    if pts_b:
+        last_v = series_b[-1]
+        end_labels += (
+            f'<text x="{pts_b[-1][0]+3:.1f}" y="{pts_b[-1][1]+10:.1f}" fill="{color_b}" '
+            f'font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="9">{last_v:+.0f}</text>'
+        )
+
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+        f'viewBox="0 0 {width} {height}" role="img" aria-label="10日资金面迷你折线图">'
+        f'<path d="{path_a}" fill="none" stroke="{color_a}" stroke-width="1.4" />'
+        f'{circles_a}'
+        f'<path d="{path_b}" fill="none" stroke="{color_b}" stroke-width="1.4" />'
+        f'{circles_b}'
+        f'{legend}'
+        f'{end_labels}'
+        f'</svg>'
+    )
 
 
 # ── Section builders ─────────────────────────────────────────────────────────
@@ -220,6 +308,20 @@ slot: {SLOT}
 
 def _build_e2_pulse(ctx: SMEveningCtx) -> dict:
     p = ctx.pulse
+    series = ctx.pulse_series or {}
+    amt_series = series.get("total_amount_yi") or []
+    north_series = series.get("north_money_yi") or []
+    series_dates = series.get("trade_dates") or []
+
+    mini_chart_svg = ""
+    if amt_series and len(amt_series) >= 2:
+        mini_chart_svg = _svg_dual_line(
+            series_a=amt_series,
+            series_b=north_series if north_series and len(north_series) == len(amt_series) else amt_series,
+            label_a="成交(亿)",
+            label_b="北向(亿)" if north_series else "成交(亿)",
+        )
+
     content = {
         "trade_date": str(p.trade_date) if p.trade_date else None,
         "market_state": p.market_state,
@@ -233,6 +335,10 @@ def _build_e2_pulse(ctx: SMEveningCtx) -> dict:
         "max_consecutive_limit_up": p.max_consecutive_limit_up,
         "blow_up_count": p.blow_up_count,
         "blow_up_rate_pct": round(p.blow_up_rate * 100, 2),
+        "mini_chart_svg": mini_chart_svg,
+        "mini_chart_dates": [d.strftime("%m-%d") for d in series_dates],
+        "mini_chart_amount_today": amt_series[-1] if amt_series else None,
+        "mini_chart_north_today": north_series[-1] if north_series else None,
     }
     return {
         "key": "smartmoney_evening.e2_pulse", "title": "市场资金水位",
@@ -927,6 +1033,7 @@ def run_smartmoney_evening(
         crowded = data.load_crowded_sectors(engine, used_td, top_n=6)
         cycle_rows = data.load_cycle_grid(engine, used_td, top_n=25)
         cycle_trajectory = data.load_cycle_trajectory(engine, used_td, n_days=5, top_n=18)
+        pulse_series = data.load_amount_north_series(engine, used_td, n_days=10)
         target_pool = data.load_tomorrow_target_pool(engine, used_td, top_n=8)
         structures = data.load_sector_structures(engine, used_td, top_n_sectors=6)
         candidates = data.load_candidate_pool(engine, used_td, fillers_n=12, trending_n=12)
@@ -947,6 +1054,7 @@ def run_smartmoney_evening(
             pulse=pulse, flow_in=flow_in, flow_out=flow_out,
             quality=quality, crowded=crowded, cycle_rows=cycle_rows,
             cycle_trajectory=cycle_trajectory, transition_model=transition_model,
+            pulse_series=pulse_series,
             target_pool=target_pool, structures=structures, candidates=candidates,
             yesterday_hypotheses=yesterday, today_outcome=outcome,
             used_trade_date=used_td, on_log=on_log,

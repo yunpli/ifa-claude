@@ -456,6 +456,63 @@ def load_cycle_grid(
     ]
 
 
+def load_amount_north_series(
+    engine: Engine,
+    trade_date: dt.date,
+    *,
+    n_days: int = 10,
+) -> dict[str, Any]:
+    """Last n_days of (total_amount, north_money) for the §02 mini chart.
+
+    total_amount is computed from raw_daily aggregation (authoritative —
+    market_state_daily.total_amount is currently stale across days).
+    north_money comes from raw_moneyflow_hsgt directly.
+
+    Returns:
+      {
+        "trade_dates": [date, ...],         # oldest → newest
+        "total_amount_yi": [float, ...],     # 亿元
+        "north_money_yi":  [float, ...],     # 亿元 (negative = 净流出)
+      }
+    """
+    sql = text(f"""
+        WITH dates AS (
+            SELECT DISTINCT trade_date
+            FROM {SCHEMA}.raw_daily
+            WHERE trade_date <= :d
+            ORDER BY trade_date DESC
+            LIMIT :n
+        ),
+        amt AS (
+            SELECT rd.trade_date, SUM(rd.amount) AS total_amount
+            FROM {SCHEMA}.raw_daily rd
+            JOIN dates d USING (trade_date)
+            GROUP BY rd.trade_date
+        )
+        SELECT a.trade_date, a.total_amount, h.north_money
+        FROM amt a
+        LEFT JOIN {SCHEMA}.raw_moneyflow_hsgt h ON h.trade_date = a.trade_date
+        ORDER BY a.trade_date ASC
+    """)
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"d": trade_date, "n": n_days}).fetchall()
+
+    out_dates: list[dt.date] = []
+    out_amt: list[float] = []
+    out_north: list[float] = []
+    for tdate, amt, north in rows:
+        out_dates.append(tdate)
+        # raw_daily.amount unit is 千元 → 亿元 / 1e5
+        out_amt.append(float(amt) / 1e5 if amt is not None else 0.0)
+        # north_money is 万元 → 亿元 / 1e4
+        out_north.append(float(north) / 1e4 if north is not None else 0.0)
+    return {
+        "trade_dates": out_dates,
+        "total_amount_yi": out_amt,
+        "north_money_yi": out_north,
+    }
+
+
 def load_cycle_trajectory(
     engine: Engine,
     trade_date: dt.date,
