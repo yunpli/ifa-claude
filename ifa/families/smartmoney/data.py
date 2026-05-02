@@ -158,20 +158,41 @@ def load_sector_flows(
     trade_date: dt.date,
     *,
     direction: str = "in",
-    source: str = "dc",
+    source: str = "sw_l2",
     top_n: int = 10,
 ) -> list[SectorFlowRow]:
     """Load top-N inflow / outflow sectors by net_amount.
 
     direction='in' → highest net_amount; direction='out' → most negative.
-    source='dc' uses raw_moneyflow_ind_dc (richest); 'ths' available too.
+    source='sw_l2' uses sector_moneyflow_sw_daily (default, PIT-correct);
+    'dc' uses raw_moneyflow_ind_dc; 'ths' uses raw_moneyflow_ind_ths.
     """
     if direction not in ("in", "out"):
         raise ValueError(f"direction must be 'in' or 'out', got {direction}")
 
     order_dir = "DESC" if direction == "in" else "ASC"
 
-    if source == "dc":
+    if source == "sw_l2":
+        sql = text(f"""
+            SELECT sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
+                   sw.pct_change,
+                   sf.net_amount, NULL AS net_amount_rate,
+                   CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
+                        THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
+                        ELSE NULL END AS elg_buy_rate,
+                   ss.role, ss.cycle_phase
+            FROM {SCHEMA}.sector_moneyflow_sw_daily sf
+            LEFT JOIN {SCHEMA}.raw_sw_daily sw
+                   ON sw.ts_code = sf.l1_code AND sw.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.sector_state_daily ss
+                   ON ss.sector_code = sf.l2_code
+                  AND ss.sector_source = 'sw_l2'
+                  AND ss.trade_date = sf.trade_date
+            WHERE sf.trade_date = :d
+            ORDER BY sf.net_amount {order_dir} NULLS LAST
+            LIMIT :n
+        """)
+    elif source == "dc":
         sql = text(f"""
             SELECT mf.ts_code, 'dc' AS sector_source, mf.name,
                    mf.pct_change, mf.net_amount, mf.net_amount_rate,
@@ -203,7 +224,7 @@ def load_sector_flows(
             LIMIT :n
         """)
     else:
-        raise ValueError(f"source must be 'dc' or 'ths', got {source}")
+        raise ValueError(f"source must be 'sw_l2', 'dc', or 'ths', got {source}")
 
     with engine.connect() as conn:
         rows = conn.execute(sql, {"d": trade_date, "n": top_n}).fetchall()
@@ -228,36 +249,66 @@ def load_quality_flows(
     engine: Engine,
     trade_date: dt.date,
     *,
+    source: str = "sw_l2",
     top_n: int = 8,
 ) -> list[SectorFlowRow]:
-    """High-quality inflow sectors:放量 + 上涨 + 高 elg_rate + 趋势确认.
+    """High-quality inflow sectors: 放量 + 上涨 + 高 elg_rate + 趋势确认.
 
     Heuristic: heat_score >= 0.65 AND trend_score >= 0.60 AND
                role IN ('主线','中军','轮动','催化') AND pct_change > 0.5.
+    source='sw_l2' (default) uses sector_moneyflow_sw_daily; 'dc' uses DC.
+    Falls back gracefully if factor_daily has no sw_l2 rows yet (pre-C2).
     """
-    sql = text(f"""
-        SELECT mf.ts_code, 'dc' AS sector_source, mf.name,
-               mf.pct_change, mf.net_amount, mf.net_amount_rate,
-               mf.buy_elg_amount_rate,
-               ss.role, ss.cycle_phase
-        FROM {SCHEMA}.raw_moneyflow_ind_dc mf
-        JOIN {SCHEMA}.factor_daily fd
-              ON fd.sector_code = mf.ts_code
-             AND fd.sector_source = 'dc'
-             AND fd.trade_date = mf.trade_date
-        JOIN {SCHEMA}.sector_state_daily ss
-              ON ss.sector_code = mf.ts_code
-             AND ss.sector_source = 'dc'
-             AND ss.trade_date = mf.trade_date
-        WHERE mf.trade_date = :d
-          AND mf.content_type IN ('概念','行业')
-          AND fd.heat_score >= 0.65
-          AND fd.trend_score >= 0.60
-          AND ss.role IN ('主线','中军','轮动','催化')
-          AND mf.pct_change > 0.5
-        ORDER BY fd.heat_score DESC
-        LIMIT :n
-    """)
+    if source == "sw_l2":
+        sql = text(f"""
+            SELECT sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
+                   sw.pct_change, sf.net_amount, NULL AS net_amount_rate,
+                   CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
+                        THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
+                        ELSE NULL END AS elg_buy_rate,
+                   ss.role, ss.cycle_phase
+            FROM {SCHEMA}.sector_moneyflow_sw_daily sf
+            JOIN {SCHEMA}.factor_daily fd
+                  ON fd.sector_code = sf.l2_code
+                 AND fd.sector_source = 'sw_l2'
+                 AND fd.trade_date = sf.trade_date
+            JOIN {SCHEMA}.sector_state_daily ss
+                  ON ss.sector_code = sf.l2_code
+                 AND ss.sector_source = 'sw_l2'
+                 AND ss.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.raw_sw_daily sw
+                   ON sw.ts_code = sf.l1_code AND sw.trade_date = sf.trade_date
+            WHERE sf.trade_date = :d
+              AND fd.heat_score >= 0.65
+              AND fd.trend_score >= 0.60
+              AND ss.role IN ('主线','中军','轮动','催化')
+            ORDER BY fd.heat_score DESC
+            LIMIT :n
+        """)
+    else:
+        sql = text(f"""
+            SELECT mf.ts_code, 'dc' AS sector_source, mf.name,
+                   mf.pct_change, mf.net_amount, mf.net_amount_rate,
+                   mf.buy_elg_amount_rate,
+                   ss.role, ss.cycle_phase
+            FROM {SCHEMA}.raw_moneyflow_ind_dc mf
+            JOIN {SCHEMA}.factor_daily fd
+                  ON fd.sector_code = mf.ts_code
+                 AND fd.sector_source = 'dc'
+                 AND fd.trade_date = mf.trade_date
+            JOIN {SCHEMA}.sector_state_daily ss
+                  ON ss.sector_code = mf.ts_code
+                 AND ss.sector_source = 'dc'
+                 AND ss.trade_date = mf.trade_date
+            WHERE mf.trade_date = :d
+              AND mf.content_type IN ('概念','行业')
+              AND fd.heat_score >= 0.65
+              AND fd.trend_score >= 0.60
+              AND ss.role IN ('主线','中军','轮动','催化')
+              AND mf.pct_change > 0.5
+            ORDER BY fd.heat_score DESC
+            LIMIT :n
+        """)
     with engine.connect() as conn:
         rows = conn.execute(sql, {"d": trade_date, "n": top_n}).fetchall()
 
@@ -278,29 +329,59 @@ def load_crowded_sectors(
     engine: Engine,
     trade_date: dt.date,
     *,
+    source: str = "sw_l2",
     top_n: int = 6,
 ) -> list[SectorFlowRow]:
-    """Crowded sectors: 高 crowding_score AND (heat 高位 + pct 滞涨)."""
-    sql = text(f"""
-        SELECT mf.ts_code, 'dc' AS sector_source, mf.name,
-               mf.pct_change, mf.net_amount, mf.net_amount_rate,
-               mf.buy_elg_amount_rate,
-               ss.role, ss.cycle_phase
-        FROM {SCHEMA}.factor_daily fd
-        JOIN {SCHEMA}.raw_moneyflow_ind_dc mf
-              ON fd.sector_code = mf.ts_code
-             AND fd.sector_source = 'dc'
-             AND fd.trade_date = mf.trade_date
-        LEFT JOIN {SCHEMA}.sector_state_daily ss
-              ON ss.sector_code = fd.sector_code
-             AND ss.sector_source = fd.sector_source
-             AND ss.trade_date = fd.trade_date
-        WHERE fd.trade_date = :d
-          AND fd.crowding_score >= 0.55
-          AND mf.content_type IN ('概念','行业')
-        ORDER BY fd.crowding_score DESC
-        LIMIT :n
-    """)
+    """Crowded sectors: 高 crowding_score AND (heat 高位 + pct 滞涨).
+
+    source='sw_l2' (default) uses sector_moneyflow_sw_daily; 'dc' uses DC.
+    """
+    if source == "sw_l2":
+        sql = text(f"""
+            SELECT sf.l2_code, 'sw_l2' AS sector_source, sf.l2_name,
+                   sw.pct_change, sf.net_amount, NULL AS net_amount_rate,
+                   CASE WHEN (sf.buy_elg_amount + sf.sell_elg_amount) > 0
+                        THEN sf.buy_elg_amount / (sf.buy_elg_amount + sf.sell_elg_amount)
+                        ELSE NULL END AS elg_buy_rate,
+                   ss.role, ss.cycle_phase
+            FROM {SCHEMA}.factor_daily fd
+            JOIN {SCHEMA}.sector_moneyflow_sw_daily sf
+                  ON fd.sector_code = sf.l2_code
+                 AND fd.sector_source = 'sw_l2'
+                 AND fd.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.raw_sw_daily sw
+                   ON sw.ts_code = sf.l1_code AND sw.trade_date = sf.trade_date
+            LEFT JOIN {SCHEMA}.sector_state_daily ss
+                  ON ss.sector_code = fd.sector_code
+                 AND ss.sector_source = fd.sector_source
+                 AND ss.trade_date = fd.trade_date
+            WHERE fd.trade_date = :d
+              AND fd.crowding_score >= 0.55
+              AND fd.sector_source = 'sw_l2'
+            ORDER BY fd.crowding_score DESC
+            LIMIT :n
+        """)
+    else:
+        sql = text(f"""
+            SELECT mf.ts_code, 'dc' AS sector_source, mf.name,
+                   mf.pct_change, mf.net_amount, mf.net_amount_rate,
+                   mf.buy_elg_amount_rate,
+                   ss.role, ss.cycle_phase
+            FROM {SCHEMA}.factor_daily fd
+            JOIN {SCHEMA}.raw_moneyflow_ind_dc mf
+                  ON fd.sector_code = mf.ts_code
+                 AND fd.sector_source = 'dc'
+                 AND fd.trade_date = mf.trade_date
+            LEFT JOIN {SCHEMA}.sector_state_daily ss
+                  ON ss.sector_code = fd.sector_code
+                 AND ss.sector_source = fd.sector_source
+                 AND ss.trade_date = fd.trade_date
+            WHERE fd.trade_date = :d
+              AND fd.crowding_score >= 0.55
+              AND mf.content_type IN ('概念','行业')
+            ORDER BY fd.crowding_score DESC
+            LIMIT :n
+        """)
     with engine.connect() as conn:
         rows = conn.execute(sql, {"d": trade_date, "n": top_n}).fetchall()
     return [
@@ -320,7 +401,7 @@ def load_cycle_grid(
     engine: Engine,
     trade_date: dt.date,
     *,
-    sources: tuple[str, ...] = ("sw", "dc"),
+    sources: tuple[str, ...] = ("sw_l2", "sw", "dc"),
     top_n: int = 25,
 ) -> list[CycleGridRow]:
     """Sector cycle phases — top by heat_score within active phases."""
