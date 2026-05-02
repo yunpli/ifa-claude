@@ -84,7 +84,7 @@ def _build_s1_tone(ctx: MarketCtx) -> dict:
         f"全 A 成交 {breadth.total_amount} 万亿 (前日 {breadth.total_amount_prev}); "
         f"涨/跌/平={breadth.up_count}/{breadth.down_count}/{breadth.flat_count}; "
         f"涨停 {breadth.limit_up_count}/跌停 {breadth.limit_down_count}; "
-        f"炸板率 {breadth.broke_limit_pct*100:.0f}% if not None else N/A; "
+        f"炸板率 {f'{breadth.broke_limit_pct*100:.0f}%' if breadth.broke_limit_pct is not None else 'N/A'}; "
         f"连板高度 {breadth.max_consec_streak}"
     )
     flows = ctx.flows
