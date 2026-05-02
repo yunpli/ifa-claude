@@ -35,6 +35,8 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+import math
+
 from .common import (
     consecutive_positive,
     cross_sectional_rank,
@@ -90,13 +92,12 @@ def _load_dc_history(
     start = trade_date - dt.timedelta(days=n_days * 2)  # calendar days ≈ 2× trading days
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "start": start}).fetchall()
+    _COLS = ["trade_date", "ts_code", "name", "content_type",
+             "pct_change", "net_amount", "net_amount_rate",
+             "buy_elg_amount", "buy_elg_amount_rate", "rank"]
     if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=[
-        "trade_date", "ts_code", "name", "content_type",
-        "pct_change", "net_amount", "net_amount_rate",
-        "buy_elg_amount", "buy_elg_amount_rate", "rank",
-    ])
+        return pd.DataFrame(columns=_COLS)
+    df = pd.DataFrame(rows, columns=_COLS)
     df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
     for col in ["pct_change", "net_amount", "net_amount_rate", "buy_elg_amount", "buy_elg_amount_rate"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -229,9 +230,10 @@ def _load_sw_history(
     start = trade_date - dt.timedelta(days=n_days * 2)
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "start": start}).fetchall()
+    _COLS = ["trade_date", "ts_code", "name", "pct_change", "amount", "vol"]
     if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=["trade_date", "ts_code", "name", "pct_change", "amount", "vol"])
+        return pd.DataFrame(columns=_COLS)
+    df = pd.DataFrame(rows, columns=_COLS)
     df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
     for col in ["pct_change", "amount", "vol"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -337,9 +339,10 @@ def _load_ths_history(
     start = trade_date - dt.timedelta(days=n_days * 2)
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "start": start}).fetchall()
+    _COLS = ["trade_date", "ts_code", "industry", "pct_change", "net_amount"]
     if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=["trade_date", "ts_code", "industry", "pct_change", "net_amount"])
+        return pd.DataFrame(columns=_COLS)
+    df = pd.DataFrame(rows, columns=_COLS)
     df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
     for col in ["pct_change", "net_amount"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -414,9 +417,10 @@ def _load_kpl_history(
     start = trade_date - dt.timedelta(days=n_days * 2)
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "start": start}).fetchall()
+    _COLS = ["trade_date", "ts_code", "name", "z_t_num", "up_num"]
     if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=["trade_date", "ts_code", "name", "z_t_num", "up_num"])
+        return pd.DataFrame(columns=_COLS)
+    df = pd.DataFrame(rows, columns=_COLS)
     df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
     for col in ["z_t_num", "up_num"]:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -524,13 +528,12 @@ def _load_sw_l2_history(
     start = trade_date - dt.timedelta(days=n_days * 2)
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "start": start}).fetchall()
+    _COLS = ["trade_date", "ts_code", "name",
+             "net_amount", "buy_elg_amount", "sell_elg_amount",
+             "stock_count", "pct_change"]
     if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=[
-        "trade_date", "ts_code", "name",
-        "net_amount", "buy_elg_amount", "sell_elg_amount",
-        "stock_count", "pct_change",
-    ])
+        return pd.DataFrame(columns=_COLS)
+    df = pd.DataFrame(rows, columns=_COLS)
     df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
     for col in ["net_amount", "buy_elg_amount", "sell_elg_amount", "stock_count", "pct_change"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -667,6 +670,13 @@ def write_factor_daily(engine: Engine, rows: list[FactorRow]) -> int:
             computed_at        = now()
     """)
 
+    def _clean(v: object) -> object:
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        if isinstance(v, dict):
+            return {k: _clean(w) for k, w in v.items()}
+        return v
+
     params_list = [
         {
             "trade_date": r.trade_date,
@@ -677,7 +687,7 @@ def write_factor_daily(engine: Engine, rows: list[FactorRow]) -> int:
             "trend_score": r.trend_score,
             "persistence_score": r.persistence_score,
             "crowding_score": r.crowding_score,
-            "derived_json": json.dumps(r.derived, ensure_ascii=False),
+            "derived_json": json.dumps(_clean(r.derived), ensure_ascii=False),
         }
         for r in rows
     ]

@@ -32,6 +32,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+import math
+
 import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -235,8 +237,8 @@ def _load_top_inst_codes(
 # ── Scoring ───────────────────────────────────────────────────────────────────
 
 def _parse_consecutive_boards(lu_desc: str | None) -> int:
-    """Parse '3连板' → 3, '一字板' → 1, '首板' → 1, None → 0."""
-    if not lu_desc:
+    """Parse '3连板' → 3, '一字板' → 1, '首板' → 1, None/NaN → 0."""
+    if not lu_desc or not isinstance(lu_desc, str):
         return 0
     s = lu_desc.strip()
     if "连板" in s:
@@ -592,6 +594,14 @@ def write_stock_signals(engine: Engine, signals: list[StockSignal]) -> int:
             evidence_json         = EXCLUDED.evidence_json,
             computed_at           = now()
     """)
+    def _nan_to_none(v: object) -> object:
+        """Replace float NaN/Inf with None — catches pandas NaN leaking into dicts."""
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        if isinstance(v, dict):
+            return {k: _nan_to_none(w) for k, w in v.items()}
+        return v
+
     rows = [
         {
             "trade_date": s.trade_date,
@@ -601,9 +611,9 @@ def write_stock_signals(engine: Engine, signals: list[StockSignal]) -> int:
             "primary_sector_source": s.primary_sector_source,
             "role": s.role,
             "score": s.score,
-            "theme": s.theme,
-            "lu_desc": s.lu_desc,
-            "evidence_json": json.dumps(s.evidence, ensure_ascii=False),
+            "theme": s.theme if isinstance(s.theme, str) else None,
+            "lu_desc": s.lu_desc if isinstance(s.lu_desc, str) else None,
+            "evidence_json": json.dumps(_nan_to_none(s.evidence), ensure_ascii=False),
         }
         for s in signals
     ]
