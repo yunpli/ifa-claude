@@ -355,6 +355,10 @@ def _build_flow_section(
     flows: list[SectorFlowRow],
     order: int,
 ) -> dict:
+    # Filter out index-membership pseudo-sectors (FTSE/MSCI/沪深300 etc.) —
+    # those are stock labels, not industries, so drill-downs are misleading.
+    flows = [f for f in flows if not data.is_non_industry_sector(f.sector_name)]
+
     if not flows:
         return {
             "key": f"smartmoney_evening.e{order}_flow_{direction}",
@@ -365,6 +369,18 @@ def _build_flow_section(
                 "fallback_text": "今日无该方向的数据。",
             },
         }
+
+    # Pre-load top-5 member stocks for each sector (drill-down)
+    top_members: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    if ctx.used_trade_date:
+        try:
+            top_members = data.load_sector_top_members(
+                ctx.engine, ctx.used_trade_date,
+                sectors=[(f.sector_code, f.sector_source) for f in flows],
+                top_n=5,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("[flow] load_sector_top_members failed: %s", exc)
 
     # Build LLM input for batch commentary
     candidates_blob = "\n".join(
@@ -405,6 +421,19 @@ def _build_flow_section(
     rows = []
     for i, s in enumerate(flows):
         comm = by_idx.get(i, {})
+        members = top_members.get((s.sector_code, s.sector_source), [])
+        member_rows = [
+            {
+                "ts_code": m["ts_code"],
+                "name": m["name"],
+                "pct_chg": m["pct_chg"],
+                "pct_chg_display": _fmt_pct(m["pct_chg"]),
+                # net_mf_amount unit is 万元 → 万 display, scaled here
+                "net_mf_yi": round((m["net_mf_amount"] or 0) / 1e4, 2)
+                              if m["net_mf_amount"] is not None else None,
+            }
+            for m in members
+        ]
         rows.append({
             "sector_name": s.sector_name,
             "sector_code": s.sector_code,
@@ -418,6 +447,7 @@ def _build_flow_section(
             "cycle_phase": s.cycle_phase or "—",
             "commentary": comm.get("sector_commentary"),
             "signal_quality": comm.get("signal_quality"),
+            "top_members": member_rows,
         })
 
     return {

@@ -473,6 +473,146 @@ def load_cycle_grid(
     ]
 
 
+def load_sector_top_members(
+    engine: Engine,
+    trade_date: dt.date,
+    *,
+    sectors: list[tuple[str, str]],   # [(sector_code, sector_source), ...]
+    top_n: int = 5,
+) -> dict[tuple[str, str], list[dict[str, Any]]]:
+    """Top-N member stocks per sector by net_mf_amount on trade_date.
+
+    Supports source ∈ {sw_l2, dc, kpl}.  Returns ``{(code, source): [stock, ...]}``
+    where stock dicts have ``ts_code, name, pct_chg, net_mf_amount, amount``.
+    """
+    if not sectors:
+        return {}
+
+    sw_codes = [c for c, s in sectors if s == "sw_l2"]
+    dc_codes = [c for c, s in sectors if s == "dc"]
+    kpl_codes = [c for c, s in sectors if s == "kpl"]
+
+    out: dict[tuple[str, str], list[dict[str, Any]]] = {}
+
+    if sw_codes:
+        snapshot_month = trade_date.replace(day=1)
+        sql = text(f"""
+            SELECT l2_code, ts_code, stock_name, pct_chg, net_mf_amount, amount
+            FROM (
+                SELECT s.l2_code, s.ts_code, s.name AS stock_name,
+                       rd.pct_chg, rd.amount, mf.net_mf_amount,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY s.l2_code
+                           ORDER BY mf.net_mf_amount DESC NULLS LAST
+                       ) AS rn
+                FROM {SCHEMA}.sw_member_monthly s
+                JOIN {SCHEMA}.raw_daily rd
+                      ON rd.ts_code = s.ts_code AND rd.trade_date = :d
+                LEFT JOIN {SCHEMA}.raw_moneyflow mf
+                      ON mf.ts_code = s.ts_code AND mf.trade_date = :d
+                WHERE s.snapshot_month = :sm AND s.l2_code = ANY(:codes)
+            ) ranked
+            WHERE rn <= :n
+            ORDER BY l2_code, rn
+        """)
+        with engine.connect() as conn:
+            rows = conn.execute(sql, {
+                "d": trade_date, "sm": snapshot_month,
+                "codes": sw_codes, "n": top_n,
+            }).fetchall()
+        for r in rows:
+            key = (r[0], "sw_l2")
+            out.setdefault(key, []).append({
+                "ts_code": r[1], "name": r[2],
+                "pct_chg": float(r[3]) if r[3] is not None else None,
+                "net_mf_amount": float(r[4]) if r[4] is not None else None,
+                "amount": float(r[5]) if r[5] is not None else None,
+            })
+
+    if dc_codes:
+        sql = text(f"""
+            SELECT sector_code, ts_code, stock_name, pct_chg, net_mf_amount, amount
+            FROM (
+                SELECT m.ts_code AS sector_code, m.con_code AS ts_code, m.name AS stock_name,
+                       rd.pct_chg, rd.amount, mf.net_mf_amount,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY m.ts_code
+                           ORDER BY mf.net_mf_amount DESC NULLS LAST
+                       ) AS rn
+                FROM {SCHEMA}.raw_dc_member m
+                JOIN {SCHEMA}.raw_daily rd
+                      ON rd.ts_code = m.con_code AND rd.trade_date = :d
+                LEFT JOIN {SCHEMA}.raw_moneyflow mf
+                      ON mf.ts_code = m.con_code AND mf.trade_date = :d
+                WHERE m.trade_date = :d AND m.ts_code = ANY(:codes)
+            ) ranked
+            WHERE rn <= :n
+            ORDER BY sector_code, rn
+        """)
+        with engine.connect() as conn:
+            rows = conn.execute(sql, {"d": trade_date, "codes": dc_codes, "n": top_n}).fetchall()
+        for r in rows:
+            key = (r[0], "dc")
+            out.setdefault(key, []).append({
+                "ts_code": r[1], "name": r[2],
+                "pct_chg": float(r[3]) if r[3] is not None else None,
+                "net_mf_amount": float(r[4]) if r[4] is not None else None,
+                "amount": float(r[5]) if r[5] is not None else None,
+            })
+
+    if kpl_codes:
+        sql = text(f"""
+            SELECT sector_code, ts_code, stock_name, pct_chg, net_mf_amount, amount
+            FROM (
+                SELECT k.con_code AS sector_code, k.ts_code, k.name AS stock_name,
+                       rd.pct_chg, rd.amount, mf.net_mf_amount,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY k.con_code
+                           ORDER BY mf.net_mf_amount DESC NULLS LAST
+                       ) AS rn
+                FROM {SCHEMA}.raw_kpl_concept_cons k
+                JOIN {SCHEMA}.raw_daily rd
+                      ON rd.ts_code = k.ts_code AND rd.trade_date = :d
+                LEFT JOIN {SCHEMA}.raw_moneyflow mf
+                      ON mf.ts_code = k.ts_code AND mf.trade_date = :d
+                WHERE k.trade_date = :d AND k.con_code = ANY(:codes)
+            ) ranked
+            WHERE rn <= :n
+            ORDER BY sector_code, rn
+        """)
+        with engine.connect() as conn:
+            rows = conn.execute(sql, {"d": trade_date, "codes": kpl_codes, "n": top_n}).fetchall()
+        for r in rows:
+            key = (r[0], "kpl")
+            out.setdefault(key, []).append({
+                "ts_code": r[1], "name": r[2],
+                "pct_chg": float(r[3]) if r[3] is not None else None,
+                "net_mf_amount": float(r[4]) if r[4] is not None else None,
+                "amount": float(r[5]) if r[5] is not None else None,
+            })
+
+    return out
+
+
+# Sector-name patterns to exclude from drilldowns (these are stock labels,
+# not industries — they map to constituents of FTSE Russell / MSCI / 沪深300).
+_NON_INDUSTRY_SECTOR_NAMES = {
+    "富时罗素", "富时罗素概念", "MSCI 概念", "MSCI", "MSCI中国",
+    "沪深300", "沪深300成分", "上证50", "中证500",
+}
+
+
+def is_non_industry_sector(name: str | None) -> bool:
+    """True if the sector name is an index-membership tag rather than a real
+    industry/concept (e.g. 'MSCI', '沪深300成分')."""
+    if not name:
+        return False
+    n = name.strip()
+    if n in _NON_INDUSTRY_SECTOR_NAMES:
+        return True
+    return any(tag in n for tag in ("MSCI", "富时罗素", "沪深300", "上证50", "中证500"))
+
+
 def load_amount_north_series(
     engine: Engine,
     trade_date: dt.date,
