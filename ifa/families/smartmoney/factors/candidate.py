@@ -78,8 +78,10 @@ def _load_member_stock_data(
     ts_codes: list[str],
 ) -> pd.DataFrame:
     """Today's price/flow/turnover/cap for candidate stocks."""
+    _COLS = ["ts_code", "pct_chg", "amount", "close", "turnover_rate", "circ_mv",
+             "total_mv", "buy_elg_amount", "sell_elg_amount", "net_mf_amount", "limit_state"]
     if not ts_codes:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_COLS + ["elg_net"])
     sql = f"""
         SELECT
             d.ts_code, d.pct_chg, d.amount, d.close,
@@ -99,13 +101,8 @@ def _load_member_stock_data(
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "codes": ts_codes}).fetchall()
     if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=[
-        "ts_code", "pct_chg", "amount", "close",
-        "turnover_rate", "circ_mv", "total_mv",
-        "buy_elg_amount", "sell_elg_amount", "net_mf_amount",
-        "limit_state",
-    ])
+        return pd.DataFrame(columns=_COLS + ["elg_net"])
+    df = pd.DataFrame(rows, columns=_COLS)
     for c in df.columns:
         if c in ("ts_code", "limit_state"):
             continue
@@ -121,8 +118,9 @@ def _load_member_history(
     n_days: int = 5,
 ) -> pd.DataFrame:
     """Last n_days of pct_chg / amount / elg_net per stock."""
+    _COLS = ["trade_date", "ts_code", "pct_chg", "amount", "elg_net"]
     if not ts_codes:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_COLS)
     start = trade_date - dt.timedelta(days=n_days * 2 + 5)
     sql = f"""
         SELECT
@@ -139,8 +137,8 @@ def _load_member_history(
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "start": start, "codes": ts_codes}).fetchall()
     if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=["trade_date", "ts_code", "pct_chg", "amount", "elg_net"])
+        return pd.DataFrame(columns=_COLS)
+    df = pd.DataFrame(rows, columns=_COLS)
     df["pct_chg"] = pd.to_numeric(df["pct_chg"], errors="coerce")
     df["amount"] = pd.to_numeric(df["amount"], errors="coerce")
     df["elg_net"] = pd.to_numeric(df["elg_net"], errors="coerce")

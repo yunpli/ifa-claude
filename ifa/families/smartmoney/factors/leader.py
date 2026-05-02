@@ -89,8 +89,9 @@ def _load_dc_members(
     sector_codes: list[str],
 ) -> pd.DataFrame:
     """Stock constituents for DC concept sectors on the given date."""
+    _COLS = ["sector_code", "ts_code", "name"]
     if not sector_codes:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_COLS)
     sql = f"""
         SELECT ts_code AS sector_code, con_code AS ts_code, name
         FROM {SCHEMA}.raw_dc_member
@@ -99,8 +100,8 @@ def _load_dc_members(
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "codes": sector_codes}).fetchall()
     if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows, columns=["sector_code", "ts_code", "name"])
+        return pd.DataFrame(columns=_COLS)
+    return pd.DataFrame(rows, columns=_COLS)
 
 
 def _load_kpl_members(
@@ -109,8 +110,9 @@ def _load_kpl_members(
     sector_codes: list[str],
 ) -> pd.DataFrame:
     """Stock constituents for KPL concept sectors on the given date."""
+    _COLS = ["sector_code", "ts_code", "name", "hot_num", "description"]
     if not sector_codes:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_COLS)
     sql = f"""
         SELECT con_code AS sector_code, ts_code, name, hot_num, description
         FROM {SCHEMA}.raw_kpl_concept_cons
@@ -119,8 +121,8 @@ def _load_kpl_members(
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "codes": sector_codes}).fetchall()
     if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows, columns=["sector_code", "ts_code", "name", "hot_num", "description"])
+        return pd.DataFrame(columns=_COLS)
+    return pd.DataFrame(rows, columns=_COLS)
 
 
 def _load_sw_members(
@@ -129,8 +131,9 @@ def _load_sw_members(
     sector_codes: list[str],
 ) -> pd.DataFrame:
     """Stock constituents for SW L2 sectors using PIT-correct monthly snapshot."""
+    _COLS = ["sector_code", "ts_code", "name"]
     if not sector_codes:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_COLS)
     snapshot_month = trade_date.replace(day=1)
     sql = f"""
         SELECT l2_code AS sector_code, ts_code, name
@@ -141,8 +144,8 @@ def _load_sw_members(
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"sm": snapshot_month, "codes": sector_codes}).fetchall()
     if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows, columns=["sector_code", "ts_code", "name"])
+        return pd.DataFrame(columns=_COLS)
+    return pd.DataFrame(rows, columns=_COLS)
 
 
 def _load_stock_data(
@@ -166,15 +169,14 @@ def _load_stock_data(
                ON mf.ts_code = d.ts_code AND mf.trade_date = d.trade_date
         WHERE d.trade_date = :d AND d.ts_code = ANY(:codes)
     """
+    _COLS = ["ts_code", "pct_chg", "amount", "close", "vol",
+             "turnover_rate", "total_mv", "circ_mv",
+             "buy_elg_amount", "sell_elg_amount", "net_mf_amount"]
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "codes": ts_codes}).fetchall()
     if not rows:
-        return pd.DataFrame()
-    df = pd.DataFrame(rows, columns=[
-        "ts_code", "pct_chg", "amount", "close", "vol",
-        "turnover_rate", "total_mv", "circ_mv",
-        "buy_elg_amount", "sell_elg_amount", "net_mf_amount",
-    ])
+        return pd.DataFrame(columns=_COLS + ["elg_net"])
+    df = pd.DataFrame(rows, columns=_COLS)
     for c in df.columns:
         if c == "ts_code":
             continue
@@ -207,12 +209,10 @@ def _load_limit_status(
     """
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date, "codes": ts_codes}).fetchall()
+    _COLS = ["ts_code", "limit_state", "limit_times", "open_times", "lu_desc", "theme", "tag"]
     if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows, columns=[
-        "ts_code", "limit_state", "limit_times", "open_times",
-        "lu_desc", "theme", "tag",
-    ])
+        return pd.DataFrame(columns=_COLS)
+    return pd.DataFrame(rows, columns=_COLS)
 
 
 def _load_top_inst_codes(
@@ -267,7 +267,7 @@ def _limit_bonus(
         return (0.0, consec)
 
     bonus = 0.5  # baseline for any 涨停
-    if lu_desc and "一字板" in lu_desc:
+    if isinstance(lu_desc, str) and "一字板" in lu_desc:
         bonus = 1.0
     elif consec >= 4:
         bonus = 0.95
