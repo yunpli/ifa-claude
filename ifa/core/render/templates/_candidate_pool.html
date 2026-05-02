@@ -2,7 +2,40 @@
 <section class="ifa-section">
   {% include "_section_head.html" %}
   <p class="ifa-section__intro">蓄势待发候选——板块强势但个股尚未充分表现的观察对象。仅供盘中观察 / 验证假设使用，不构成买卖建议。</p>
-  {% if c.candidates %}
+  {% if c.pools %}
+    {% for pool in c.pools %}
+    <div class="ifa-cand-pool" data-pool="{{ pool.label }}">
+      <div class="ifa-cand-pool__head">
+        <span class="ifa-cand-pool__label">{{ pool.label }}</span>
+        <span class="ifa-cand-pool__horizon">{{ pool.horizon }}</span>
+        <span class="ifa-cand-pool__alg">算法 · {{ pool.algorithm }}</span>
+        <span class="ifa-cand-pool__target">{{ pool.target_return }}</span>
+      </div>
+      {% if pool.candidates %}
+      <div class="ifa-cand-grid">
+        {% for r in pool.candidates %}
+        <div class="ifa-cand-card">
+          <div class="ifa-cand-card__head">
+            <div>
+              <span class="ifa-cand-card__name">{{ r.stock_name }}</span>
+              <span class="ifa-cand-card__code">{{ r.stock_code }}</span>
+            </div>
+            <span class="ifa-cand-card__layer">{{ (r.layer_id or '—') | upper }}</span>
+          </div>
+          <div class="ifa-cand-card__row"><span class="ifa-cand-card__lbl">蓄势逻辑</span><span>{{ r.setup_logic or '—' }}</span></div>
+          <div class="ifa-cand-card__row up"><span class="ifa-cand-card__lbl">触发条件</span><span>{{ r.trigger_condition or '—' }}</span></div>
+          <div class="ifa-cand-card__row down"><span class="ifa-cand-card__lbl">失效条件</span><span>{{ r.failure_condition or '—' }}</span></div>
+          <div class="ifa-cand-card__row"><span class="ifa-cand-card__lbl">风险</span><span>{{ r.risk_note or '—' }}</span></div>
+          <div class="ifa-cand-card__strength">信号强度 · {{ r.signal_strength or '—' }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="ifa-empty">{{ pool.label }}今日暂未筛出符合标准的标的。</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% elif c.candidates %}
   <div class="ifa-cand-grid">
     {% for r in c.candidates %}
     <div class="ifa-cand-card">
@@ -26,6 +59,14 @@
   {% endif %}
 </section>
 <style>
+.ifa-cand-pool{margin-bottom:18px;}
+.ifa-cand-pool__head{display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;border-bottom:1px solid var(--rule);padding-bottom:6px;margin-bottom:10px;}
+.ifa-cand-pool__label{font-family:var(--font-serif);font-weight:600;font-size:15px;color:var(--ink);}
+.ifa-cand-pool__horizon{font-size:11px;color:var(--ink-2);background:var(--rule-soft);padding:2px 10px;letter-spacing:0.04em;font-weight:600;}
+.ifa-cand-pool__alg{font-size:10.5px;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;}
+.ifa-cand-pool__target{font-size:11px;color:var(--ink-muted);margin-left:auto;font-style:italic;}
+.ifa-cand-pool[data-pool='短线池'] .ifa-cand-pool__label{color:#c2410c;}
+.ifa-cand-pool[data-pool='中长线池'] .ifa-cand-pool__label{color:#1d4ed8;}
 .ifa-cand-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;}
 .ifa-cand-card{border:1px solid var(--rule);border-left:3px solid var(--accent-2);background:var(--paper-tint);padding:14px 16px;border-radius:2px;}
 .ifa-cand-card__head{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px dashed var(--rule);padding-bottom:6px;margin-bottom:8px;}
@@ -37,5 +78,5 @@
 .ifa-cand-card__row.down .ifa-cand-card__lbl{color:var(--down);}
 .ifa-cand-card__lbl{font-size:10.5px;color:var(--ink-muted);font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding-top:1px;}
 .ifa-cand-card__strength{margin-top:8px;padding-top:6px;border-top:1px solid var(--rule);font-size:11px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:0.06em;font-weight:600;text-align:right;}
-@media (max-width:720px){.ifa-cand-grid{grid-template-columns:1fr;}}
+@media (max-width:720px){.ifa-cand-grid{grid-template-columns:1fr;}.ifa-cand-pool__target{margin-left:0;width:100%;}}
 </style>

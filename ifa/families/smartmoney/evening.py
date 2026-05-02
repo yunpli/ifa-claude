@@ -727,11 +727,24 @@ def _build_e9_structure(ctx: SMEveningCtx) -> dict:
 # ─── E10: Candidate pool (reuse _candidate_pool partial style — but custom) ────
 
 def _build_e10_candidates(ctx: SMEveningCtx) -> dict:
+    """§10 双池分层：短线池 (RF, 1-3天) + 中长线池 (XGB, 1-2月, 目标 +30~50%).
+
+    Until B8 trains the actual RF/XGB models, the source attribution shows
+    『规则版』and the candidates are sourced from candidate.py rule-based
+    filtering (补涨 → 短线; 趋势 → 中长线).  When B8 lands, swap attribution
+    to 『RF 模型』/『XGB 模型』 and update the candidate provenance metadata.
+    """
     fillers = [c for c in ctx.candidates if c.role == "补涨"]
     trending = [c for c in ctx.candidates if c.role == "趋势"]
 
-    def _fmt(c: CandidateStock) -> dict[str, Any]:
+    # Detect whether the underlying signals came from real ML or are rule-based.
+    # Today: stock_signals_daily is rule-based.  Switching is a one-line change.
+    short_attribution = "规则版（B8 后切换 RF）"
+    long_attribution = "规则版（B8 后切换 XGB）"
+
+    def _fmt(c: CandidateStock, *, pool: str) -> dict[str, Any]:
         ev = c.evidence or {}
+        is_short = (pool == "short")
         return {
             "stock_code": c.ts_code, "stock_name": c.name or "—",
             "layer_id": c.role,
@@ -741,24 +754,41 @@ def _build_e10_candidates(ctx: SMEveningCtx) -> dict:
             ),
             "trigger_condition": (
                 f"今日涨幅 {_fmt_pct(c.pct_chg_today)};  评分 {c.score:.3f}"
-                if c.role == "补涨"
+                if is_short
                 else f"5日上涨天数 {ev.get('up_days_5d','—')};  量比 {ev.get('vol_ratio_today','—')}"
             ),
             "failure_condition": (
                 "若主板块切换至退潮 / 龙头分歧 → 失效"
-                if c.role == "补涨"
+                if is_short
                 else "若 5 日上涨天数跌破 3 → 失效"
             ),
             "risk_note": "样本较小，需配合主板块共振验证；不构成买卖建议。",
             "signal_strength": "high" if c.score >= 0.75 else ("medium" if c.score >= 0.55 else "low"),
         }
 
-    cards = [_fmt(c) for c in (fillers[:8] + trending[:8])]
+    short_pool = {
+        "label": "短线池",
+        "horizon": "1–3 个交易日",
+        "target_return": "捕捉板块轮动 / 补涨节奏",
+        "algorithm": short_attribution,
+        "candidates": [_fmt(c, pool="short") for c in fillers[:8]],
+    }
+    long_pool = {
+        "label": "中长线池",
+        "horizon": "1–2 个月",
+        "target_return": "目标 +30~50%（趋势确立 + 资金持续流入）",
+        "algorithm": long_attribution,
+        "candidates": [_fmt(c, pool="long") for c in trending[:8]],
+    }
+
     return {
-        "key": "smartmoney_evening.e10_candidates", "title": "候选股票池",
+        "key": "smartmoney_evening.e10_candidates", "title": "候选股票池（短线 / 中长线）",
         "order": 10, "type": "candidate_pool",
         "content_json": {
-            "candidates": cards,
+            "pools": [short_pool, long_pool],
+            # Backwards-compat: keep flat 'candidates' list so any older
+            # template renders fall back gracefully.
+            "candidates": short_pool["candidates"] + long_pool["candidates"],
             "fallback_text": "今日无符合候选标准的股票。",
         },
     }
