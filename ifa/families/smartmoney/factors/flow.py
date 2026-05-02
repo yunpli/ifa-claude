@@ -717,7 +717,7 @@ def compute_factors_for_date(
         dict mapping source → number of rows written.
     """
     if sources is None:
-        sources = ["dc", "sw", "ths", "kpl", "sw_l2"]
+        sources = ["sw_l2", "sw", "ths", "kpl"]  # dc removed: data only 2023+, evening defaults sw_l2
 
     history_days = int(params.get("factors", {}).get("history_days", 60))
     written: dict[str, int] = {}
