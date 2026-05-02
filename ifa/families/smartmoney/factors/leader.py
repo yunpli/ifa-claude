@@ -62,14 +62,14 @@ def _load_active_sectors(
     engine: Engine,
     trade_date: dt.date,
 ) -> pd.DataFrame:
-    """Sectors with role ∈ {主线, 中军, 轮动, 催化} and source ∈ {dc, kpl}."""
+    """Sectors with role ∈ {主线, 中军, 轮动, 催化} and source ∈ {dc, kpl, sw_l2}."""
     sql = f"""
         SELECT sector_code, sector_source, sector_name, role,
                cycle_phase, role_confidence
         FROM {SCHEMA}.sector_state_daily
         WHERE trade_date = :d
           AND role IN ('主线', '中军', '轮动', '催化')
-          AND sector_source IN ('dc', 'kpl')
+          AND sector_source IN ('dc', 'kpl', 'sw_l2')
     """
     with engine.connect() as conn:
         rows = conn.execute(text(sql), {"d": trade_date}).fetchall()
@@ -119,6 +119,28 @@ def _load_kpl_members(
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame(rows, columns=["sector_code", "ts_code", "name", "hot_num", "description"])
+
+
+def _load_sw_members(
+    engine: Engine,
+    trade_date: dt.date,
+    sector_codes: list[str],
+) -> pd.DataFrame:
+    """Stock constituents for SW L2 sectors using PIT-correct monthly snapshot."""
+    if not sector_codes:
+        return pd.DataFrame()
+    snapshot_month = trade_date.replace(day=1)
+    sql = f"""
+        SELECT l2_code AS sector_code, ts_code, name
+        FROM {SCHEMA}.sw_member_monthly
+        WHERE snapshot_month = :sm
+          AND l2_code = ANY(:codes)
+    """
+    with engine.connect() as conn:
+        rows = conn.execute(text(sql), {"sm": snapshot_month, "codes": sector_codes}).fetchall()
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows, columns=["sector_code", "ts_code", "name"])
 
 
 def _load_stock_data(
@@ -413,11 +435,13 @@ def compute_leaders_for_date(
 
     dc_codes = sectors[sectors["sector_source"] == "dc"]["sector_code"].tolist()
     kpl_codes = sectors[sectors["sector_source"] == "kpl"]["sector_code"].tolist()
+    sw_codes = sectors[sectors["sector_source"] == "sw_l2"]["sector_code"].tolist()
 
     dc_members = _load_dc_members(engine, trade_date, dc_codes)
     kpl_members = _load_kpl_members(engine, trade_date, kpl_codes)
+    sw_members = _load_sw_members(engine, trade_date, sw_codes)
 
-    if dc_members.empty and kpl_members.empty:
+    if dc_members.empty and kpl_members.empty and sw_members.empty:
         log.warning("[leader] no member data for active sectors on %s", trade_date)
         return []
 
@@ -426,6 +450,8 @@ def compute_leaders_for_date(
         dc_members["ts_code"].tolist() if not dc_members.empty else []
     ) | set(
         kpl_members["ts_code"].tolist() if not kpl_members.empty else []
+    ) | set(
+        sw_members["ts_code"].tolist() if not sw_members.empty else []
     ))
 
     stock_data = _load_stock_data(engine, trade_date, all_ts_codes)
@@ -445,9 +471,22 @@ def compute_leaders_for_date(
     """
     with engine.connect() as conn:
         for code, pct in conn.execute(text(sql_pct), {"d": trade_date}):
-            # KPL doesn't have pct_change; we'll use 0 as baseline (median market)
             sector_pct_map[(code, "dc")] = float(pct) if pct is not None else 0.0
             sector_pct_map[(code, "kpl")] = 0.0
+
+    # SW L2: use L1 pct_change as proxy (same L1 → same proxy value within L1 group)
+    if sw_codes:
+        sql_sw_pct = text(f"""
+            SELECT sf.l2_code, sw.pct_change
+            FROM {SCHEMA}.sector_moneyflow_sw_daily sf
+            JOIN {SCHEMA}.raw_sw_daily sw
+                  ON sw.ts_code = sf.l1_code
+                 AND sw.trade_date = sf.trade_date
+            WHERE sf.trade_date = :d AND sf.l2_code = ANY(:codes)
+        """)
+        with engine.connect() as conn:
+            for code, pct in conn.execute(sql_sw_pct, {"d": trade_date, "codes": sw_codes}):
+                sector_pct_map[(code, "sw_l2")] = float(pct) if pct is not None else 0.0
 
     # Score each sector's members and assign roles
     output: list[StockSignal] = []
@@ -468,8 +507,10 @@ def compute_leaders_for_date(
         sec_name = sec["sector_name"]
         if src == "dc":
             mem = dc_members[dc_members["sector_code"] == sec_code]
-        else:
+        elif src == "kpl":
             mem = kpl_members[kpl_members["sector_code"] == sec_code]
+        else:  # sw_l2
+            mem = sw_members[sw_members["sector_code"] == sec_code]
         if mem.empty:
             continue
 

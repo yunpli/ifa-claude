@@ -48,7 +48,7 @@ import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from .leader import StockSignal, _load_active_sectors, _load_dc_members, _load_kpl_members
+from .leader import StockSignal, _load_active_sectors, _load_dc_members, _load_kpl_members, _load_sw_members
 
 log = logging.getLogger(__name__)
 SCHEMA = "smartmoney"
@@ -294,12 +294,15 @@ def compute_candidates_for_date(
 
     dc_codes = sectors[sectors["sector_source"] == "dc"]["sector_code"].tolist()
     kpl_codes = sectors[sectors["sector_source"] == "kpl"]["sector_code"].tolist()
+    sw_codes = sectors[sectors["sector_source"] == "sw_l2"]["sector_code"].tolist()
     dc_members = _load_dc_members(engine, trade_date, dc_codes)
     kpl_members = _load_kpl_members(engine, trade_date, kpl_codes)
+    sw_members = _load_sw_members(engine, trade_date, sw_codes)
 
     all_ts_codes = sorted(set(
         (dc_members["ts_code"].tolist() if not dc_members.empty else [])
         + (kpl_members["ts_code"].tolist() if not kpl_members.empty else [])
+        + (sw_members["ts_code"].tolist() if not sw_members.empty else [])
     ))
     if not all_ts_codes:
         return []
@@ -336,7 +339,11 @@ def compute_candidates_for_date(
         sec_code = sec["sector_code"]
         sec_src = sec["sector_source"]
         sec_name = sec["sector_name"]
-        members = (dc_members if sec_src == "dc" else kpl_members)
+        members = (
+            dc_members if sec_src == "dc"
+            else kpl_members if sec_src == "kpl"
+            else sw_members
+        )
         sec_member_codes = members[members["sector_code"] == sec_code]["ts_code"].tolist()
         if not sec_member_codes:
             continue
@@ -403,7 +410,7 @@ def compute_candidates_for_date(
 
             # Find the most-confident sector this stock belongs to
             primary_sec = None
-            for src, mem_df in (("dc", dc_members), ("kpl", kpl_members)):
+            for src, mem_df in (("dc", dc_members), ("kpl", kpl_members), ("sw_l2", sw_members)):
                 if mem_df.empty:
                     continue
                 hits = mem_df[mem_df["ts_code"] == r["ts_code"]]
