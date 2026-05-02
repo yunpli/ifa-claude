@@ -57,6 +57,8 @@ from ifa.core.report.run import (
 )
 from ifa.families.macro.morning import _safe_chat_json
 
+import numpy as np
+
 from . import data, prompts
 from .llm_aug import (
     concept_cluster as _aug_cc,
@@ -75,6 +77,8 @@ from .data import (
     TomorrowTarget,
 )
 from .transition_matrix import PHASES, TransitionMatrixModel
+from .ml.features import ALL_FEATURE_COLS, build_feature_matrix
+from .ml.persistence import load_model
 
 log = logging.getLogger(__name__)
 
@@ -114,6 +118,7 @@ class SMEveningCtx:
     transition_model: TransitionMatrixModel | None
     pulse_series: dict[str, Any]
     llm_aug: LLMAugContext
+    ml_candidates: dict[str, Any]
     target_pool: list[TomorrowTarget]
     structures: list[SectorStructureRow]
     candidates: list[CandidateStock]
@@ -243,6 +248,102 @@ def _svg_dual_line(
         f'{end_labels}'
         f'</svg>'
     )
+
+
+# ── ML candidate runner (B8.4) ───────────────────────────────────────────────
+
+_ML_VERSION = "v2026_05"
+
+
+def _run_ml_candidates(
+    engine: Engine,
+    trade_date: "dt.date",
+    on_log: "Callable[[str], None]",
+) -> dict[str, Any]:
+    """Score SW L2 sectors with RF (1d) + XGB (20d) and return top picks per pool.
+
+    Returns a dict with keys:
+      short_picks:    list of stock dicts from top-5 RF sectors
+      long_picks:     list of stock dicts from top-5 XGB sectors
+      rf_version:     model version tag
+      xgb_version:    model version tag
+      rf_top_sectors: [{"sector_name":..., "proba":...}, ...]
+      xgb_top_sectors: [...]
+    On any failure returns {} and the caller falls back to rule-based candidates.
+    """
+    try:
+        rf = load_model("random_forest", _ML_VERSION)
+        xgb_model = load_model("xgboost", _ML_VERSION)
+    except FileNotFoundError as exc:
+        on_log(f"  [ml] models not found ({exc}); using rule-based candidates")
+        return {}
+
+    try:
+        features = build_feature_matrix(engine, trade_date, trade_date, source="sw_l2")
+        if features.empty:
+            on_log("  [ml] no sw_l2 features for today; using rule-based candidates")
+            return {}
+
+        X = features[ALL_FEATURE_COLS].values.astype(np.float32)
+        meta = features[["sector_code", "sector_source", "sector_name"]].reset_index(drop=True)
+
+        meta["rf_proba"] = rf.predict_proba(X)
+        meta["xgb_proba"] = xgb_model.predict_proba(X)
+
+        top_rf = meta.nlargest(5, "rf_proba")
+        top_xgb = meta.nlargest(5, "xgb_proba")
+        on_log(
+            f"  [ml] RF top sectors: {', '.join(f'{r.sector_name}({r.rf_proba:.2f})' for _, r in top_rf.iterrows())}"
+        )
+        on_log(
+            f"  [ml] XGB top sectors: {', '.join(f'{r.sector_name}({r.xgb_proba:.2f})' for _, r in top_xgb.iterrows())}"
+        )
+
+        rf_sectors = [(r.sector_code, r.sector_source) for _, r in top_rf.iterrows()]
+        xgb_sectors = [(r.sector_code, r.sector_source) for _, r in top_xgb.iterrows()]
+        rf_members = data.load_sector_top_members(engine, trade_date, sectors=rf_sectors, top_n=4)
+        xgb_members = data.load_sector_top_members(engine, trade_date, sectors=xgb_sectors, top_n=4)
+
+        def _picks(top_df: "pd.DataFrame", members: dict, proba_col: str,
+                   attribution: str, horizon: str) -> list[dict[str, Any]]:
+            result = []
+            for _, sec in top_df.iterrows():
+                stocks = members.get((sec["sector_code"], sec["sector_source"]), [])
+                for stk in stocks[:3]:
+                    result.append({
+                        "ts_code": stk["ts_code"],
+                        "name": stk["name"] or "—",
+                        "sector_name": sec["sector_name"],
+                        "sector_proba": round(float(sec[proba_col]), 3),
+                        "pct_chg": stk["pct_chg"],
+                        "pct_chg_display": _fmt_pct(stk["pct_chg"]),
+                        "net_mf_yi": round(float(stk["net_mf_amount"] or 0) / 1e4, 2)
+                                     if stk["net_mf_amount"] is not None else None,
+                        "algorithm": attribution,
+                        "horizon": horizon,
+                    })
+            return result
+
+        return {
+            "short_picks": _picks(top_rf, rf_members, "rf_proba",
+                                  f"RF 模型 {_ML_VERSION}", "1–3 交易日"),
+            "long_picks": _picks(top_xgb, xgb_members, "xgb_proba",
+                                 f"XGB 模型 {_ML_VERSION}", "1–2 月"),
+            "rf_version": _ML_VERSION,
+            "xgb_version": _ML_VERSION,
+            "rf_top_sectors": [
+                {"sector_name": r["sector_name"], "proba": round(float(r["rf_proba"]), 3)}
+                for _, r in top_rf.iterrows()
+            ],
+            "xgb_top_sectors": [
+                {"sector_name": r["sector_name"], "proba": round(float(r["xgb_proba"]), 3)}
+                for _, r in top_xgb.iterrows()
+            ],
+        }
+    except Exception as exc:  # noqa: BLE001
+        log.warning("[ml_candidates] failed: %s", exc)
+        on_log(f"  [ml] FAILED: {exc}; using rule-based candidates")
+        return {}
 
 
 # ── LLM Aug runner ───────────────────────────────────────────────────────────
@@ -855,28 +956,67 @@ def _build_e8_targets(ctx: SMEveningCtx) -> dict:
             sec_cands = candidates_by_sector_name.get(sec_name, [])
             short_picks = [c for c in sec_cands if c.role == "补涨"][:3]
             long_picks = [c for c in sec_cands if c.role == "趋势"][:3]
-            t["short_picks"] = [
-                {
-                    "ts_code": c.ts_code, "name": c.name or "—",
-                    "pct_chg_today": c.pct_chg_today,
-                    "pct_chg_display": _fmt_pct(c.pct_chg_today),
-                    "score": round(c.score, 3),
-                    "algorithm": "规则版（B8 后切换 RF）",
-                    "horizon": "1–3 日",
-                }
-                for c in short_picks
-            ]
-            t["long_picks"] = [
-                {
-                    "ts_code": c.ts_code, "name": c.name or "—",
-                    "pct_chg_today": c.pct_chg_today,
-                    "pct_chg_display": _fmt_pct(c.pct_chg_today),
-                    "score": round(c.score, 3),
-                    "algorithm": "规则版（B8 后切换 XGB）",
-                    "horizon": "1–2 月",
-                }
-                for c in long_picks
-            ]
+            ml = ctx.ml_candidates or {}
+            rf_ver = ml.get("rf_version", _ML_VERSION)
+            xgb_ver = ml.get("xgb_version", _ML_VERSION)
+            rf_label = f"RF 模型 {rf_ver}" if ml.get("short_picks") else "规则版（ML备用）"
+            xgb_label = f"XGB 模型 {xgb_ver}" if ml.get("long_picks") else "规则版（ML备用）"
+
+            # Prefer ML sector picks for this target sector if available
+            ml_short = {s["ts_code"]: s for s in ml.get("short_picks", [])
+                        if s.get("sector_name") == sec_name}
+            ml_long = {s["ts_code"]: s for s in ml.get("long_picks", [])
+                       if s.get("sector_name") == sec_name}
+
+            if ml_short:
+                t["short_picks"] = [
+                    {
+                        "ts_code": s["ts_code"], "name": s["name"],
+                        "pct_chg_today": s.get("pct_chg"),
+                        "pct_chg_display": s.get("pct_chg_display", "—"),
+                        "score": s.get("sector_proba", 0),
+                        "algorithm": rf_label,
+                        "horizon": "1–3 日",
+                    }
+                    for s in list(ml_short.values())[:3]
+                ]
+            else:
+                t["short_picks"] = [
+                    {
+                        "ts_code": c.ts_code, "name": c.name or "—",
+                        "pct_chg_today": c.pct_chg_today,
+                        "pct_chg_display": _fmt_pct(c.pct_chg_today),
+                        "score": round(c.score, 3),
+                        "algorithm": rf_label,
+                        "horizon": "1–3 日",
+                    }
+                    for c in short_picks
+                ]
+
+            if ml_long:
+                t["long_picks"] = [
+                    {
+                        "ts_code": s["ts_code"], "name": s["name"],
+                        "pct_chg_today": s.get("pct_chg"),
+                        "pct_chg_display": s.get("pct_chg_display", "—"),
+                        "score": s.get("sector_proba", 0),
+                        "algorithm": xgb_label,
+                        "horizon": "1–2 月",
+                    }
+                    for s in list(ml_long.values())[:3]
+                ]
+            else:
+                t["long_picks"] = [
+                    {
+                        "ts_code": c.ts_code, "name": c.name or "—",
+                        "pct_chg_today": c.pct_chg_today,
+                        "pct_chg_display": _fmt_pct(c.pct_chg_today),
+                        "score": round(c.score, 3),
+                        "algorithm": xgb_label,
+                        "horizon": "1–2 月",
+                    }
+                    for c in long_picks
+                ]
     return {
         "key": "smartmoney_evening.e8_targets", "title": section_title,
         "order": 8, "type": "sm_tomorrow_targets",
@@ -914,59 +1054,97 @@ def _build_e9_structure(ctx: SMEveningCtx) -> dict:
 # ─── E10: Candidate pool (reuse _candidate_pool partial style — but custom) ────
 
 def _build_e10_candidates(ctx: SMEveningCtx) -> dict:
-    """§10 双池分层：短线池 (RF, 1-3天) + 中长线池 (XGB, 1-2月, 目标 +30~50%).
+    """§10 双池分层：短线池 (RF, 1-3天) + 中长线池 (XGB, 1-2月).
 
-    Until B8 trains the actual RF/XGB models, the source attribution shows
-    『规则版』and the candidates are sourced from candidate.py rule-based
-    filtering (补涨 → 短线; 趋势 → 中长线).  When B8 lands, swap attribution
-    to 『RF 模型』/『XGB 模型』 and update the candidate provenance metadata.
+    Preferred path: ML sector predictions from ctx.ml_candidates (B8.4).
+    Fallback: rule-based filtering from ctx.candidates (补涨 → 短线; 趋势 → 中长线).
     """
-    fillers = [c for c in ctx.candidates if c.role == "补涨"]
-    trending = [c for c in ctx.candidates if c.role == "趋势"]
+    ml = ctx.ml_candidates or {}
+    use_ml = bool(ml.get("short_picks") or ml.get("long_picks"))
 
-    # Detect whether the underlying signals came from real ML or are rule-based.
-    # Today: stock_signals_daily is rule-based.  Switching is a one-line change.
-    short_attribution = "规则版（B8 后切换 RF）"
-    long_attribution = "规则版（B8 后切换 XGB）"
+    if use_ml:
+        short_attribution = f"RF 模型 {ml.get('rf_version', _ML_VERSION)}"
+        long_attribution = f"XGB 模型 {ml.get('xgb_version', _ML_VERSION)}"
 
-    def _fmt(c: CandidateStock, *, pool: str) -> dict[str, Any]:
-        ev = c.evidence or {}
-        is_short = (pool == "short")
-        return {
-            "stock_code": c.ts_code, "stock_name": c.name or "—",
-            "layer_id": c.role,
-            "setup_logic": (
-                f"sector={c.primary_sector_name or '—'}; "
-                f"主题={c.theme or '—'}"
-            ),
-            "trigger_condition": (
-                f"今日涨幅 {_fmt_pct(c.pct_chg_today)};  评分 {c.score:.3f}"
-                if is_short
-                else f"5日上涨天数 {ev.get('up_days_5d','—')};  量比 {ev.get('vol_ratio_today','—')}"
-            ),
-            "failure_condition": (
-                "若主板块切换至退潮 / 龙头分歧 → 失效"
-                if is_short
-                else "若 5 日上涨天数跌破 3 → 失效"
-            ),
-            "risk_note": "样本较小，需配合主板块共振验证；不构成买卖建议。",
-            "signal_strength": "high" if c.score >= 0.75 else ("medium" if c.score >= 0.55 else "low"),
+        def _fmt_ml(stk: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "stock_code": stk["ts_code"],
+                "stock_name": stk["name"],
+                "layer_id": "ML短线" if stk.get("horizon", "").startswith("1–3") else "ML中长线",
+                "setup_logic": (
+                    f"板块={stk.get('sector_name', '—')} "
+                    f"(RF概率={stk.get('sector_proba', '—')})"
+                ),
+                "trigger_condition": (
+                    f"今日涨幅 {stk.get('pct_chg_display', '—')};  "
+                    f"主力净流入 {stk['net_mf_yi']:+.2f}亿" if stk.get("net_mf_yi") is not None
+                    else f"今日涨幅 {stk.get('pct_chg_display', '—')}"
+                ),
+                "failure_condition": "RF/XGB 板块概率跌出 top-20% → 失效",
+                "risk_note": "ML 预测基于 SW L2 板块因子，不构成买卖建议。",
+                "signal_strength": (
+                    "high" if stk.get("sector_proba", 0) >= 0.55
+                    else ("medium" if stk.get("sector_proba", 0) >= 0.52 else "low")
+                ),
+            }
+
+        short_pool = {
+            "label": "短线池",
+            "horizon": "1–3 个交易日",
+            "target_return": "RF 模型 top-quintile 板块成员股",
+            "algorithm": short_attribution,
+            "top_sectors": ml.get("rf_top_sectors", []),
+            "candidates": [_fmt_ml(s) for s in ml.get("short_picks", [])[:9]],
         }
+        long_pool = {
+            "label": "中长线池",
+            "horizon": "1–2 个月",
+            "target_return": "XGB 模型 top-quintile 板块成员股",
+            "algorithm": long_attribution,
+            "top_sectors": ml.get("xgb_top_sectors", []),
+            "candidates": [_fmt_ml(s) for s in ml.get("long_picks", [])[:9]],
+        }
+    else:
+        # Rule-based fallback
+        fillers = [c for c in ctx.candidates if c.role == "补涨"]
+        trending = [c for c in ctx.candidates if c.role == "趋势"]
+        short_attribution = "规则版（ML模型加载失败时的备用）"
+        long_attribution = "规则版（ML模型加载失败时的备用）"
 
-    short_pool = {
-        "label": "短线池",
-        "horizon": "1–3 个交易日",
-        "target_return": "捕捉板块轮动 / 补涨节奏",
-        "algorithm": short_attribution,
-        "candidates": [_fmt(c, pool="short") for c in fillers[:8]],
-    }
-    long_pool = {
-        "label": "中长线池",
-        "horizon": "1–2 个月",
-        "target_return": "目标 +30~50%（趋势确立 + 资金持续流入）",
-        "algorithm": long_attribution,
-        "candidates": [_fmt(c, pool="long") for c in trending[:8]],
-    }
+        def _fmt_rule(c: CandidateStock, *, pool: str) -> dict[str, Any]:
+            ev = c.evidence or {}
+            is_short = (pool == "short")
+            return {
+                "stock_code": c.ts_code, "stock_name": c.name or "—",
+                "layer_id": c.role,
+                "setup_logic": f"sector={c.primary_sector_name or '—'}; 主题={c.theme or '—'}",
+                "trigger_condition": (
+                    f"今日涨幅 {_fmt_pct(c.pct_chg_today)};  评分 {c.score:.3f}"
+                    if is_short
+                    else f"5日上涨天数 {ev.get('up_days_5d','—')};  量比 {ev.get('vol_ratio_today','—')}"
+                ),
+                "failure_condition": (
+                    "若主板块切换至退潮 / 龙头分歧 → 失效"
+                    if is_short else "若 5 日上涨天数跌破 3 → 失效"
+                ),
+                "risk_note": "样本较小，需配合主板块共振验证；不构成买卖建议。",
+                "signal_strength": "high" if c.score >= 0.75 else ("medium" if c.score >= 0.55 else "low"),
+            }
+
+        short_pool = {
+            "label": "短线池",
+            "horizon": "1–3 个交易日",
+            "target_return": "捕捉板块轮动 / 补涨节奏",
+            "algorithm": short_attribution,
+            "candidates": [_fmt_rule(c, pool="short") for c in fillers[:8]],
+        }
+        long_pool = {
+            "label": "中长线池",
+            "horizon": "1–2 个月",
+            "target_return": "目标 +30~50%（趋势确立 + 资金持续流入）",
+            "algorithm": long_attribution,
+            "candidates": [_fmt_rule(c, pool="long") for c in trending[:8]],
+        }
 
     return {
         "key": "smartmoney_evening.e10_candidates", "title": "候选股票池（短线 / 中长线）",
@@ -1246,7 +1424,7 @@ _GLOSSARY_TERMS: list[dict[str, str]] = [
     {"section": "§10", "term": "补涨 / 趋势",
      "definition": "补涨=板块强但个股未充分表现（短线池）；趋势=多日上涨 + 资金持续（中长线池）。"},
     {"section": "§10", "term": "RF / XGB 模型",
-     "definition": "短线池 RandomForest（1–3天动量+资金方向）；中长线池 XGBoost（趋势+周期+资金趋势）。当前为规则版，B8 训练后切换。"},
+     "definition": f"短线池 RandomForest {_ML_VERSION}（1d top-quintile, OOS AUC=0.5726, +14.5 pts）；中长线池 XGBoost {_ML_VERSION}（20d top-quintile, OOS AUC=0.541, +8.2 pts）。基于 SW L2 45 个特征，in-sample 2021-01→2025-10。"},
 ]
 
 
@@ -1341,6 +1519,10 @@ def run_smartmoney_evening(
         on_log("running LLM aug modules…")
         llm_aug = _run_llm_aug(engine, llm, used_td, on_log)
 
+        # B8.4: run RF+XGB sector scoring → member stock candidates
+        on_log("running ML candidate scoring…")
+        ml_candidates = _run_ml_candidates(engine, used_td, on_log)
+
         ctx = SMEveningCtx(
             engine=engine, llm=llm, run=run,
             pulse=pulse, flow_in=flow_in, flow_out=flow_out,
@@ -1348,6 +1530,7 @@ def run_smartmoney_evening(
             cycle_trajectory=cycle_trajectory, transition_model=transition_model,
             pulse_series=pulse_series,
             llm_aug=llm_aug,
+            ml_candidates=ml_candidates,
             target_pool=target_pool, structures=structures, candidates=candidates,
             yesterday_hypotheses=yesterday, today_outcome=outcome,
             used_trade_date=used_td, on_log=on_log,
