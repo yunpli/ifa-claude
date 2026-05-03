@@ -1,4 +1,20 @@
 {# Ningbo: position alerts (stop-loss / take-profit triggered today) #}
+{%- macro strategy_zh(v) -%}
+  {%- if v == 'sniper' -%}神枪手
+  {%- elif v == 'treasure_basin' -%}聚宝盆
+  {%- elif v == 'half_year_double' -%}半年翻倍
+  {%- elif v == 'multi' -%}多策略共振
+  {%- else -%}{{ v }}
+  {%- endif -%}
+{%- endmacro -%}
+{%- macro mode_zh(v) -%}
+  {%- if v == 'heuristic' -%}启发式
+  {%- elif v == 'ml_aggressive' -%}ML 激进
+  {%- elif v == 'ml_conservative' -%}ML 稳健
+  {%- elif v == 'ml' -%}ML
+  {%- else -%}{{ v }}
+  {%- endif -%}
+{%- endmacro -%}
 <section class="ifa-section ifa-ningbo-alerts">
   <h2 class="ifa-section__title">{{ s.order }}. {{ s.title }}</h2>
 
@@ -66,7 +82,7 @@
       <table class="ifa-alerts__table">
         <thead>
           <tr>
-            <th>推荐日</th><th>股票</th><th>策略</th><th>模式</th>
+            <th>推荐日</th><th>股票代码</th><th>名称</th><th>策略</th><th>模式</th>
             <th class="num">推荐价</th><th class="num">当前累计</th>
             <th class="num">追踪日</th><th class="num">期间峰值</th>
           </tr>
@@ -75,9 +91,10 @@
           {% for a in sl %}
           <tr>
             <td>{{ a.rec_date }}</td>
-            <td>{{ a.ts_code }}</td>
-            <td>{{ a.strategy }}</td>
-            <td>{{ a.scoring_mode }}</td>
+            <td style="font-family:var(--font-mono);">{{ a.ts_code }}</td>
+            <td>{{ a.name or '—' }}</td>
+            <td>{{ strategy_zh(a.strategy) }}</td>
+            <td>{{ mode_zh(a.scoring_mode) }}</td>
             <td class="num">¥{{ '%.2f'|format(a.rec_price) }}</td>
             <td class="num cum-neg">{{ '%+.2f'|format(a.final_cum_return * 100) }}%</td>
             <td class="num">T+{{ a.outcome_track_day }}</td>
@@ -95,7 +112,7 @@
       <table class="ifa-alerts__table">
         <thead>
           <tr>
-            <th>推荐日</th><th>股票</th><th>策略</th><th>模式</th>
+            <th>推荐日</th><th>股票代码</th><th>名称</th><th>策略</th><th>模式</th>
             <th class="num">推荐价</th><th class="num">当前累计</th>
             <th class="num">追踪日</th>
           </tr>
@@ -104,9 +121,10 @@
           {% for a in tp %}
           <tr>
             <td>{{ a.rec_date }}</td>
-            <td>{{ a.ts_code }}</td>
-            <td>{{ a.strategy }}</td>
-            <td>{{ a.scoring_mode }}</td>
+            <td style="font-family:var(--font-mono);">{{ a.ts_code }}</td>
+            <td>{{ a.name or '—' }}</td>
+            <td>{{ strategy_zh(a.strategy) }}</td>
+            <td>{{ mode_zh(a.scoring_mode) }}</td>
             <td class="num">¥{{ '%.2f'|format(a.rec_price) }}</td>
             <td class="num cum-pos">{{ '%+.2f'|format(a.final_cum_return * 100) }}%</td>
             <td class="num">T+{{ a.outcome_track_day }}</td>

@@ -1,0 +1,204 @@
+{# Ningbo: by-date click-to-expand tracking — only top-5 consensus per day #}
+{%- macro strategy_zh(v) -%}
+  {%- if v == 'sniper' -%}神枪手
+  {%- elif v == 'treasure_basin' -%}聚宝盆
+  {%- elif v == 'half_year_double' -%}半年翻倍
+  {%- elif v == 'multi' -%}多策略
+  {%- else -%}{{ v }}
+  {%- endif -%}
+{%- endmacro -%}
+<section class="ifa-section ifa-ningbo-tcons">
+  <h2 class="ifa-section__title">{{ s.order }}. {{ s.title }}</h2>
+
+  <p class="ifa-section__intro" style="font-size:12px; color:var(--ink-soft); line-height:1.6;">
+    每个日期对应当日 <strong>共识矩阵的 top-5 推荐</strong>（与该日「sec 2」高亮 5 只一致），追踪后续 15 个交易日表现。
+    点击日期标题展开/收起。最近一日默认展开。
+  </p>
+
+  <style>
+    .ifa-tcons__day {
+      border: 1px solid var(--rule-soft);
+      margin-bottom: 8px;
+      border-radius: 3px;
+      background: var(--paper);
+    }
+    .ifa-tcons__day[open] {
+      border-left: 3px solid var(--accent);
+    }
+    .ifa-tcons__summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 8px 12px;
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      font-size: 12.5px;
+      flex-wrap: wrap;
+    }
+    .ifa-tcons__summary::-webkit-details-marker { display: none; }
+    .ifa-tcons__summary::before {
+      content: "▶";
+      font-size: 9px;
+      color: var(--ink-soft);
+      transition: transform 0.15s;
+    }
+    .ifa-tcons__day[open] .ifa-tcons__summary::before {
+      transform: rotate(90deg);
+    }
+    .ifa-tcons__date {
+      font-weight: 600;
+      color: var(--ink);
+      font-family: var(--font-mono);
+    }
+    .ifa-tcons__chip {
+      font-size: 10.5px;
+      padding: 2px 7px;
+      border-radius: 10px;
+      background: var(--paper-tint);
+      color: var(--ink-2);
+    }
+    .ifa-tcons__chip--win { background: var(--up-soft); color: var(--up); }
+    .ifa-tcons__chip--loss { background: var(--down-soft); color: var(--down); }
+    .ifa-tcons__chip--max-stars { background: rgba(217,119,6,0.15); color: #d97706; font-weight: 600; }
+
+    .ifa-tcons__table {
+      width: 100%;
+      font-size: 11.5px;
+      border-collapse: collapse;
+      border-top: 1px dashed var(--rule-soft);
+    }
+    .ifa-tcons__table th, .ifa-tcons__table td {
+      padding: 5px 8px;
+      border-bottom: 1px dotted var(--rule-soft);
+    }
+    .ifa-tcons__table th {
+      background: var(--paper-tint);
+      color: var(--ink-soft);
+      font-size: 10.5px;
+      font-weight: normal;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      text-align: left;
+    }
+    .ifa-tcons__table td.num {
+      font-family: var(--font-mono);
+      text-align: right;
+    }
+    .ifa-tcons__cum-pos { color: var(--up); font-weight: 600; }
+    .ifa-tcons__cum-neg { color: var(--down); font-weight: 600; }
+
+    .ifa-tcons__stars {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #d97706;
+      letter-spacing: 1px;
+    }
+    .ifa-tcons__rank {
+      font-family: var(--font-mono);
+      text-align: center;
+      font-size: 11px;
+    }
+    .ifa-tcons__rank--present { color: var(--ink); font-weight: 600; }
+    .ifa-tcons__rank--absent { color: var(--ink-soft); }
+
+    .ifa-tcons__status {
+      font-size: 10.5px;
+      padding: 1px 6px;
+      border-radius: 2px;
+      font-weight: 500;
+    }
+    .ifa-tcons__status--in_progress { background: var(--paper-tint); color: var(--ink-2); }
+    .ifa-tcons__status--stop_loss   { background: var(--down-soft); color: var(--down); }
+    .ifa-tcons__status--take_profit { background: var(--up-soft); color: var(--up); }
+    .ifa-tcons__status--expired     { background: var(--paper-tint); color: var(--ink-soft); }
+
+    .ifa-tcons__empty {
+      color: var(--ink-soft);
+      font-style: italic;
+      padding: 16px;
+      text-align: center;
+    }
+  </style>
+
+  {% set days = s.content_json.by_date %}
+  {% if days %}
+    {% for day in days %}
+    <details class="ifa-tcons__day" {% if loop.first %}open{% endif %}>
+      <summary class="ifa-tcons__summary">
+        <span class="ifa-tcons__date">{{ day.rec_date }}</span>
+        <span class="ifa-tcons__chip">{{ day.n_picks }} picks</span>
+        {% if day.summary.take_profit > 0 %}<span class="ifa-tcons__chip ifa-tcons__chip--win">✓ 止盈 {{ day.summary.take_profit }}</span>{% endif %}
+        {% if day.summary.stop_loss > 0 %}<span class="ifa-tcons__chip ifa-tcons__chip--loss">⚠ 止损 {{ day.summary.stop_loss }}</span>{% endif %}
+        {% if day.summary.expired > 0 %}<span class="ifa-tcons__chip">● 满15日 {{ day.summary.expired }}</span>{% endif %}
+        {% if day.summary.in_progress > 0 %}<span class="ifa-tcons__chip">… 进行中 {{ day.summary.in_progress }}</span>{% endif %}
+        {% if day.summary.max_stars >= 4 %}
+        <span class="ifa-tcons__chip ifa-tcons__chip--max-stars">最高 {% for _ in range(day.summary.max_stars) %}★{% endfor %}</span>
+        {% endif %}
+      </summary>
+
+      <table class="ifa-tcons__table">
+        <thead>
+          <tr>
+            <th>共识</th>
+            <th>股票代码</th>
+            <th>名称</th>
+            <th>策略</th>
+            <th class="ifa-tcons__rank">启发式</th>
+            <th class="ifa-tcons__rank">激进</th>
+            <th class="ifa-tcons__rank">稳健</th>
+            <th class="num">推荐价</th>
+            <th class="num">峰值</th>
+            <th class="num">最终累计</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in day.picks %}
+          <tr>
+            <td>
+              <span class="ifa-tcons__stars">{% for _ in range(p.stars) %}★{% endfor %}{% for _ in range(5 - p.stars) %}<span style="color:var(--ink-soft);">☆</span>{% endfor %}</span>
+            </td>
+            <td style="font-family:var(--font-mono);">{{ p.ts_code }}</td>
+            <td>{{ p.name or '—' }}</td>
+            <td style="font-size:11px; color:var(--ink-2);">
+              {%- for s in p.strategies.split(",") -%}
+                {{ strategy_zh(s) }}{% if not loop.last %}/{% endif %}
+              {%- endfor -%}
+            </td>
+            <td class="ifa-tcons__rank {% if p.rank_heuristic %}ifa-tcons__rank--present{% else %}ifa-tcons__rank--absent{% endif %}">
+              {%- if p.rank_heuristic -%}#{{ p.rank_heuristic }}{%- else -%}—{%- endif -%}
+            </td>
+            <td class="ifa-tcons__rank {% if p.rank_aggressive %}ifa-tcons__rank--present{% else %}ifa-tcons__rank--absent{% endif %}">
+              {%- if p.rank_aggressive -%}#{{ p.rank_aggressive }}{%- else -%}—{%- endif -%}
+            </td>
+            <td class="ifa-tcons__rank {% if p.rank_conservative %}ifa-tcons__rank--present{% else %}ifa-tcons__rank--absent{% endif %}">
+              {%- if p.rank_conservative -%}#{{ p.rank_conservative }}{%- else -%}—{%- endif -%}
+            </td>
+            <td class="num">¥{{ '%.2f'|format(p.rec_price) }}</td>
+            <td class="num {% if p.peak_cum_return >= 0 %}ifa-tcons__cum-pos{% else %}ifa-tcons__cum-neg{% endif %}">
+              {{ '%+.2f'|format(p.peak_cum_return * 100) }}%
+            </td>
+            <td class="num {% if p.final_cum_return >= 0 %}ifa-tcons__cum-pos{% else %}ifa-tcons__cum-neg{% endif %}">
+              {{ '%+.2f'|format(p.final_cum_return * 100) }}%
+            </td>
+            <td>
+              <span class="ifa-tcons__status ifa-tcons__status--{{ p.outcome_status }}">
+                {%- if p.outcome_status == 'in_progress' -%}进行中
+                {%- elif p.outcome_status == 'stop_loss' -%}⚠ 止损 T+{{ p.outcome_track_day }}
+                {%- elif p.outcome_status == 'take_profit' -%}✓ 止盈 T+{{ p.outcome_track_day }}
+                {%- elif p.outcome_status == 'expired' -%}● 满15日
+                {%- endif -%}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endfor %}
+  {% else %}
+    <div class="ifa-tcons__empty">
+      最近 15 个交易日内尚无追踪记录（首次运行需累积几天数据）。
+    </div>
+  {% endif %}
+</section>

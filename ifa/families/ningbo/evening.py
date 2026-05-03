@@ -213,14 +213,16 @@ def _build_today_recs_section(
     }
 
 
-def _build_alerts_section(alerts_dict: dict) -> dict[str, Any]:
+def _build_alerts_section(alerts_dict: dict, names: dict[str, str] | None = None) -> dict[str, Any]:
     sl = alerts_dict["stop_loss"].to_dict("records") if not alerts_dict["stop_loss"].empty else []
     tp = alerts_dict["take_profit"].to_dict("records") if not alerts_dict["take_profit"].empty else []
-    # serialize dates to strings
+    # serialize dates to strings + attach name
+    names = names or {}
     for lst in (sl, tp):
         for row in lst:
             if isinstance(row.get("rec_date"), dt.date):
                 row["rec_date"] = row["rec_date"].isoformat()
+            row["name"] = names.get(row.get("ts_code"), "")
             for k, v in row.items():
                 if hasattr(v, "__float__") and not isinstance(v, (int, float, bool)):
                     row[k] = float(v)
@@ -233,8 +235,128 @@ def _build_alerts_section(alerts_dict: dict) -> dict[str, Any]:
     }
 
 
+def _build_tracking_consensus_section(
+    engine, on_date: dt.date, names: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Build by-date click-to-expand tracking — top-5 consensus per past day.
+
+    For each past rec_date in the 15-day window:
+      1. Pull all picks (all 3 scoring_modes)
+      2. Compute per-track ranks (within each mode, sorted by confidence_score)
+      3. Compute consensus star score per ts_code (same formula as today's matrix)
+      4. Take top-5 by star score
+      5. Render with sparkline + current cum_return + outcome status
+    """
+    from sqlalchemy import text as _text
+    names = names or {}
+
+    # Pull all recs from past 15 trading days, all scoring_modes
+    earliest = on_date - dt.timedelta(days=30)  # ~15 trading days buffer
+    sql = _text("""
+        SELECT
+            r.rec_date, r.ts_code, r.strategy, r.scoring_mode,
+            r.rec_price, r.confidence_score,
+            o.outcome_status, o.outcome_track_day,
+            o.peak_cum_return, o.trough_cum_return, o.final_cum_return
+        FROM ningbo.recommendations_daily r
+        LEFT JOIN ningbo.recommendation_outcomes o USING (rec_date, ts_code, strategy, scoring_mode)
+        WHERE r.rec_date >= :earliest AND r.rec_date <= :on_date
+          AND r.scoring_mode IN ('heuristic', 'ml_aggressive', 'ml_conservative')
+        ORDER BY r.rec_date DESC, r.scoring_mode, r.confidence_score DESC
+    """)
+    all_recs = pd.read_sql(sql, engine, params={
+        "earliest": earliest, "on_date": on_date,
+    })
+    if all_recs.empty:
+        return {
+            "key": "ningbo.s4_tracking_consensus",
+            "title": "近 15 交易日推荐复盘 (按日期展开 · 仅 top-5 共识)",
+            "order": 4, "type": "ningbo_tracking_consensus",
+            "content_json": {"by_date": []},
+        }
+
+    # Per-track rank within each (rec_date, scoring_mode), sorted by confidence DESC
+    all_recs["rank_in_track"] = (
+        all_recs.groupby(["rec_date", "scoring_mode"])["confidence_score"]
+                .rank(method="min", ascending=False).astype(int)
+    )
+
+    by_date_payload: list[dict] = []
+
+    for rd, day_df in all_recs.groupby("rec_date", sort=False):
+        day_df = day_df.copy()
+        # Compute consensus score per ts_code
+        score_per_ts: dict[str, dict] = {}
+        for _, r in day_df.iterrows():
+            ts = r["ts_code"]
+            mode = r["scoring_mode"]
+            rk = int(r["rank_in_track"])
+            if rk > 5:
+                continue   # top-5 only contributes to consensus
+            entry = score_per_ts.setdefault(ts, {
+                "ts_code": ts,
+                "rank_heuristic": None, "rank_aggressive": None, "rank_conservative": None,
+                "score_total": 0,
+                "rec_price": float(r["rec_price"]),
+                "outcome_status": r["outcome_status"] or "in_progress",
+                "outcome_track_day": int(r["outcome_track_day"]) if pd.notna(r["outcome_track_day"]) else None,
+                "peak_cum_return": float(r["peak_cum_return"]) if pd.notna(r["peak_cum_return"]) else 0.0,
+                "final_cum_return": float(r["final_cum_return"]) if pd.notna(r["final_cum_return"]) else 0.0,
+                "strategies": set(),
+            })
+            entry["strategies"].add(r["strategy"])
+            entry["score_total"] += max(0, 6 - rk)
+            if mode == "heuristic":      entry["rank_heuristic"]    = rk
+            elif mode == "ml_aggressive":   entry["rank_aggressive"]   = rk
+            elif mode == "ml_conservative": entry["rank_conservative"] = rk
+
+        if not score_per_ts:
+            continue
+
+        # Top-5 by score
+        top5 = sorted(score_per_ts.values(), key=lambda x: x["score_total"], reverse=True)[:5]
+
+        # Compute stars (same formula as today's matrix)
+        for p in top5:
+            sc = p["score_total"]
+            if   sc >= 13: p["stars"] = 5
+            elif sc >= 10: p["stars"] = 4
+            elif sc >= 7:  p["stars"] = 3
+            elif sc >= 4:  p["stars"] = 2
+            else:          p["stars"] = 1
+            p["name"] = names.get(p["ts_code"], "")
+            p["strategies"] = ",".join(sorted(p["strategies"]))
+
+        # Per-day summary
+        n_take_profit  = sum(1 for p in top5 if p["outcome_status"] == "take_profit")
+        n_stop_loss    = sum(1 for p in top5 if p["outcome_status"] == "stop_loss")
+        n_expired      = sum(1 for p in top5 if p["outcome_status"] == "expired")
+        n_in_progress  = sum(1 for p in top5 if p["outcome_status"] == "in_progress")
+
+        by_date_payload.append({
+            "rec_date": rd.isoformat() if hasattr(rd, "isoformat") else str(rd),
+            "n_picks": len(top5),
+            "summary": {
+                "take_profit": n_take_profit,
+                "stop_loss":   n_stop_loss,
+                "expired":     n_expired,
+                "in_progress": n_in_progress,
+                "max_stars":   max((p["stars"] for p in top5), default=0),
+            },
+            "picks": top5,
+        })
+
+    return {
+        "key": "ningbo.s4_tracking_consensus",
+        "title": "近 15 交易日推荐复盘 (按日期展开 · 仅 top-5 共识)",
+        "order": 4,
+        "type": "ningbo_tracking_consensus",
+        "content_json": {"by_date": by_date_payload},
+    }
+
+
 def _build_tracking_section(engine, on_date: dt.date) -> dict[str, Any]:
-    """Build the recap section split by scoring_mode."""
+    """LEGACY 3-pane tracking by scoring_mode (kept for backward compat)."""
     in_prog = fetch_in_progress_summary(engine, on_date)
 
     def make_pane(mode: str, label: str):
@@ -663,6 +785,25 @@ def run_ningbo_evening(
         on_log(f"  alerts: stop_loss={len(alerts['stop_loss'])}, "
                f"take_profit={len(alerts['take_profit'])}")
 
+        # Enrich names: include alert ts_codes + historical tracking ts_codes
+        # so every code displayed has a Chinese name resolved.
+        extra_codes: set[str] = set()
+        for col in ("stop_loss", "take_profit"):
+            if not alerts[col].empty:
+                extra_codes.update(alerts[col]["ts_code"].tolist())
+        from sqlalchemy import text as _text
+        with engine.connect() as _c:
+            _hist_codes = _c.execute(_text("""
+                SELECT DISTINCT ts_code FROM ningbo.recommendations_daily
+                WHERE rec_date >= :earliest AND rec_date <= :on_date
+            """), {"earliest": report_date - dt.timedelta(days=30), "on_date": report_date}).fetchall()
+        extra_codes.update(r[0] for r in _hist_codes)
+        # Merge with already-loaded names; load the missing ones in one shot
+        missing = [c for c in extra_codes if c not in names]
+        if missing:
+            extra_names = _load_names(engine, missing)
+            names.update(extra_names)
+
         # ── 9. Assemble sections ──────────────────────────────────────────
         sections: list[dict[str, Any]] = []
         sections.append(_build_market_brief(
@@ -679,8 +820,10 @@ def run_ningbo_evening(
                 results_by_mode.get("ml", pd.DataFrame()),
                 report_date, names, prices,
             ))
-        sections.append(_build_alerts_section(alerts))
-        sections.append(_build_tracking_section(engine, report_date))
+        sections.append(_build_alerts_section(alerts, names))
+        # New consensus-based tracking (replaces legacy 3-pane);
+        # only top-5 per past date, click-to-expand by date.
+        sections.append(_build_tracking_consensus_section(engine, report_date, names))
         sections.append(_build_disclaimer_section())
 
         # Persist sections

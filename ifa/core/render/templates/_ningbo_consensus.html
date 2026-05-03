@@ -43,8 +43,18 @@
     }
     .ifa-cm__rank--present { color: var(--ink); font-weight: 600; }
     .ifa-cm__rank--absent  { color: var(--ink-soft); }
+    /* First 5 rows = today's actionable top picks (regardless of stars) */
+    .ifa-cm__row--main {
+      background: linear-gradient(to right, rgba(37, 99, 235, 0.10), rgba(37, 99, 235, 0.02) 60%, transparent);
+      border-left: 3px solid #2563eb;   /* blue accent */
+    }
+    .ifa-cm__row--main td:first-child { padding-left: 6px; }
+    .ifa-cm__row--main + tr:not(.ifa-cm__row--main) { border-top: 1px solid var(--rule-soft); }
+
+    /* High-conviction (★★★★+) — overlay gold accent on top of main if applicable */
     .ifa-cm__row--top {
-      background: linear-gradient(to right, rgba(217, 119, 6, 0.08), transparent);
+      background: linear-gradient(to right, rgba(217, 119, 6, 0.12), rgba(217, 119, 6, 0.02) 60%, transparent);
+      border-left: 3px solid #d97706;   /* gold */
     }
     .ifa-cm__legend {
       font-size: 11px;
@@ -72,7 +82,7 @@
     </thead>
     <tbody>
       {% for r in rows %}
-      <tr class="{% if r.stars >= 4 %}ifa-cm__row--top{% endif %}">
+      <tr class="{% if r.stars >= 4 %}ifa-cm__row--top{% elif loop.index <= 5 %}ifa-cm__row--main{% endif %}">
         <td>
           <span class="ifa-cm__stars">{% for i in range(r.stars) %}★{% endfor %}{% for i in range(5 - r.stars) %}<span style="color:var(--ink-soft);">☆</span>{% endfor %}</span>
         </td>
