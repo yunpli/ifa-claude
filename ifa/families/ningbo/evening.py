@@ -572,8 +572,18 @@ def _picks_from_ml_scores(
     if scores is None or candidates_df.empty:
         return None
 
+    # Normalize ML scores to [0, 1] per-day so they fit in confidence_score
+    # NUMERIC column. Ensemble outputs raw negative ranks (e.g. -106.8); without
+    # normalization we hit psycopg "numeric field overflow".
+    import numpy as _np
+    s_arr = _np.asarray(scores, dtype=float)
+    s_min, s_max = float(s_arr.min()), float(s_arr.max())
+    if s_max > s_min:
+        norm_scores = (s_arr - s_min) / (s_max - s_min)
+    else:
+        norm_scores = _np.zeros_like(s_arr)
     df = candidates_df.copy()
-    df["_score"] = scores
+    df["_score"] = norm_scores
     df = df.sort_values("_score", ascending=False)
 
     picks: list[dict] = []
@@ -653,18 +663,28 @@ def _build_consensus_section(
 
 
 def _build_disclaimer_section() -> dict[str, Any]:
+    """Use the shared bilingual disclaimer (matches market / smartmoney / etc).
+
+    Adds 4 ningbo-specific risk lines to the front of the Chinese paragraphs.
+    """
+    from ifa.core.report.disclaimer import (
+        DISCLAIMER_PARAGRAPHS_EN, DISCLAIMER_PARAGRAPHS_ZH,
+    )
+    ningbo_extra_zh = [
+        "【宁波派短线策略专用风险提示】"
+        "本报告基于 EOD 数据生成的算法信号 + ML 共识打分，仅供研究参考。"
+        "宁波派短线打法历史回撤可观（5/15 交易日窗口内最大回撤可达 -50% 到 -80%），"
+        "推荐止损纪律必须严格执行：单只目标累计 +20% 立即止盈，跌破 24 日均线立即止损，"
+        "满 15 日无终态自动到期清仓。本报告不构成投资建议。",
+    ]
     return {
         "key": "ningbo.s5_disclaimer",
         "title": "风险提示与免责声明",
         "order": 5,
         "type": "disclaimer",
         "content_json": {
-            "items": [
-                "本报告基于 EOD 数据生成的算法信号，仅供研究参考。",
-                "宁波派短线打法风险较高，回撤可观；推荐止损纪律必须严格执行。",
-                "持仓周期 5-15 个交易日，单只目标累计 +20% 或跌破 24 日均线立即离场。",
-                "本报告不构成投资建议。",
-            ],
+            "paragraphs_en": DISCLAIMER_PARAGRAPHS_EN,
+            "paragraphs_zh": ningbo_extra_zh + DISCLAIMER_PARAGRAPHS_ZH,
         },
     }
 
