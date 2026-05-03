@@ -32,3 +32,6 @@ logs/
 .ruff_cache/
 htmlcov/
 .coverage
+
+# CatBoost training logs
+catboost_info/
