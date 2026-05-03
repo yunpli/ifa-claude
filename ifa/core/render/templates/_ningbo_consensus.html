@@ -1,0 +1,117 @@
+{# Ningbo: consensus matrix — combines heuristic + ML aggressive + ML conservative tracks #}
+<section class="ifa-section ifa-ningbo-consensus">
+  <h2 class="ifa-section__title">{{ s.order }}. {{ s.title }}</h2>
+
+  <p class="ifa-section__intro" style="font-size:12px; color:var(--ink-soft); line-height:1.6;">
+    每只候选股在 3 个独立轨道（启发式 / ML-激进 / ML-稳健）中的排名汇总。
+    ★ 越多代表「多个独立模型一致看好」的信号越强。
+    <strong style="color:var(--accent);">★★★★★ = 三方一致且至少两方排进 top-2</strong>，
+    属当日最高 conviction 标的。
+  </p>
+
+  <style>
+    .ifa-cm__table {
+      width: 100%;
+      font-size: 12px;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    .ifa-cm__table th, .ifa-cm__table td {
+      padding: 6px 8px;
+      border-bottom: 1px dotted var(--rule-soft);
+      vertical-align: middle;
+    }
+    .ifa-cm__table th {
+      background: var(--paper-tint);
+      color: var(--ink-soft);
+      font-size: 10.5px;
+      font-weight: normal;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      text-align: left;
+    }
+    .ifa-cm__stars {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: #d97706;     /* gold */
+      letter-spacing: 1px;
+    }
+    .ifa-cm__rank {
+      font-family: var(--font-mono);
+      text-align: center;
+      font-size: 11px;
+    }
+    .ifa-cm__rank--present { color: var(--ink); font-weight: 600; }
+    .ifa-cm__rank--absent  { color: var(--ink-soft); }
+    .ifa-cm__row--top {
+      background: linear-gradient(to right, rgba(217, 119, 6, 0.08), transparent);
+    }
+    .ifa-cm__legend {
+      font-size: 11px;
+      color: var(--ink-soft);
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: var(--paper-tint);
+      border-left: 3px solid var(--accent);
+    }
+  </style>
+
+  {% set rows = s.content_json.rows %}
+  {% if rows %}
+  <table class="ifa-cm__table">
+    <thead>
+      <tr>
+        <th>共识</th>
+        <th>股票</th>
+        <th>来源策略</th>
+        <th class="ifa-cm__rank">启发式</th>
+        <th class="ifa-cm__rank">ML 激进</th>
+        <th class="ifa-cm__rank">ML 稳健</th>
+        <th style="text-align:right;">推荐价</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr class="{% if r.stars >= 4 %}ifa-cm__row--top{% endif %}">
+        <td>
+          <span class="ifa-cm__stars">{% for i in range(r.stars) %}★{% endfor %}{% for i in range(5 - r.stars) %}<span style="color:var(--ink-soft);">☆</span>{% endfor %}</span>
+        </td>
+        <td>
+          <span style="font-family:var(--font-mono); font-weight:500;">{{ r.ts_code }}</span>
+          {% if r.name %}<span style="color:var(--ink-2); margin-left:6px;">{{ r.name }}</span>{% endif %}
+        </td>
+        <td style="font-size:11px; color:var(--ink-2);">
+          {%- for s in r.strategies.split(",") -%}
+            {%- if s == 'sniper' -%}神枪手
+            {%- elif s == 'treasure_basin' -%}聚宝盆
+            {%- elif s == 'half_year_double' -%}半年翻倍
+            {%- else -%}{{ s }}
+            {%- endif -%}
+            {%- if not loop.last %}/{% endif -%}
+          {%- endfor -%}
+        </td>
+        <td class="ifa-cm__rank {% if r.rank_heuristic %}ifa-cm__rank--present{% else %}ifa-cm__rank--absent{% endif %}">
+          {%- if r.rank_heuristic -%}#{{ r.rank_heuristic }}{%- else -%}—{%- endif -%}
+        </td>
+        <td class="ifa-cm__rank {% if r.rank_aggressive %}ifa-cm__rank--present{% else %}ifa-cm__rank--absent{% endif %}">
+          {%- if r.rank_aggressive -%}#{{ r.rank_aggressive }}{%- else -%}—{%- endif -%}
+        </td>
+        <td class="ifa-cm__rank {% if r.rank_conservative %}ifa-cm__rank--present{% else %}ifa-cm__rank--absent{% endif %}">
+          {%- if r.rank_conservative -%}#{{ r.rank_conservative }}{%- else -%}—{%- endif -%}
+        </td>
+        <td style="text-align:right; font-family:var(--font-mono);">{{ '%.2f'|format(r.rec_price) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="ifa-cm__legend">
+    <strong>★ 计分</strong>：每个轨道按 top-5 排名给分（top-1=5 分, top-5=1 分），3 轨道加总满分 15。
+    13-15 分 = ★★★★★，10-12 = ★★★★，7-9 = ★★★，4-6 = ★★，1-3 = ★。
+    <br>
+    <strong>建议</strong>：客户可按风险偏好选择 — 追求高收益看 ML-激进栏，求稳看 ML-稳健栏，要 conviction 看 ★ 数最高的。
+  </div>
+  {% else %}
+  <p style="color:var(--ink-soft); padding:12px 0;">今日无候选股进入任意轨道的 top-5。</p>
+  {% endif %}
+</section>

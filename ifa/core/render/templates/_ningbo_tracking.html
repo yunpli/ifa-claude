@@ -87,6 +87,56 @@
     .ifa-track__summary strong { color: var(--ink); }
   </style>
 
+  {# ── Top-line 3-way comparison (helps clients pick which track to follow) ── #}
+  {% if s.content_json.panes | length >= 2 %}
+  <div class="ifa-track__compare" style="margin-bottom: 14px; padding: 10px 12px;
+       background: var(--paper-tint); border-left: 3px solid var(--accent);">
+    <div style="font-size:11px; color:var(--ink-soft); letter-spacing:0.05em; text-transform:uppercase; margin-bottom:6px;">
+      三轨累计对比 (近 15 交易日窗口)
+    </div>
+    <table style="width:100%; font-size:11.5px; border-collapse:collapse;">
+      <thead>
+        <tr style="color:var(--ink-soft); font-size:10.5px;">
+          <th style="text-align:left;  padding:3px 6px;">轨道</th>
+          <th style="text-align:right; padding:3px 6px;">N</th>
+          <th style="text-align:right; padding:3px 6px;">止盈 ✓</th>
+          <th style="text-align:right; padding:3px 6px;">止损 ⚠</th>
+          <th style="text-align:right; padding:3px 6px;">满 15 日</th>
+          <th style="text-align:right; padding:3px 6px;">进行中</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for pane in s.content_json.panes %}
+          {% if pane.summary %}
+          <tr style="border-top: 1px dotted var(--rule-soft);">
+            <td style="padding:4px 6px; font-weight:500;">{{ pane.label }}</td>
+            <td style="padding:4px 6px; text-align:right; font-family:var(--font-mono);">{{ pane.summary.total }}</td>
+            <td style="padding:4px 6px; text-align:right; font-family:var(--font-mono); color:var(--up);">
+              {{ pane.summary.take_profit }}
+              ({{ "%.0f"|format(pane.summary.take_profit / pane.summary.total * 100 if pane.summary.total else 0) }}%)
+            </td>
+            <td style="padding:4px 6px; text-align:right; font-family:var(--font-mono); color:var(--down);">
+              {{ pane.summary.stop_loss }}
+              ({{ "%.0f"|format(pane.summary.stop_loss / pane.summary.total * 100 if pane.summary.total else 0) }}%)
+            </td>
+            <td style="padding:4px 6px; text-align:right; font-family:var(--font-mono);">{{ pane.summary.expired }}</td>
+            <td style="padding:4px 6px; text-align:right; font-family:var(--font-mono); color:var(--ink-soft);">{{ pane.summary.in_progress }}</td>
+          </tr>
+          {% else %}
+          <tr style="border-top: 1px dotted var(--rule-soft); color:var(--ink-soft);">
+            <td style="padding:4px 6px;">{{ pane.label }}</td>
+            <td colspan="5" style="padding:4px 6px; font-style:italic;">无数据</td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="font-size:10.5px; color:var(--ink-soft); margin-top:6px; line-height:1.4;">
+      建议：高风险偏好 → ML 激进；稳健投资 → ML 稳健；启发式作传统对照。
+    </div>
+  </div>
+  {% endif %}
+
   {% for pane in s.content_json.panes %}
     <div class="ifa-track__pane">
       <div class="ifa-track__pane-title">{{ pane.label }}</div>
@@ -154,7 +204,11 @@
       {% else %}
         <div class="ifa-track__empty">
           {% if pane.scoring_mode == 'ml' %}
-            ML 评分模式将在 Phase 3 上线。
+            ML 评分模式（旧版）已停用，请用 ml_aggressive / ml_conservative。
+          {% elif pane.scoring_mode == 'ml_aggressive' %}
+            ML 激进追踪：尚无历史推荐进入追踪窗（双轨刚上线，需累积几日数据）。
+          {% elif pane.scoring_mode == 'ml_conservative' %}
+            ML 稳健追踪：尚无历史推荐进入追踪窗（双轨刚上线，需累积几日数据）。
           {% else %}
             最近 15 个交易日内尚无追踪记录（首次运行需积累若干天数据）。
           {% endif %}

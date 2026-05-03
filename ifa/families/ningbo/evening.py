@@ -39,6 +39,9 @@ from ifa.families.ningbo.signals.alerts import (
 )
 from ifa.families.ningbo.signals.confidence import HeuristicScorer
 from ifa.families.ningbo.signals.selection import select_top_n
+from ifa.families.ningbo.ml.dual_scorer import (
+    score_with_active_models, build_consensus_matrix,
+)
 from ifa.families.ningbo.strategies import (
     half_year_double, six_step, sniper, treasure_basin,
 )
@@ -55,8 +58,11 @@ REPORT_TYPE = "ningbo_evening"
 SLOT = "evening"
 TEMPLATE_VERSION = "v0.1.0-ningbo"
 PROMPT_VERSION = "ningbo_v1.0"
-TOP_N = 5
-PER_STRATEGY_CAP = 2
+# DB persists top-N picks per day (audit + replay + future ML reranking).
+# Report display only shows the top REPORT_DISPLAY_TOP_N (currently 5).
+TOP_N = 10
+PER_STRATEGY_CAP = 3
+REPORT_DISPLAY_TOP_N = 5
 
 # ── Stock-name lookup helper (small in-memory cache for the run) ───────────────
 
@@ -178,7 +184,9 @@ def _build_today_recs_section(
     def to_pane(picks: pd.DataFrame | None, mode: str, label: str, version: str):
         recs_list = []
         if picks is not None and not picks.empty:
-            for _, r in picks.iterrows():
+            # Report shows only the top REPORT_DISPLAY_TOP_N; DB has all TOP_N.
+            picks_display = picks.head(REPORT_DISPLAY_TOP_N)
+            for _, r in picks_display.iterrows():
                 ts = r["ts_code"]
                 meta = r["rec_signal_meta"] if isinstance(r["rec_signal_meta"], dict) else {}
                 recs_list.append({
@@ -233,6 +241,15 @@ def _build_tracking_section(engine, on_date: dt.date) -> dict[str, Any]:
         sub = in_prog[in_prog["scoring_mode"] == mode] if not in_prog.empty else pd.DataFrame()
         if sub.empty:
             return {"scoring_mode": mode, "label": label, "recs": [], "summary": None}
+
+        # DB now stores TOP_N=10 per day, but the recap display limits to the
+        # top-5 by confidence_score within each origin rec_date — keeps the
+        # report readable.  rank 6-10 is still in DB for audit/replay.
+        sub = sub.copy()
+        sub["_rank_in_day"] = sub.groupby("rec_date")["confidence_score"].rank(
+            method="min", ascending=False
+        )
+        sub = sub[sub["_rank_in_day"] <= REPORT_DISPLAY_TOP_N].drop(columns=["_rank_in_day"])
 
         # Fetch tracking rows for these recs and render sparkline per row
         keys = sub[["rec_date", "ts_code", "strategy", "scoring_mode"]].to_dict("records")
@@ -303,8 +320,9 @@ def _build_tracking_section(engine, on_date: dt.date) -> dict[str, Any]:
         }
 
     panes = [
-        make_pane("heuristic", "启发式追踪复盘 (近 15 交易日推荐)"),
-        make_pane("ml", "ML 追踪复盘 (Phase 3 上线)"),
+        make_pane("heuristic",        "启发式  (传统对照)"),
+        make_pane("ml_aggressive",    "ML 激进  (高收益)"),
+        make_pane("ml_conservative",  "ML 稳健  (高 Sharpe)"),
     ]
     return {
         "key": "ningbo.s4_tracking",
@@ -312,6 +330,172 @@ def _build_tracking_section(engine, on_date: dt.date) -> dict[str, Any]:
         "order": 4,
         "type": "ningbo_tracking",
         "content_json": {"panes": panes},
+    }
+
+
+# ── Dual-track scoring helper ────────────────────────────────────────────────
+
+def _score_dual_track(
+    *, engine, candidates_by_strategy: dict[str, pd.DataFrame],
+    report_date: dt.date, on_log: Callable[[str], None],
+) -> tuple[pd.DataFrame, pd.DataFrame | None, pd.DataFrame | None, pd.DataFrame | None]:
+    """Score all candidates 3 ways → top-N per track + consensus matrix.
+
+    Returns (top_heuristic, top_ml_aggressive, top_ml_conservative, consensus_df).
+    Any of the ML returns can be None if the corresponding slot has no active model.
+    """
+    # 1. Heuristic: existing pipeline with resonance boost
+    heur_scorer = HeuristicScorer(version="v1.0")
+    top_h = select_top_n(
+        candidates_by_strategy, heur_scorer,
+        top_n=TOP_N, per_strategy_cap=PER_STRATEGY_CAP,
+    )
+    on_log(f"  heuristic top-{TOP_N}: {len(top_h)} picks")
+
+    # 2. Build unified per-strategy candidate DataFrame for ML scoring
+    rows: list[dict] = []
+    close_lookup = _close_lookup_from_strategies(candidates_by_strategy, engine, report_date)
+    for strat_name, df in candidates_by_strategy.items():
+        if df is None or df.empty:
+            continue
+        for _, r in df.iterrows():
+            ts = r["ts_code"]
+            rows.append({
+                "ts_code": ts,
+                "strategy": strat_name,
+                "confidence_score": float(r["confidence_score"]),
+                "rec_signal_meta": r.get("signal_meta", {}) or {},
+                "rec_price": close_lookup.get(ts, 0.0),
+            })
+    candidates_df = pd.DataFrame(rows)
+    if candidates_df.empty:
+        return top_h, None, None, None
+
+    # 3. Score with both ML slots (loads from registry)
+    on_log(f"  scoring with active ML models on {len(candidates_df)} candidates…")
+    scores_by_track = score_with_active_models(engine, candidates_df, report_date)
+
+    # 4. Top-N per ML track via existing select_top_n with custom scorer wrapper
+    top_a = _picks_from_ml_scores(
+        candidates_df, scores_by_track.get("ml_aggressive"),
+        scoring_mode="ml_aggressive",
+    )
+    top_c = _picks_from_ml_scores(
+        candidates_df, scores_by_track.get("ml_conservative"),
+        scoring_mode="ml_conservative",
+    )
+    on_log(f"  aggressive top-{TOP_N}: {len(top_a) if top_a is not None else 0} picks  |  "
+           f"conservative top-{TOP_N}: {len(top_c) if top_c is not None else 0} picks")
+
+    # 5. Consensus matrix combining 3 tracks
+    cm = build_consensus_matrix(
+        candidates_df, scores_by_track,
+        top_n=REPORT_DISPLAY_TOP_N, per_strategy_cap=PER_STRATEGY_CAP,
+    )
+    on_log(f"  consensus matrix: {len(cm)} unique stocks across 3 tracks")
+    return top_h, top_a, top_c, cm
+
+
+def _close_lookup_from_strategies(
+    candidates_by_strategy: dict[str, pd.DataFrame],
+    engine, report_date: dt.date,
+) -> dict[str, float]:
+    all_codes = set()
+    for df in candidates_by_strategy.values():
+        if df is not None and not df.empty:
+            all_codes.update(df["ts_code"].tolist())
+    return _fetch_close(engine, list(all_codes), report_date) if all_codes else {}
+
+
+def _picks_from_ml_scores(
+    candidates_df: pd.DataFrame, scores: Any, *, scoring_mode: str,
+) -> pd.DataFrame | None:
+    """Apply per-strategy cap top-N selection on ML scores.
+
+    Each (ts_code, strategy) row competes individually. If a stock appears
+    multiple times (multi-strategy), the highest-scored row is kept and we
+    label its strategy as 'multi'.
+    """
+    if scores is None or candidates_df.empty:
+        return None
+
+    df = candidates_df.copy()
+    df["_score"] = scores
+    df = df.sort_values("_score", ascending=False)
+
+    picks: list[dict] = []
+    seen_ts: dict[str, int] = {}     # ts_code → picks index
+    per_strat: dict[str, int] = {}
+    for _, r in df.iterrows():
+        ts = r["ts_code"]
+        if ts in seen_ts:
+            continue
+        s = r["strategy"]
+        if per_strat.get(s, 0) >= PER_STRATEGY_CAP:
+            continue
+        # Detect multi-strategy: same ts appears under other strategies in candidate pool
+        all_strats = candidates_df[candidates_df["ts_code"] == ts]["strategy"].unique().tolist()
+        is_multi = len(all_strats) >= 2
+        picks.append({
+            "ts_code": ts,
+            "strategy": "multi" if is_multi else s,
+            "strategies_hit": sorted(all_strats),
+            "confidence_score": float(r["_score"]),
+            "scoring_mode": scoring_mode,
+            "param_version": f"{scoring_mode}_v1",
+            "rec_signal_meta": {
+                "by_strategy": {
+                    str(strat): {
+                        "raw_score": float(candidates_df[
+                            (candidates_df["ts_code"] == ts) &
+                            (candidates_df["strategy"] == strat)
+                        ]["confidence_score"].iloc[0]),
+                        "signal_meta": candidates_df[
+                            (candidates_df["ts_code"] == ts) &
+                            (candidates_df["strategy"] == strat)
+                        ]["rec_signal_meta"].iloc[0],
+                    } for strat in all_strats
+                },
+                "strategies_hit": sorted(all_strats),
+                "n_hits": len(all_strats),
+                "ml_score": float(r["_score"]),
+                "best_individual_score": float(candidates_df[
+                    candidates_df["ts_code"] == ts
+                ]["confidence_score"].max()),
+            },
+        })
+        seen_ts[ts] = len(picks) - 1
+        per_strat[s] = per_strat.get(s, 0) + 1
+        if len(picks) >= TOP_N:
+            break
+
+    return pd.DataFrame(picks)
+
+
+def _build_consensus_section(
+    consensus_df: pd.DataFrame, names: dict[str, str],
+) -> dict[str, Any]:
+    """★1-★5 consensus matrix table — main user-facing recommendation."""
+    rows = []
+    for _, r in consensus_df.iterrows():
+        ts = r["ts_code"]
+        rows.append({
+            "ts_code": ts,
+            "name": names.get(ts, ""),
+            "strategies": r["strategies"],
+            "rank_heuristic":    int(r["rank_heuristic"])    if pd.notna(r["rank_heuristic"])    else None,
+            "rank_aggressive":   int(r["rank_aggressive"])   if pd.notna(r["rank_aggressive"])   else None,
+            "rank_conservative": int(r["rank_conservative"]) if pd.notna(r["rank_conservative"]) else None,
+            "stars": int(r["stars"]),
+            "score_total": int(r["score_total"]),
+            "rec_price": float(r["rec_price"]),
+        })
+    return {
+        "key": "ningbo.s2c_consensus",
+        "title": "今日推荐共识矩阵 (★ 越多越强)",
+        "order": 2,
+        "type": "ningbo_consensus",
+        "content_json": {"rows": rows},
     }
 
 
@@ -403,6 +587,7 @@ def run_ningbo_evening(
         }
 
         results_by_mode: dict[str, pd.DataFrame] = {}
+        consensus_matrix: pd.DataFrame | None = None
         for mode in scoring_modes:
             if mode == "heuristic":
                 scorer = HeuristicScorer(version="v1.0")
@@ -411,9 +596,21 @@ def run_ningbo_evening(
                     top_n=TOP_N, per_strategy_cap=PER_STRATEGY_CAP,
                 )
                 results_by_mode[mode] = top
-                on_log(f"  heuristic top-5: {len(top)} picks")
+                on_log(f"  heuristic top-{TOP_N}: {len(top)} picks")
+            elif mode == "dual":
+                # Build top-N for all 3 tracks (heuristic + 2 ML) + consensus matrix
+                top_h, top_a, top_c, cm = _score_dual_track(
+                    engine=engine, candidates_by_strategy=candidates_by_strategy,
+                    report_date=report_date, on_log=on_log,
+                )
+                results_by_mode["heuristic"]       = top_h
+                if top_a is not None:
+                    results_by_mode["ml_aggressive"]   = top_a
+                if top_c is not None:
+                    results_by_mode["ml_conservative"] = top_c
+                consensus_matrix = cm
             elif mode == "ml":
-                on_log("  ⚠️ ml mode requested but Phase 3 not implemented; skipping")
+                on_log("  ⚠️ legacy 'ml' mode — use 'dual' instead; skipping")
                 results_by_mode[mode] = pd.DataFrame()
 
         # ── 4. Names + prices for picked stocks ───────────────────────────
@@ -472,11 +669,16 @@ def run_ningbo_evening(
             engine, report_date, universe["ts_code"].nunique(),
             six_step_passed, len(sniper_df), len(basin_df), len(hyd_df),
         ))
-        sections.append(_build_today_recs_section(
-            results_by_mode.get("heuristic", pd.DataFrame()),
-            results_by_mode.get("ml", pd.DataFrame()),
-            report_date, names, prices,
-        ))
+        # If dual mode produced a consensus matrix, render it as the primary
+        # recommendation section. Otherwise fall back to legacy single/heuristic.
+        if consensus_matrix is not None and not consensus_matrix.empty:
+            sections.append(_build_consensus_section(consensus_matrix, names))
+        else:
+            sections.append(_build_today_recs_section(
+                results_by_mode.get("heuristic", pd.DataFrame()),
+                results_by_mode.get("ml", pd.DataFrame()),
+                report_date, names, prices,
+            ))
         sections.append(_build_alerts_section(alerts))
         sections.append(_build_tracking_section(engine, report_date))
         sections.append(_build_disclaimer_section())
