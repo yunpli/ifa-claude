@@ -35,7 +35,7 @@ All notable changes to iFA China Market Report System.
 - `docs/smartmoney-deep-dive.md` — V2.1.2 SW L2 修复的来龙去脉 + 两层 recompute 体系
 - `docs/main-three-aux-deep-dive.md` — 一主三辅协作时序与数据流
 - `docs/multi-agent-deployment.md` — 多 agent 平台部署建议（generic prompt + 配置）
-- `LICENSE` — Business Source License 1.1
+- `LICENSE` — MIT License
 - `CHANGELOG.md` — 本文件
 - `.env.example` — 环境变量模板
 
