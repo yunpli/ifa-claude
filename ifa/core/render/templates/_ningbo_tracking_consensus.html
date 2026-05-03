@@ -142,13 +142,11 @@
             <th>共识</th>
             <th>股票代码</th>
             <th>名称</th>
-            <th>策略</th>
-            <th class="ifa-tcons__rank">启发式</th>
-            <th class="ifa-tcons__rank">激进</th>
-            <th class="ifa-tcons__rank">稳健</th>
             <th class="num">推荐价</th>
-            <th class="num">峰值</th>
-            <th class="num">最终累计</th>
+            <th class="spark" style="text-align:center;">15 日累计走势</th>
+            <th class="num">当前累计</th>
+            <th class="num">期间峰值</th>
+            <th class="num">追踪日</th>
             <th>状态</th>
           </tr>
         </thead>
@@ -160,27 +158,15 @@
             </td>
             <td style="font-family:var(--font-mono);">{{ p.ts_code }}</td>
             <td>{{ p.name or '—' }}</td>
-            <td style="font-size:11px; color:var(--ink-2);">
-              {%- for s in p.strategies.split(",") -%}
-                {{ strategy_zh(s) }}{% if not loop.last %}/{% endif %}
-              {%- endfor -%}
-            </td>
-            <td class="ifa-tcons__rank {% if p.rank_heuristic %}ifa-tcons__rank--present{% else %}ifa-tcons__rank--absent{% endif %}">
-              {%- if p.rank_heuristic -%}#{{ p.rank_heuristic }}{%- else -%}—{%- endif -%}
-            </td>
-            <td class="ifa-tcons__rank {% if p.rank_aggressive %}ifa-tcons__rank--present{% else %}ifa-tcons__rank--absent{% endif %}">
-              {%- if p.rank_aggressive -%}#{{ p.rank_aggressive }}{%- else -%}—{%- endif -%}
-            </td>
-            <td class="ifa-tcons__rank {% if p.rank_conservative %}ifa-tcons__rank--present{% else %}ifa-tcons__rank--absent{% endif %}">
-              {%- if p.rank_conservative -%}#{{ p.rank_conservative }}{%- else -%}—{%- endif -%}
-            </td>
             <td class="num">¥{{ '%.2f'|format(p.rec_price) }}</td>
+            <td class="spark" style="text-align:center; padding:2px 4px;">{{ p.sparkline_svg|safe }}</td>
+            <td class="num {% if p.current_cum_return >= 0 %}ifa-tcons__cum-pos{% else %}ifa-tcons__cum-neg{% endif %}">
+              {{ '%+.2f'|format(p.current_cum_return * 100) }}%
+            </td>
             <td class="num {% if p.peak_cum_return >= 0 %}ifa-tcons__cum-pos{% else %}ifa-tcons__cum-neg{% endif %}">
               {{ '%+.2f'|format(p.peak_cum_return * 100) }}%
             </td>
-            <td class="num {% if p.final_cum_return >= 0 %}ifa-tcons__cum-pos{% else %}ifa-tcons__cum-neg{% endif %}">
-              {{ '%+.2f'|format(p.final_cum_return * 100) }}%
-            </td>
+            <td class="num">T+{{ p.track_day }}</td>
             <td>
               <span class="ifa-tcons__status ifa-tcons__status--{{ p.outcome_status }}">
                 {%- if p.outcome_status == 'in_progress' -%}进行中

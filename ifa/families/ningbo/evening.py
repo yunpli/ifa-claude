@@ -245,10 +245,29 @@ def _build_tracking_consensus_section(
       2. Compute per-track ranks (within each mode, sorted by confidence_score)
       3. Compute consensus star score per ts_code (same formula as today's matrix)
       4. Take top-5 by star score
-      5. Render with sparkline + current cum_return + outcome status
+      5. Render row with: stars + ts_code + name + sparkline trend + numeric stats
     """
     from sqlalchemy import text as _text
     names = names or {}
+
+    # Helper: compute cum_returns trajectory (15-day window) for one (ts_code, rec_date, rec_price)
+    def _cum_returns_15d(ts: str, rec_dt: dt.date, rec_price: float) -> list[float | None]:
+        """Read close prices for 15 trading days after rec_dt; return cum_returns list."""
+        sql_close = _text("""
+            SELECT trade_date, close FROM smartmoney.raw_daily
+            WHERE ts_code = :ts AND trade_date > :rd
+            ORDER BY trade_date LIMIT 15
+        """)
+        with engine.connect() as c:
+            rows = c.execute(sql_close, {"ts": ts, "rd": rec_dt}).fetchall()
+        out: list[float | None] = []
+        for r in rows:
+            close = float(r[1])
+            out.append((close - rec_price) / rec_price)
+        # Pad to 15
+        while len(out) < 15:
+            out.append(None)
+        return out
 
     # Pull all recs from past 15 trading days, all scoring_modes
     earliest = on_date - dt.timedelta(days=30)  # ~15 trading days buffer
@@ -316,7 +335,7 @@ def _build_tracking_consensus_section(
         # Top-5 by score
         top5 = sorted(score_per_ts.values(), key=lambda x: x["score_total"], reverse=True)[:5]
 
-        # Compute stars (same formula as today's matrix)
+        # Compute stars (same formula as today's matrix) + sparkline + current cum
         for p in top5:
             sc = p["score_total"]
             if   sc >= 13: p["stars"] = 5
@@ -326,6 +345,18 @@ def _build_tracking_consensus_section(
             else:          p["stars"] = 1
             p["name"] = names.get(p["ts_code"], "")
             p["strategies"] = ",".join(sorted(p["strategies"]))
+
+            # Sparkline trajectory
+            cum_returns = _cum_returns_15d(p["ts_code"], rd, p["rec_price"])
+            p["current_cum_return"] = next(
+                (v for v in reversed(cum_returns) if v is not None), 0.0
+            )
+            terminal_status = p["outcome_status"] if p["outcome_status"] != "in_progress" else None
+            terminal_day = p["outcome_track_day"] if terminal_status else None
+            p["sparkline_svg"] = render_sparkline(
+                cum_returns, terminal_status=terminal_status, terminal_track_day=terminal_day,
+            )
+            p["track_day"] = sum(1 for v in cum_returns if v is not None)
 
         # Per-day summary
         n_take_profit  = sum(1 for p in top5 if p["outcome_status"] == "take_profit")

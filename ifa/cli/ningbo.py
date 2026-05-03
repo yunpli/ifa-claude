@@ -531,6 +531,28 @@ def train_v2_command(
                   f"oos={art.n_oos:,} / {art.n_oos_days} days[/dim]")
 
 
+# ─── backfill historical dual recommendations ───────────────────────────────
+@app.command("backfill-dual")
+def backfill_dual_command(
+    days: int = typer.Option(30, "--days", help="trading days back to backfill (default 30)"),
+    mode: str = typer.Option("manual", "--mode"),
+) -> None:
+    """Score historical candidate pools with active ML models, persist top-10 per slot.
+
+    Run after `ifa ningbo refresh weekly` activates ML models. Populates
+    ml_aggressive / ml_conservative recommendations for past dates so the
+    consensus matrix shows ★★★+ stocks (rather than only ★/★★ from heuristic-only).
+    """
+    _override_mode(mode)
+    from ifa.core.db import get_engine
+    from ifa.config import get_settings
+    from ifa.families.ningbo.ml.backfill_dual import backfill_dual_recs
+    engine = get_engine(get_settings())
+    result = backfill_dual_recs(engine, days_back=days, on_log=lambda m: console.print(m))
+    console.print(f"\n[bold green]Done.[/bold green]  "
+                  f"days={result['days_processed']}  inserted={result['inserted']}")
+
+
 # ─── Candidate outcomes only (post-backfill bulk SQL) ────────────────────────
 @app.command("candidate-outcomes")
 def candidate_outcomes_command(
