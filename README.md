@@ -1,6 +1,6 @@
 # ifa-claude — iFA China Market Report System
 
-**Version 2.1.2** · AI-native, structured, source-anchored daily intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
+**Version 2.1.3** · AI-native, structured, source-anchored daily intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
 
 ---
 
@@ -73,6 +73,7 @@ The main `market` family is 总指挥型 — it summarises the day. The three au
 | **Asset** (aux) | `ifa generate asset` | morning / evening | 10 | Yes (18 SW commodity-relevant L2) | Commodity futures → A 股板块传导 |
 | **Tech** (aux) | `ifa generate tech` | morning / evening | 12 | Yes (5-layer SW L2 mapping) | AI 五层蛋糕 — 算力/模型/应用/终端/生态 |
 | **SmartMoney** (separate) | `ifa smartmoney evening` | evening | 14 | Yes (SW L2 sector flow) | Institutional 板块资金流, ML 信号, 假设回顾 |
+| **Ningbo** (separate) | `ifa ningbo evening` | evening | 5 | Yes (SW L2 member lookup) | 短线策略三轨 — 启发式 / ML 激进 / ML 稳健，★1-★5 共识矩阵，15 日追踪 |
 
 All families share the same reporting tables (`report_runs`, `report_sections`, `report_judgments`, `model_outputs`) and the same `ReportRun` lifecycle.
 
@@ -223,6 +224,11 @@ Implementation uses headless Chrome with print-CSS injection that opens all `<de
 - [`docs/database-schema.md`](docs/database-schema.md) — full schema reference (`public.*` + `smartmoney.*`)
 - [`docs/run-modes.md`](docs/run-modes.md) — test / manual / production semantics
 - `docs/audit-pre-b8.md` — historical audit record (kept for provenance, do not edit)
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — 运维手册：日/周/月/季节奏，所有 family 的操作检查清单
+- [`docs/ningbo-deep-dive.md`](docs/ningbo-deep-dive.md) — 宁波派完整架构：Phase 1-3.D，三轨，Champion-Challenger
+- [`docs/smartmoney-deep-dive.md`](docs/smartmoney-deep-dive.md) — SmartMoney V2.1.2 修复背景 + 两层 recompute 体系
+- [`docs/main-three-aux-deep-dive.md`](docs/main-three-aux-deep-dive.md) — 一主三辅协作时序与数据流
+- [`docs/multi-agent-deployment.md`](docs/multi-agent-deployment.md) — 多 agent 平台部署指南（generic prompt + watcher 配置）
 
 The root `CLAUDE.md` is the engineering checklist for the in-progress SmartMoney B/C work and is the source of truth for migration phase status.
 
@@ -235,6 +241,7 @@ The root `CLAUDE.md` is the engineering checklist for the in-progress SmartMoney
 | V2.1 release (SW unification, PDF, units fix) | Done |
 | V2.1.1 patch (SW L2 daily price ETL)          | Done |
 | V2.1.2 patch (SmartMoney L2 pct_change in factors; recompute+retrain required) | Done |
+| V2.1.3 patch (Ningbo Phase 1-3.D 全闭环；Champion-Challenger；★ 共识矩阵；运维文档) | Done |
 | SmartMoney A 阶段 (raw backfill 2021-01 → 2026) | Done |
 | SmartMoney B 阶段 (factor refactor onto SW) | In progress |
 | SmartMoney C 阶段 (compute / train / OOS validation) | Pending B |
