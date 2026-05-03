@@ -206,3 +206,58 @@ ifa smartmoney
     ├── freeze --name vYYYY_MM --from-backtest <run-id>
     └── archive vYYYY_MM
 ```
+
+---
+
+## Ningbo — 宁波派短线策略 (separate)
+
+**Purpose.** A 股短线流派（神枪手/聚宝盆/半年翻倍）的算法化实现 + ML 增强。每天从 ~310 候选股中选 top-5 推荐，目标 +20% 累计止盈 / 跌破 24 日均线止损 / 满 15 日到期。
+
+**Slots.** `evening` only
+
+**Sections (evening, 5).**
+
+| # | Name | Notes |
+|---|---|---|
+| S1 | market_brief | 上证 / 中证 1000 / 创业板 + 6 步曲漏斗扫描 |
+| S2 | **consensus_matrix** ★1-★5 | 三轨（启发式 / ML 激进 / ML 稳健）排名加权打星，前 5 高亮 |
+| S3 | alerts | 今日触发的 stop_loss / take_profit |
+| S4 | tracking (by-date click-to-expand) | 过去 15 交易日每日 top-5 共识 picks 的 sparkline 趋势 |
+| S5 | disclaimer | 中英对照，含宁波派特化风险提示 |
+
+**Architecture.** Champion-Challenger 双 slot：
+- **aggressive slot** — 优化 Top5_AvgReturn（当前 active: ensemble_meanrank, +2.18% T5_Mean）
+- **conservative slot** — 优化 Sharpe（当前 active: xgb_ndcg, Sharpe 0.27, MaxDD -57%）
+- **heuristic** — 永远在线，作为 baseline
+
+每周日 22:00 BJT 自动重训 + Champion-Challenger 晋升判断。
+
+**Data.** Phase 1-3.D 实现，~233k 历史候选 + 219k 标签（自 2024-01-02）。
+
+**CLI tree.**
+
+```
+ifa ningbo
+├── evening              --scoring dual --mode production --generate-pdf
+├── backfill             --start YYYY-MM-DD --end YYYY-MM-DD
+├── backfill-candidates  --start ... --end ... [--skip-outcomes]
+├── candidate-outcomes   --start ... --end ...
+├── backfill-dual        --days N
+├── tracking             --start ... --end ...
+├── train                --in-sample-end YYYY-MM-DD --activate
+├── train-v2             (legacy, prefer refresh weekly)
+├── refresh
+│   ├── weekly           # 每周日 22:00：训练 + 晋升判断
+│   ├── monthly          # 每月 1 号：walk-forward 健康体检
+│   └── quarterly        # 每季 1 号：架构评审
+├── registry
+│   ├── status           # 看当前 active + 晋升历史
+│   ├── promote <slot> <version>     # 手动晋升
+│   └── rollback <slot>              # 紧急回退
+├── stats
+└── params
+    ├── list
+    └── freeze
+```
+
+详见 [`ningbo-deep-dive.md`](./ningbo-deep-dive.md)。
