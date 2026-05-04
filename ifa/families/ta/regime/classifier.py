@@ -31,6 +31,16 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 
+from ifa.families.ta.params import load_params
+
+
+def _vetos(detector: str) -> dict:
+    return load_params()["regime"]["vetos"].get(detector, {})
+
+
+def _thresh(detector: str) -> dict:
+    return load_params()["regime"]["thresholds"].get(detector, {})
+
 # Canonical regime names (also used as DB column values)
 REGIMES: tuple[str, ...] = (
     "trend_continuation",
@@ -229,16 +239,17 @@ def _score_trend_continuation(ctx: RegimeContext) -> float:
         return 0.0
 
     # Breadth veto: trend_continuation requires healthy positive breadth.
+    v = _vetos("trend_continuation")
     udr = _up_down_ratio(ctx)
-    if udr is not None and udr < 1.15:    # not clearly more up than down
+    if udr is not None and udr < v["udr_min"]:
         return 0.0
-    if ctx.n_limit_down is not None and ctx.n_limit_down > 25:
+    if ctx.n_limit_down is not None and ctx.n_limit_down > v["n_limit_down_max"]:
         return 0.0
-    if ctx.n_down is not None and ctx.n_down > 3700:
+    if ctx.n_down is not None and ctx.n_down > v["n_down_max"]:
         return 0.0
-    # Defer to early_risk_on on a strongly-positive day (lu≥70 + up≥4000)
-    if (ctx.n_limit_up is not None and ctx.n_limit_up >= 70
-            and ctx.n_up is not None and ctx.n_up >= 4000):
+    # Defer to early_risk_on on a strongly-positive day
+    if (ctx.n_limit_up is not None and ctx.n_limit_up >= v["defer_to_early_lu_min"]
+            and ctx.n_up is not None and ctx.n_up >= v["defer_to_early_up_min"]):
         return 0.0
 
     score = 0.0
@@ -263,13 +274,14 @@ def _score_early_risk_on(ctx: RegimeContext) -> float:
     risk-on signal even if YoY ratio modest.
     """
     score = 0.0
+    t = _thresh("early_risk_on")
 
     # Absolute breadth path (e.g. 2026-03-25: 涨停 84 + up 4820 + index +1.3%)
-    if (ctx.n_limit_up is not None and ctx.n_limit_up >= 70
-            and ctx.n_up is not None and ctx.n_up >= 4000):
+    if (ctx.n_limit_up is not None and ctx.n_limit_up >= t["absolute_lu_min"]
+            and ctx.n_up is not None and ctx.n_up >= t["absolute_up_min"]):
         score += 0.45
         udr = _up_down_ratio(ctx)
-        if udr is not None and udr >= 1.7:
+        if udr is not None and udr >= t["udr_strong_min"]:
             score += 0.2
 
     # Classic path
@@ -315,25 +327,28 @@ def _score_range_bound(ctx: RegimeContext) -> float:
     limit-down > 20) means today is NOT range-bound — defer to early_risk_on
     / cooldown / distribution_risk.
     """
-    if ctx.n_up is not None and ctx.n_up > 4200:
+    v = _vetos("range_bound")
+    if ctx.n_up is not None and ctx.n_up > v["n_up_max"]:
         return 0.0
-    if ctx.n_limit_up is not None and ctx.n_limit_up > 80:
+    if ctx.n_limit_up is not None and ctx.n_limit_up > v["n_limit_up_max"]:
         return 0.0
-    if ctx.n_down is not None and ctx.n_down > 3700:
+    if ctx.n_down is not None and ctx.n_down > v["n_down_max"]:
         return 0.0
-    if ctx.n_limit_down is not None and ctx.n_limit_down > 25:
+    if ctx.n_limit_down is not None and ctx.n_limit_down > v["n_limit_down_max"]:
         return 0.0
     # cooldown-leaning days are not range_bound
     udr = _up_down_ratio(ctx)
-    if (udr is not None and udr < 0.7
-            and ctx.n_down is not None and ctx.n_down > 3000):
+    if (udr is not None and udr < v["cooldown_path_udr_max"]
+            and ctx.n_down is not None and ctx.n_down > v["cooldown_path_n_down_min"]):
         return 0.0
 
     score = 0.0
-    if ctx.sse_volatility_20d_pct is not None and ctx.sse_volatility_20d_pct < 8:
+    t = _thresh("range_bound")
+    if (ctx.sse_volatility_20d_pct is not None
+            and ctx.sse_volatility_20d_pct < t["vol_pct_max"]):
         score += 0.4
     if (ctx.sse_ma5 is not None and ctx.sse_ma20 is not None
-            and abs(ctx.sse_ma5 - ctx.sse_ma20) / ctx.sse_ma20 < 0.01):
+            and abs(ctx.sse_ma5 - ctx.sse_ma20) / ctx.sse_ma20 < t["ma_diff_pct_max"]):
         score += 0.3
     amt_ratio = _amount_vs_ma20(ctx)
     if amt_ratio is not None and 0.85 <= amt_ratio <= 1.1:
@@ -385,13 +400,16 @@ def _score_distribution_risk(ctx: RegimeContext) -> float:
     Also fires on big intraday breadth disaster (跌停 > 50 OR down > 5000).
     """
     score = 0.0
+    t = _thresh("distribution_risk")
     # Crash-day path: 涨停 << 跌停 OR 大量个股跌停
-    if ctx.n_limit_down is not None and ctx.n_limit_down >= 50:
+    if ctx.n_limit_down is not None and ctx.n_limit_down >= t["n_limit_down_strong"]:
         score += 0.4
-    if ctx.n_down is not None and ctx.n_down > 4500:
+    if (ctx.n_down is not None and ctx.n_down > t["n_down_strong"]
+            and ctx.n_limit_down is not None
+            and ctx.n_limit_down > t["n_limit_down_with_down"]):
         score += 0.25
     if (ctx.n_limit_up is not None and ctx.n_limit_down is not None
-            and ctx.n_limit_down > ctx.n_limit_up * 1.5):
+            and ctx.n_limit_down > ctx.n_limit_up * t["ld_vs_lu_ratio"]):
         score += 0.2
 
     rising = _sse_ma20_rising(ctx)
@@ -413,26 +431,27 @@ def _score_distribution_risk(ctx: RegimeContext) -> float:
 def _score_cooldown(ctx: RegimeContext) -> float:
     """退潮冷却: 涨停环比下降 + 跌家数 >> 涨家数 OR 跌停 >20.
 
-    Absolute breadth path: 跌停 ≥ 25 OR (down > 1.3*up AND down > 2500) is
+    Absolute breadth path: 跌停 ≥ threshold OR (low udr AND large n_down) is
     a strong cooldown signal regardless of MA structure or yoy ratios.
     """
     score = 0.0
+    t = _thresh("cooldown")
 
     # Absolute breadth path
-    if ctx.n_limit_down is not None and ctx.n_limit_down >= 25:
+    if ctx.n_limit_down is not None and ctx.n_limit_down >= t["n_limit_down_strong"]:
         score += 0.4
-    elif ctx.n_limit_down is not None and ctx.n_limit_down > 15:
+    elif ctx.n_limit_down is not None and ctx.n_limit_down > t["n_limit_down_weak"]:
         score += 0.2
 
     udr = _up_down_ratio(ctx)
-    if udr is not None and udr < 0.6:
+    if udr is not None and udr < t["udr_strong"]:
         score += 0.35
-    elif udr is not None and udr < 0.7:
+    elif udr is not None and udr < t["udr_med"]:
         score += 0.3
-    elif udr is not None and udr < 0.8:
+    elif udr is not None and udr < t["udr_weak"]:
         score += 0.2
 
-    if ctx.n_down is not None and ctx.n_down > 3000:
+    if ctx.n_down is not None and ctx.n_down > t["n_down_min"]:
         score += 0.2
 
     # Classic 涨停 yoy path

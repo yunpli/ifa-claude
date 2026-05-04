@@ -17,14 +17,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ifa.families.ta.params import load_params
 from ifa.families.ta.regime.classifier import Regime
 from ifa.families.ta.setups.base import Candidate
 
-OBSERVATION_DECAY_FLOOR = -10.0
-SUSPENSION_DECAY_FLOOR = -15.0
-WINRATE_TARGET_PCT = 30.0       # setup that wins T+10 ≥ 5% at this rate gets full score
-WINRATE_FLOOR_RATIO = 0.4       # never discount below 40% of raw score
-TOP_DIVERSITY_CAP = 3            # max picks of same setup_name in top_watchlist
+
+def _ranker_params() -> dict:
+    return load_params()["ranker"]
 
 
 @dataclass(frozen=True)
@@ -51,9 +50,10 @@ def _stars(score: float) -> int:
 def _governance_status(decay: float | None) -> str:
     if decay is None:
         return "active"
-    if decay < SUSPENSION_DECAY_FLOOR:
+    p = _ranker_params()["decay"]
+    if decay < p["suspension_floor_pp"]:
         return "suspended"
-    if decay < OBSERVATION_DECAY_FLOOR:
+    if decay < p["observation_floor_pp"]:
         return "observation_only"
     return "active"
 
@@ -75,6 +75,10 @@ def rank(
             ta.setup_metrics_daily. Missing → setup treated as ACTIVE / no boost.
     """
     setup_metrics = setup_metrics or {}
+    rp = _ranker_params()
+    boost_pp = rp["regime_boost"]
+    wr_target = rp["winrate"]["target_pct"]
+    wr_floor = rp["winrate"]["floor_ratio"]
 
     enriched: list[tuple[float, str, Candidate, str]] = []
     for c in candidates:
@@ -87,15 +91,14 @@ def rank(
         boost = 0.0
         suitable = m.get("suitable_regimes") or []
         if current_regime and current_regime in suitable:
-            boost = 0.1
+            boost = boost_pp
 
         adj_score = min(c.score + boost, 1.0)
 
         # Winrate scaling — discount weak-edge setups proportionally.
         winrate = m.get("winrate_60d")
         if winrate is not None:
-            ratio = max(WINRATE_FLOOR_RATIO,
-                        min(1.0, winrate / WINRATE_TARGET_PCT))
+            ratio = max(wr_floor, min(1.0, winrate / wr_target))
             adj_score *= ratio
 
         enriched.append((adj_score, c.setup_name, c, status))
@@ -103,6 +106,7 @@ def rank(
     enriched.sort(key=lambda t: (-t[0], t[1], t[2].ts_code))
 
     # Top-watchlist with per-setup diversity cap
+    diversity_cap = rp["diversity"]["top_cap_per_setup"]
     out: list[RankedCandidate] = []
     n_top_assigned = 0
     per_setup_top = {}
@@ -110,7 +114,7 @@ def rank(
         eligible_for_top = (status == "active")
         if eligible_for_top and n_top_assigned < top_n:
             cnt = per_setup_top.get(c.setup_name, 0)
-            in_top = cnt < TOP_DIVERSITY_CAP
+            in_top = cnt < diversity_cap
         else:
             in_top = False
         if in_top:

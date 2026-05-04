@@ -1,0 +1,46 @@
+ranker:
+  decay:
+    observation_floor_pp: -10
+    suspension_floor_pp: -15
+  diversity:
+    top_cap_per_setup: 3
+  regime_boost: 0.1
+  winrate:
+    floor_ratio: 0.4
+    target_pct: 30
+regime:
+  thresholds:
+    cooldown:
+      n_down_min: 3000
+      n_limit_down_strong: 25
+      n_limit_down_weak: 15
+      udr_med: 0.7
+      udr_strong: 0.6
+      udr_weak: 0.8
+    distribution_risk:
+      ld_vs_lu_ratio: 1.5
+      n_down_strong: 4500
+      n_limit_down_strong: 50
+      n_limit_down_with_down: 30
+    early_risk_on:
+      absolute_lu_min: 70
+      absolute_up_min: 4000
+      udr_strong_min: 1.7
+    range_bound:
+      ma_diff_pct_max: 0.01
+      vol_pct_max: 8
+  vetos:
+    range_bound:
+      cooldown_path_n_down_min: 3000
+      cooldown_path_udr_max: 0.7
+      n_down_max: 3700
+      n_limit_down_max: 25
+      n_limit_up_max: 80
+      n_up_max: 4200
+    trend_continuation:
+      defer_to_early_lu_min: 70
+      defer_to_early_up_min: 4000
+      n_down_max: 3700
+      n_limit_down_max: 25
+      udr_min: 1.265
+version: 2.2.0
