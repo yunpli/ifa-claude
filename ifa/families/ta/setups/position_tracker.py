@@ -50,6 +50,10 @@ class PositionEvent:
     realized_return_pct: float | None
     max_drawdown_pct: float | None
     days_held: int | None
+    # Fixed-horizon close-based returns (no stop/target — used by backtest objective).
+    return_t5_pct: float | None = None
+    return_t10_pct: float | None = None
+    return_t15_pct: float | None = None
 
 
 def _load_ohlc(engine: Engine, ts_code: str, after: date,
@@ -180,6 +184,15 @@ def evaluate_candidate(
 
     realized = (exit_price - fill_price) / fill_price * 100
     days_held = (exit_date - fill_date).days if (exit_date and fill_date) else None
+
+    # Fixed-horizon returns (close at T+5/T+10/T+15 vs fill_price; no stop/target).
+    # Indices: rows[0] = T+1, so T+N = rows[N-1] when len(rows) >= N.
+    def _ret_at(n: int) -> float | None:
+        if len(rows) < n:
+            return None
+        close_at = rows[n - 1][4]
+        return round((close_at - fill_price) / fill_price * 100, 4)
+
     return PositionEvent(
         candidate_id=candidate_id,
         generation_date=generation_date, ts_code=ts_code,
@@ -190,6 +203,9 @@ def evaluate_candidate(
         realized_return_pct=round(realized, 4),
         max_drawdown_pct=round(max_drawdown_pct, 4),
         days_held=days_held,
+        return_t5_pct=_ret_at(5),
+        return_t10_pct=_ret_at(10),
+        return_t15_pct=_ret_at(15),
     )
 
 
@@ -199,13 +215,15 @@ _UPSERT = text("""
          entry_price, stop_loss, target_price,
          fill_status, fill_date, fill_price,
          exit_status, exit_date, exit_price,
-         realized_return_pct, max_drawdown_pct, days_held)
+         realized_return_pct, max_drawdown_pct, days_held,
+         return_t5_pct, return_t10_pct, return_t15_pct)
     VALUES
         (:candidate_id, :generation_date, :ts_code, :setup_name,
          :entry_price, :stop_loss, :target_price,
          :fill_status, :fill_date, :fill_price,
          :exit_status, :exit_date, :exit_price,
-         :realized_return_pct, :max_drawdown_pct, :days_held)
+         :realized_return_pct, :max_drawdown_pct, :days_held,
+         :return_t5_pct, :return_t10_pct, :return_t15_pct)
     ON CONFLICT (candidate_id) DO UPDATE SET
         fill_status = EXCLUDED.fill_status,
         fill_date = EXCLUDED.fill_date,
@@ -216,6 +234,9 @@ _UPSERT = text("""
         realized_return_pct = EXCLUDED.realized_return_pct,
         max_drawdown_pct = EXCLUDED.max_drawdown_pct,
         days_held = EXCLUDED.days_held,
+        return_t5_pct = EXCLUDED.return_t5_pct,
+        return_t10_pct = EXCLUDED.return_t10_pct,
+        return_t15_pct = EXCLUDED.return_t15_pct,
         evaluated_at = NOW()
 """)
 
@@ -264,6 +285,9 @@ def evaluate_for_date(
                 "realized_return_pct": ev.realized_return_pct,
                 "max_drawdown_pct": ev.max_drawdown_pct,
                 "days_held": ev.days_held,
+                "return_t5_pct": ev.return_t5_pct,
+                "return_t10_pct": ev.return_t10_pct,
+                "return_t15_pct": ev.return_t15_pct,
             })
             n += 1
     log.info("evaluate_for_date(%s): wrote %d position events", generation_date, n)
