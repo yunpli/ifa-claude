@@ -392,6 +392,10 @@ def _compute_disclosure_delay(snap: CompanyFinancialSnapshot, p: dict) -> Factor
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _is_decrease(trade: dict) -> bool:
+    # Tushare stk_holdertrade uses in_de: 'IN' (增持) / 'DE' (减持)
+    in_de = str(trade.get("in_de") or "").upper()
+    if in_de == "DE":
+        return True
     direction = str(trade.get("trade_type") or trade.get("direction") or "").lower()
     return "减持" in direction or "sell" in direction or "decrease" in direction
 
