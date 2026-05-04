@@ -260,14 +260,34 @@ def _compute_pledge_ratio(snap: CompanyFinancialSnapshot, p: dict) -> FactorResu
     spec = SPECS["PLEDGE_RATIO"]
 
     if not snap.pledge_stat:
+        # Distinguish "fetch returned 0 rows" (= no pledges, healthy)
+        # from "fetch never happened" (= unknown).
+        if snap.data_status.get("pledge_stat") == "empty":
+            val = Decimal("0")
+            status = classify_lower_better(
+                val,
+                warning_above=p.get("warning_above", 30.0),
+                critical_above=p.get("critical_above", 70.0),
+            )
+            return FactorResult(
+                spec=spec, value=val, status=status,
+                period=snap.latest_period,
+                raw_inputs={"pledge_ratio_pct": "0"},
+                notes=["pledge_stat 返回 0 行：无大股东质押"],
+            )
         return FactorResult(
             spec=spec, value=None, status=FactorStatus.UNKNOWN,
             period=snap.latest_period,
             notes=["缺 pledge_stat 数据"],
         )
 
-    # Sort by ann_date desc, take latest
-    sorted_ps = sorted(snap.pledge_stat, key=lambda r: r.get("ann_date") or "", reverse=True)
+    # Sort by end_date desc, take latest. Tushare pledge_stat returns
+    # weekly snapshots keyed by end_date (not ann_date).
+    sorted_ps = sorted(
+        snap.pledge_stat,
+        key=lambda r: r.get("end_date") or r.get("ann_date") or "",
+        reverse=True,
+    )
     latest = sorted_ps[0]
     ratio_raw = latest.get("pledge_ratio")
 

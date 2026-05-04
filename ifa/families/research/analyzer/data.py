@@ -267,10 +267,14 @@ def load_company_snapshot(
         "stk_rewards", "block_trade", "disclosure_date", "cyq_perf",
     ]
     for api in expected:
-        rows = cache.get(api, [])
-        snap.data_status[api] = "ok" if rows else "empty"
-        if not rows:
+        if api not in cache:
+            snap.data_status[api] = "missing"
             snap.missing_apis.append(api)
+        elif not cache[api]:
+            # Fetch succeeded with zero rows — definitive "no data" signal.
+            snap.data_status[api] = "empty"
+        else:
+            snap.data_status[api] = "ok"
 
     # ── Identity ──────────────────────────────────────────────────────────
     if (sb := cache.get("stock_basic")) and sb:
