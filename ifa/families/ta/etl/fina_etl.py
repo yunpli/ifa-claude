@@ -63,15 +63,15 @@ def fetch_fina_indicator_for_period(
 ) -> int:
     """Pull all listed companies' fina_indicator for a single period (e.g. 20260331)."""
     yyyymmdd = end_date.strftime("%Y%m%d")
+    fields = ("ts_code,end_date,ann_date,roe,roe_dt,eps,"
+              "netprofit_margin,grossprofit_margin,ar_turn")
+    # Prefer fina_indicator_vip (period-only, all stocks); fall back to per-stock.
     try:
-        df = client.call(
-            "fina_indicator",
-            period=yyyymmdd,
-            fields="ts_code,end_date,ann_date,roe,roe_dt,eps,"
-                   "netprofit_margin,grossprofit_margin,ar_turn",
-        )
+        df = client.call("fina_indicator_vip", period=yyyymmdd, fields=fields)
     except Exception as e:
-        log.warning("fina_indicator fetch failed for period %s: %s", end_date, e)
+        log.warning("fina_indicator_vip fetch failed for %s: %s; "
+                    "fina_indicator requires per-stock iteration which is heavy",
+                    end_date, e)
         return 0
 
     if df is None or len(df) == 0:

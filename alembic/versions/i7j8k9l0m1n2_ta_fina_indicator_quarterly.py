@@ -26,12 +26,12 @@ def upgrade() -> None:
         sa.Column("ts_code", sa.String(12), nullable=False),
         sa.Column("end_date", sa.Date, nullable=False),     # period end (e.g. 20260331)
         sa.Column("ann_date", sa.Date),                      # announcement date
-        sa.Column("roe", sa.Numeric(10, 4)),                 # 净资产收益率 %
-        sa.Column("roe_dt", sa.Numeric(10, 4)),              # 摊薄 ROE %
-        sa.Column("eps", sa.Numeric(10, 4)),                 # 基本每股收益
-        sa.Column("netprofit_margin", sa.Numeric(10, 4)),    # 销售净利率 %
-        sa.Column("grossprofit_margin", sa.Numeric(10, 4)),  # 销售毛利率 %
-        sa.Column("ar_turn", sa.Numeric(10, 4)),             # 应收账款周转率
+        sa.Column("roe", sa.Numeric(14, 4)),                 # 净资产收益率 %
+        sa.Column("roe_dt", sa.Numeric(14, 4)),              # 摊薄 ROE %
+        sa.Column("eps", sa.Numeric(14, 4)),                 # 基本每股收益
+        sa.Column("netprofit_margin", sa.Numeric(14, 4)),    # 销售净利率 %
+        sa.Column("grossprofit_margin", sa.Numeric(14, 4)),  # 销售毛利率 %
+        sa.Column("ar_turn", sa.Numeric(14, 2)),             # 应收账款周转率 (large)
         sa.Column("created_at", sa.TIMESTAMP(timezone=True), server_default=sa.text("NOW()")),
         sa.PrimaryKeyConstraint("ts_code", "end_date"),
         schema=SCHEMA,
