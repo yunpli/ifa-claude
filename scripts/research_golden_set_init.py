@@ -183,13 +183,16 @@ def main() -> None:
                 snap, results, scoring, params,
                 tier="deep", augmenter=augmenter, engine=engine,
             )
-            base = REPORTS_DIR / f"research_{s['ts_code']}_deep"
+            stamp = bjt_now().strftime("%Y%m%d")
+            base = REPORTS_DIR / f"Stock-Analysis-{s['ts_code']}-{stamp}-deep"
             base.with_suffix(".html").write_text(
                 html_renderer.render(report=report), encoding="utf-8"
             )
             base.with_suffix(".md").write_text(
                 render_markdown(report), encoding="utf-8"
             )
+            s["report_html_path"] = str(base.with_suffix(".html").relative_to(ROOT))
+            s["report_md_path"] = str(base.with_suffix(".md").relative_to(ROOT))
             s["report_status"] = "ok"
         except Exception as e:
             log.warning("    failed: %s", str(e)[:200])
@@ -204,8 +207,8 @@ def main() -> None:
             "board": s["board"],
             "sw_l2": s.get("sw_l2"),
             "system_overall_score": round(s["overall_score"], 1),
-            "report_html": f"tests/golden_set/reports/research_{s['ts_code']}_deep.html",
-            "report_md":   f"tests/golden_set/reports/research_{s['ts_code']}_deep.md",
+            "report_html": s.get("report_html_path", ""),
+            "report_md":   s.get("report_md_path", ""),
             "_INSTRUCTIONS": (
                 "Open the report (HTML or MD) and answer 4 questions. "
                 "Leave fields blank only if you genuinely don't know."

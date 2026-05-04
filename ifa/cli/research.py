@@ -172,11 +172,11 @@ def cmd_report(
 
     out_dir = Path(output)
     out_dir.mkdir(parents=True, exist_ok=True)
-    # Append tier to filename only when not standard, to keep the canonical
-    # path stable for default invocations.
-    suffix = f"_{tier}" if tier != "standard" else ""
-    html_path = out_dir / f"research_{company.ts_code}{suffix}.html"
-    md_path = out_dir / f"research_{company.ts_code}{suffix}.md"
+    suffix = f"-{tier}" if tier != "standard" else ""
+    stamp = bjt_now().strftime("%Y%m%d")
+    base = f"Stock-Analysis-{company.ts_code}-{stamp}{suffix}"
+    html_path = out_dir / f"{base}.html"
+    md_path = out_dir / f"{base}.md"
     html_path.write_text(HtmlRenderer().render(report=report), encoding="utf-8")
     md_path.write_text(render_markdown(report), encoding="utf-8")
 
