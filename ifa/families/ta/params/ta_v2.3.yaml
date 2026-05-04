@@ -77,8 +77,8 @@ version: 2.3.0
 # stop  = entry × (1 − k_stop × ATR%)         k_stop = 2.0 → -2 ATR
 # target= entry × (1 + k_target × ATR%)       k_target = 4.0 → +4 ATR → R:R 2:1
 recommended_price:
-  k_stop: 2.0
-  k_target: 4.0
+  k_stop: 1.5      # tightened from 2.0 — smaller stops in choppy market
+  k_target: 3.0    # tightened from 4.0 — smaller targets, easier to hit (R:R 2:1 preserved)
   # entry_offset_atr is per-setup-category in code (not tunable per-yaml).
 
 # T+15 holding-period optimization weights for backtest objective.

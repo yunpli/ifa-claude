@@ -20,9 +20,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Default ATR coefficients (tunable via params later).
+from ifa.families.ta.params import load_params
+
+# Default ATR coefficients (used when yaml unavailable).
 K_STOP_DEFAULT = 2.0
 K_TARGET_DEFAULT = 4.0
+
+
+def _yaml_k_stop() -> float:
+    p = load_params().get("recommended_price", {}) or {}
+    return float(p.get("k_stop", K_STOP_DEFAULT))
+
+
+def _yaml_k_target() -> float:
+    p = load_params().get("recommended_price", {}) or {}
+    return float(p.get("k_target", K_TARGET_DEFAULT))
 
 _BREAKOUT_SETUPS = {
     "T1_BREAKOUT", "T3_ACCELERATION", "V1_VOL_PRICE_UP",
@@ -78,8 +90,8 @@ def compute_recommended_price(
     atr_pct_20d: float | None,
     *,
     evidence: dict | None = None,
-    k_stop: float = K_STOP_DEFAULT,
-    k_target: float = K_TARGET_DEFAULT,
+    k_stop: float | None = None,
+    k_target: float | None = None,
 ) -> RecommendedPrice | None:
     """Return entry/stop/target prices in 元 for a single setup hit.
 
@@ -89,6 +101,11 @@ def compute_recommended_price(
         return None
     if atr_pct_20d is None or atr_pct_20d <= 0:
         return None
+    # Read from yaml when not explicitly overridden.
+    if k_stop is None:
+        k_stop = _yaml_k_stop()
+    if k_target is None:
+        k_target = _yaml_k_target()
     offset = _entry_offset_atr(setup_name, evidence)
     entry = entry_close * (1.0 + offset * atr_pct_20d / 100.0)
     stop = entry * (1.0 - k_stop * atr_pct_20d / 100.0)
