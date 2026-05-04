@@ -4,9 +4,16 @@
 > **定位**：iFA 第一个**自上而下、跨家族汇聚**型策略产品 — 不是新策略，而是**策略元层**
 > **关键差异**：不替代 Smart Money、不放大 Ningbo、不黑盒 AI 选股，是**纪律化的次日交易准备文档**
 >
-> **打分原则**：所有 19 个策略的内部加分均为 **连续 strength function**（非 boolean）；
+> **打分原则**：所有 28 个策略的内部加分均为 **连续 strength function**（非 boolean）；
 > 跨族共振 bonus 按"次族强度 × 递减权重"累计。M9.5 增强：cross-sectional rank
 > + ATR-normalized magnitudes。详见 [`scoring-principles.md`](scoring-principles.md)。
+>
+> **M10 扩张（2026-05-04）**：原 19 setup（7 族）→ **28 setup（11 族）**。新增 4 族：
+> · **O 主力资金**（O1 机构连续抢筹 / O2 龙虎榜机构净买入 / O3 涨停封单结构）
+> · **D 顶部反转**（D1 双顶 / D2 头肩顶 / D3 流星线 — 警示型，进 §13 风险扫描而非 Tier A/B）
+> · **Z 统计**（Z1 极端 z-score / Z2 超卖反弹）
+> · **E 事件**（E1 业绩预告/快报/披露窗口催化 — 数据由 `ta.event_signal_daily` 承载，
+>   ETL: `ifa.families.ta.etl.event_etl` 拉 Tushare `forecast`/`express`/`disclosure_date`）
 >
 > **历史重点池关注（§08）**：每日 Tier A（重点池）选股保留过去 15 个交易日的
 > 跟踪记录，展示 T+1/T+3/T+5/T+10 实际收益（仅观察、不止盈止损）。冷启动

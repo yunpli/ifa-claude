@@ -57,6 +57,15 @@ SETUP_ZH: dict[str, dict[str, str]] = {
     "S3_LAGGARD_CATCHUP":     {"name": "落后补涨", "family": "板块"},
     "C1_CHIP_CONCENTRATED":   {"name": "筹码集中", "family": "筹码"},
     "C2_CHIP_LOOSE":          {"name": "筹码松动（警示）", "family": "筹码"},
+    "O1_INST_PERSISTENT_BUY": {"name": "机构连续抢筹", "family": "主力资金"},
+    "O2_LHB_INST_BUY":        {"name": "龙虎榜机构净买入", "family": "主力资金"},
+    "O3_LIMIT_SEAL_STRENGTH": {"name": "涨停封单强度", "family": "主力资金"},
+    "D1_DOUBLE_TOP":          {"name": "双顶反转（警示）", "family": "顶部反转"},
+    "D2_HS_TOP":              {"name": "头肩顶（警示）", "family": "顶部反转"},
+    "D3_SHOOTING_STAR":       {"name": "流星线（警示）", "family": "顶部反转"},
+    "Z1_ZSCORE_EXTREME":      {"name": "极端 Z-score", "family": "统计"},
+    "Z2_OVERSOLD_REBOUND":    {"name": "超卖反弹", "family": "统计"},
+    "E1_EVENT_CATALYST":      {"name": "事件催化", "family": "事件"},
 }
 
 TRIGGER_ZH: dict[str, str] = {
@@ -150,6 +159,45 @@ TRIGGER_ZH: dict[str, str] = {
     "regime_warning": "体制警示",
     "extreme_winner_rate": "盈利盘比例极高（≥90%）",
     "extreme_run": "近期累计涨幅 ≥30%",
+    # O1/O2/O3 — order flow
+    "inst_5d_inflow>=1%": "5 日机构净流入 ≥1% 流通市值",
+    "strong_inst_inflow": "机构净流入显著",
+    "lhb_inst_buy_recent": "近 5 日龙虎榜机构买入",
+    "lhb_net_buy>=0.5%float": "龙虎榜净买入 ≥0.5% 流通市值",
+    "lhb_inst_seat_today": "今日机构席位净买",
+    "lhb_strong_net_buy": "龙虎榜净买入显著",
+    "lhb_inst_persistent": "近 5 日机构持续买入",
+    "limit_sealed": "涨停封死（未炸板）",
+    "seal_ratio>=1%": "封单 ≥1% 流通市值",
+    "strong_seal": "封单结构强",
+    "inst_inflow_aligned": "机构资金同向流入",
+    # D1/D2/D3 — top reversal
+    "double_top": "双顶形态",
+    "post_runup": "前期已大幅上涨",
+    "decisive_break": "破位明显",
+    "hs_top": "头肩顶形态",
+    "shooting_star": "流星线",
+    "post_strong_runup": "前 20 日累计 ≥15%",
+    "no_continuation": "今日无延续",
+    "long_upper_shadow": "长上影线",
+    "climax_volume": "高位放量",
+    # Z1/Z2 — statistical
+    "z_extreme_long": "极端负 Z（统计性反弹候选）",
+    "z_extreme_short": "极端正 Z（统计性衰竭候选）",
+    "very_extreme": "极端程度高",
+    "rsi_oversold": "RSI 超卖",
+    "rsi_overbought": "RSI 超买",
+    "5d_drawdown": "近 5 日回撤 ≥5%",
+    "stabilizing": "今日企稳",
+    "deeply_oversold": "深度超卖",
+    "turn_volume": "转折成交放大",
+    # E1 — event-driven
+    "event:forecast": "业绩预告日",
+    "event:express": "业绩快报日",
+    "event:disclosure_pre": "披露窗口临近",
+    "positive_polarity": "正面催化",
+    "negative_polarity": "负面预警",
+    "imminent_disclosure": "披露 ≤5 个交易日",
 }
 
 

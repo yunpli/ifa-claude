@@ -245,7 +245,8 @@ class TestC2ChipLoose:
 
 # ──────────────────────── Registry sanity ────────────────────────
 class TestRegistryDay45:
-    def test_all_18_registered(self):
+    def test_all_registered(self):
+        # Original 19 (T/P/R/F/V/S/C) + M10 expansion 9 (O/D/Z/E) = 28
         expected = {
             "T1_BREAKOUT", "T2_PULLBACK_RESUME", "T3_ACCELERATION",
             "P1_MA20_PULLBACK", "P2_GAP_FILL", "P3_TIGHT_CONSOLIDATION",
@@ -254,10 +255,11 @@ class TestRegistryDay45:
             "V1_VOL_PRICE_UP", "V2_QUIET_COIL",
             "S1_SECTOR_RESONANCE", "S2_LEADER_FOLLOWTHROUGH", "S3_LAGGARD_CATCHUP",
             "C1_CHIP_CONCENTRATED", "C2_CHIP_LOOSE",
+            "O1_INST_PERSISTENT_BUY", "O2_LHB_INST_BUY", "O3_LIMIT_SEAL_STRENGTH",
+            "D1_DOUBLE_TOP", "D2_HS_TOP", "D3_SHOOTING_STAR",
+            "Z1_ZSCORE_EXTREME", "Z2_OVERSOLD_REBOUND",
+            "E1_EVENT_CATALYST",
         }
         assert set(SETUPS.keys()) == expected, \
             f"missing: {expected - set(SETUPS.keys())}, extra: {set(SETUPS.keys()) - expected}"
-        # 19 names because we also kept all original setups; 18 = day23(9) + day45(9)... 19 here
-        # Actually: T1+T2+T3+P1+P2+P3+R1+R2+R3+F1+F2+F3+V1+V2+S1+S2+S3+C1+C2 = 19
-        # The user spec says 18 setups but the count includes T1; verify this matches reality.
-        assert len(SETUPS) == 19
+        assert len(SETUPS) == 28

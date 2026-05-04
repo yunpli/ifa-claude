@@ -82,6 +82,29 @@ class SetupContext:
     chip_concentration_pct: float | None = None     # smaller = more concentrated
     chip_winner_rate_pct: float | None = None       # 0-100, % of float in profit
 
+    # M10 — Order-flow (O family) inputs
+    # Number of days in last 5 trade-days where stock had at least one institutional
+    # seat net-buying on 龙虎榜 (raw_top_inst.side='买' AND net_buy>0).
+    lhb_inst_buy_days_5d: int | None = None
+    # Today's 龙虎榜 净买额 / 流通市值 (raw_top_list.net_amount / float_values), %
+    lhb_net_buy_pct_float_today: float | None = None
+    # Today's KPL 涨停封单强度: lu_bid_vol*close / free_float, % of float
+    kpl_seal_ratio_today: float | None = None
+    # KPL status today: 'T' fully sealed, 'broken' if open_times>0, None if not in pool
+    kpl_status_today: str | None = None
+    # Today's pct_chg from raw_daily (cached)
+    today_pct_chg: float | None = None
+    # 5-day cumulative super-large net buy / 流通市值 (proxy for 机构连续抢筹), %
+    super_large_net_buy_5d_pct: float | None = None
+
+    # M10 — Event-driven (E family) inputs (None until backfill populates)
+    # Event type today: 'forecast' / 'express' / 'disclosure_pre'
+    event_type_today: str | None = None
+    # Polarity when known: 'positive' / 'negative' / 'neutral'
+    event_polarity: str | None = None
+    # Days until next earnings disclosure; None if unknown
+    days_to_disclosure: int | None = None
+
 
 @dataclass(frozen=True)
 class Candidate:

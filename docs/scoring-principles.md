@@ -257,7 +257,7 @@ def stars(score):
 
 | Family · file | Pattern | Status |
 |---|---|---|
-| `ta/setups/*.py` (19 setups) | continuous strength | ✓ as of `4b700b4` |
+| `ta/setups/*.py` (28 setups, 11 families) | continuous strength | ✓ as of `4b700b4`; M10 expansion (O/D/Z/E) on 2026-05-04 |
 | `ta/setups/ranker.py` | continuous resonance bonus | ✓ as of `4b700b4` |
 | `smartmoney/factors/liquidity.py` | continuous attack/retreat/defense | ✓ as of `ec3df2d` |
 | `smartmoney/factors/flow.py` | rank-based × weights (already continuous) | ✓ |

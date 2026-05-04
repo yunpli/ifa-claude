@@ -167,6 +167,81 @@ def build_contexts(
                ON mf.l2_code = s.sector_code AND mf.trade_date = s.trade_date
         WHERE s.sector_source = 'sw_l2' AND s.trade_date = :on_date
     """)
+    # M10 — Order flow (O family)
+    # 5d institutional buying days: count distinct trade_dates where any
+    # 机构专用 seat had net_buy > 0 (raw_top_inst.exalter = '机构专用').
+    sql_lhb_inst = text("""
+        SELECT ts_code, COUNT(DISTINCT trade_date) AS n_days
+        FROM smartmoney.raw_top_inst
+        WHERE trade_date <= :on_date AND trade_date > :start_5d
+          AND exalter = '机构专用' AND net_buy > 0
+        GROUP BY ts_code
+    """)
+    # Today's 龙虎榜 净买额 / 流通市值 (%) — both columns are in 元.
+    sql_lhb_today = text("""
+        SELECT ts_code,
+               CASE WHEN float_values > 0
+                    THEN net_amount / float_values * 100
+               END AS pct_float
+        FROM smartmoney.raw_top_list
+        WHERE trade_date = :on_date
+    """)
+    # KPL today: seal strength = limit_order(元) / free_float(元) × 100 = % of float
+    # status: 'T' fully sealed; 'broken' if raw_limit_list_d.limit_='Z' or open_times>0
+    sql_kpl_today = text("""
+        SELECT k.ts_code,
+               CASE WHEN k.free_float > 0 AND k.limit_order IS NOT NULL
+                    THEN k.limit_order::numeric / k.free_float * 100
+               END AS seal_ratio,
+               CASE
+                   WHEN l.limit_ = 'Z' OR COALESCE(l.open_times, 0) > 0 THEN 'broken'
+                   ELSE 'T'
+               END AS status
+        FROM smartmoney.raw_kpl_list k
+        LEFT JOIN smartmoney.raw_limit_list_d l
+               ON l.ts_code = k.ts_code AND l.trade_date = k.trade_date
+        WHERE k.trade_date = :on_date
+    """)
+    # 5d cumulative super-large + large net flow / 流通市值 (%)
+    # raw_moneyflow buy_elg / sell_elg / buy_lg / sell_lg are in 万元;
+    # raw_daily_basic.float_share is in 万股, close from raw_daily.
+    sql_super_flow_5d = text("""
+        WITH inst_flow AS (
+            SELECT m.ts_code,
+                   SUM(COALESCE(m.buy_elg_amount, 0) - COALESCE(m.sell_elg_amount, 0)
+                       + COALESCE(m.buy_lg_amount, 0) - COALESCE(m.sell_lg_amount, 0)) AS net_5d
+            FROM smartmoney.raw_moneyflow m
+            WHERE m.trade_date <= :on_date AND m.trade_date > :start_5d
+            GROUP BY m.ts_code
+        ),
+        float_mv AS (
+            SELECT b.ts_code, b.float_share * d.close AS float_mv_wan
+            FROM smartmoney.raw_daily_basic b
+            JOIN smartmoney.raw_daily d
+              ON d.ts_code = b.ts_code AND d.trade_date = b.trade_date
+            WHERE b.trade_date = :on_date
+        )
+        SELECT i.ts_code,
+               CASE WHEN f.float_mv_wan > 0
+                    THEN i.net_5d / f.float_mv_wan * 100
+               END AS net_flow_pct
+        FROM inst_flow i
+        JOIN float_mv f ON f.ts_code = i.ts_code
+    """)
+    # M10 — Event-driven (E family); table populated by event_etl from Tushare.
+    # When event_signal_daily has multiple events per stock, prefer the most
+    # impactful (forecast > express > disclosure_pre) using lexical priority.
+    sql_event = text("""
+        SELECT DISTINCT ON (ts_code) ts_code, event_type, polarity, days_to_disclosure
+        FROM ta.event_signal_daily
+        WHERE trade_date = :on_date
+        ORDER BY ts_code,
+                 CASE event_type
+                      WHEN 'forecast' THEN 1
+                      WHEN 'express' THEN 2
+                      WHEN 'disclosure_pre' THEN 3 ELSE 9 END
+    """)
+
     # Chip distribution
     sql_chip = text("""
         SELECT ts_code,
@@ -204,6 +279,29 @@ def build_contexts(
             }
             for r in conn.execute(sql_chip, {"on_date": on_date})
         }
+        start_5d = on_date - timedelta(days=10)  # 5 trade-days ≈ 10 calendar days
+        lhb_inst_days = {r[0]: int(r[1]) for r in conn.execute(
+            sql_lhb_inst, {"on_date": on_date, "start_5d": start_5d})}
+        lhb_today = {r[0]: float(r[1]) if r[1] is not None else None
+                     for r in conn.execute(sql_lhb_today, {"on_date": on_date})}
+        kpl_today: dict[str, dict] = {}
+        for r in conn.execute(sql_kpl_today, {"on_date": on_date}):
+            kpl_today[r[0]] = {
+                "seal_ratio": float(r[1]) if r[1] is not None else None,
+                "status": r[2],
+            }
+        super_flow_5d = {r[0]: float(r[1]) if r[1] is not None else None
+                         for r in conn.execute(sql_super_flow_5d,
+                                               {"on_date": on_date, "start_5d": start_5d})}
+        events_today: dict[str, dict] = {}
+        try:
+            for r in conn.execute(sql_event, {"on_date": on_date}):
+                events_today[r[0]] = {
+                    "event_type": r[1], "polarity": r[2],
+                    "days_to_disclosure": int(r[3]) if r[3] is not None else None,
+                }
+        except Exception as e:
+            log.debug("ta.event_signal_daily not available: %s", e)
         sector_flow_raw = {
             r[0]: {
                 "role": r[1], "cycle_phase": r[2],
@@ -357,6 +455,15 @@ def build_contexts(
             sector_cycle_phase=sector_flow_raw.get(l2_code, {}).get("cycle_phase") if l2_code else None,
             chip_concentration_pct=cp.get("concentration_pct"),
             chip_winner_rate_pct=cp.get("winner_rate_pct"),
+            today_pct_chg=stock_pct_today.get(ts_code),
+            lhb_inst_buy_days_5d=lhb_inst_days.get(ts_code),
+            lhb_net_buy_pct_float_today=lhb_today.get(ts_code),
+            kpl_seal_ratio_today=kpl_today.get(ts_code, {}).get("seal_ratio"),
+            kpl_status_today=kpl_today.get(ts_code, {}).get("status"),
+            super_large_net_buy_5d_pct=super_flow_5d.get(ts_code),
+            event_type_today=events_today.get(ts_code, {}).get("event_type"),
+            event_polarity=events_today.get(ts_code, {}).get("polarity"),
+            days_to_disclosure=events_today.get(ts_code, {}).get("days_to_disclosure"),
         )
 
     log.info("built %d setup contexts for %s", len(contexts), on_date)

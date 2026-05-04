@@ -293,7 +293,7 @@ ifa research
 
 ## TA — 晚盘技术面体制+候选 (separate)
 
-**Purpose.** Daily evening report covering market regime classification, 19 candidate setups across 7 families (T/P/R/F/V/S/C), candidate ranking with regime gating + decay-based suspension, T+1/T+3/T+5/T+10/T+30 outcome tracking, falsifiable next-day hypotheses.
+**Purpose.** Daily evening report covering market regime classification, 28 candidate setups across 11 families (T/P/R/F/V/S/C/O/D/Z/E), candidate ranking with regime gating + decay-based suspension, T+1/T+3/T+5/T+10/T+15/T+30 outcome tracking, falsifiable next-day hypotheses.
 
 **Sections (evening, 11 + 3 LLM).** §01 overview · §02 market state · §02-N regime narrative (LLM) · §03 5★ candidates · §04 4★ candidates · §04-N candidate narrative (LLM) · §07 candidates by family · §08 verification (T+1) · §10 setup metrics · §11 attribution · §13 risk scan · §13-N strategy review (LLM) · §14 falsifiable hypotheses · §16 disclaimer.
 
@@ -308,8 +308,12 @@ ifa research
 | V 量价 | V1 量价齐升 · V2 缩量整理 |
 | S 板块 | S1 共振 · S2 跟风 · S3 补涨 |
 | C 筹码 | C1 集中 · C2 松动 |
+| O 主力资金 (M10) | O1 机构连续抢筹 · O2 龙虎榜机构净买入 · O3 涨停封单结构 |
+| D 顶部反转 (M10, 警示) | D1 双顶 · D2 头肩顶 · D3 流星线 |
+| Z 统计 (M10) | Z1 极端 z-score · Z2 超卖反弹 |
+| E 事件 (M10) | E1 业绩预告/快报/披露窗口催化 |
 
-**Key data sources.** `smartmoney.raw_daily` (60d OHLCV) · `smartmoney.market_state_daily` (breadth + 涨跌停 + 连板) · `smartmoney.raw_moneyflow_hsgt` (北向) · `smartmoney.raw_sw_daily` (SW L1/L2 pct_change) · `ta.factor_pro_daily` (Tushare 80 fields incl. MACD/RSI) · `ta.cyq_perf_daily` (chip distribution).
+**Key data sources.** `smartmoney.raw_daily` (60d OHLCV) · `smartmoney.market_state_daily` (breadth + 涨跌停 + 连板) · `smartmoney.raw_moneyflow_hsgt` (北向) · `smartmoney.raw_sw_daily` (SW L1/L2 pct_change) · `ta.factor_pro_daily` (Tushare 80 fields incl. MACD/RSI) · `ta.cyq_perf_daily` (chip distribution) · `smartmoney.raw_top_inst` / `raw_top_list` (LHB) · `smartmoney.raw_kpl_list` + `raw_limit_list_d` (涨停池) · `smartmoney.raw_moneyflow` (5d super-large net flow) · `ta.event_signal_daily` (M10 — populated by `ifa.families.ta.etl.event_etl` from Tushare `forecast`/`express`/`disclosure_date`).
 
 **Governance (M5.3).**
 - Regime gating: setup gets +0.1 score boost when current regime ∈ historical `suitable_regimes` (from setup_metrics_daily).
