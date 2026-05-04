@@ -150,6 +150,36 @@ def build_contexts(
         if l2:
             l2_to_members[l2].append(ts_code)
 
+    # ── Cross-sectional ranks (0-1, 1.0 = highest in today's universe) ──
+    # Build rank for volume_ratio (Tushare-provided where available, else our proxy)
+    # and today's stock return — both used by setups for "relatively strong" tests.
+    vol_ratio_today: dict[str, float] = {}
+    for ts_code, fp in factor_pro.items():
+        v = fp.get("volume_ratio_tushare")
+        if v is not None:
+            vol_ratio_today[ts_code] = v
+
+    def _rank_dict(values: dict[str, float]) -> dict[str, float]:
+        """Returns ts_code → percentile rank (0..1) within values."""
+        if not values:
+            return {}
+        sorted_vals = sorted(values.values())
+        n = len(sorted_vals)
+        out: dict[str, float] = {}
+        for ts_code, v in values.items():
+            # Number of values strictly less than v
+            lo, hi = 0, n
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if sorted_vals[mid] < v:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            out[ts_code] = lo / max(n - 1, 1)   # 0 = lowest, 1 = highest
+        return out
+
+    vol_ratio_rank_dict = _rank_dict(vol_ratio_today)
+
     # Compute today's stock pct_change from raw_daily for peer dicts
     stock_pct_today: dict[str, float] = {}
     for ts_code, rows in by_stock.items():
@@ -160,6 +190,9 @@ def build_contexts(
         close = float(row[5]) if row[5] else None
         if pre_close and close:
             stock_pct_today[ts_code] = (close / pre_close - 1.0) * 100
+
+    # Cross-sectional rank of today's stock return
+    pct_rank_dict = _rank_dict(stock_pct_today)
 
     contexts: dict[str, SetupContext] = {}
     for ts_code, rows in by_stock.items():
@@ -184,6 +217,18 @@ def build_contexts(
         # volume_ratio = today's vol / 20-day avg
         avg_vol_20 = sum(volumes[-21:-1]) / 20 if len(volumes) >= 21 else None
         vol_ratio = volumes[-1] / avg_vol_20 if avg_vol_20 and avg_vol_20 > 0 else None
+
+        # ATR proxy = 20d std-dev of intraday range / close, in % units (volatility)
+        atr_pct_20d = None
+        if len(closes) >= 20 and len(highs) >= 20 and len(lows) >= 20:
+            window_20 = list(zip(highs[-20:], lows[-20:], closes[-20:]))
+            ranges_pct = [
+                (h - l) / c * 100 if c else None
+                for (h, l, c) in window_20
+            ]
+            ranges_clean = [r for r in ranges_pct if r is not None]
+            if len(ranges_clean) >= 10:
+                atr_pct_20d = sum(ranges_clean) / len(ranges_clean)
 
         l1_code, l2_code = members.get(ts_code, (None, None))
         l1_pct = sector_pct.get(l1_code) if l1_code else None
@@ -220,6 +265,9 @@ def build_contexts(
             rsi_qfq_6=fp.get("rsi_qfq_6"),
             turnover_rate_pct=fp.get("turnover_rate_pct"),
             volume_ratio=vol_ratio_final,
+            atr_pct_20d=atr_pct_20d,
+            volume_ratio_rank=vol_ratio_rank_dict.get(ts_code),
+            today_pct_chg_rank=pct_rank_dict.get(ts_code),
             regime=regime,
             sw_l1_code=l1_code,
             sw_l2_code=l2_code,

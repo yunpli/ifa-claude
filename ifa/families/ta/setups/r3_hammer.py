@@ -56,8 +56,13 @@ def R3_HAMMER(ctx: SetupContext) -> Candidate | None:
     triggers = ["downtrend_20d<=-8%", "small_body", "long_lower_shadow", "bullish_close"]
     score = 0.5
 
-    # Continuous: 跌幅深度 — -8%→0, -25%→full
-    drop_strength = max(0.0, min(1.0, (-ret_20d - 0.08) / 0.17))
+    # ATR-normalized drop depth: how many ATR units below
+    if ctx.atr_pct_20d and ctx.atr_pct_20d > 0:
+        atr_units = (-ret_20d * 100) / (20 * ctx.atr_pct_20d)
+        # 0.5 ATR units (shallow) → 0; 2.0+ units (deep) → full
+        drop_strength = max(0.0, min(1.0, (atr_units - 0.5) / 1.5))
+    else:
+        drop_strength = max(0.0, min(1.0, (-ret_20d - 0.08) / 0.17))
     score += 0.20 * drop_strength
     if drop_strength >= 0.4:
         triggers.append("deep_drop")

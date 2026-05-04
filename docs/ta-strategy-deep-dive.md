@@ -5,7 +5,12 @@
 > **关键差异**：不替代 Smart Money、不放大 Ningbo、不黑盒 AI 选股，是**纪律化的次日交易准备文档**
 >
 > **打分原则**：所有 19 个策略的内部加分均为 **连续 strength function**（非 boolean）；
-> 跨族共振 bonus 按"次族强度 × 递减权重"累计。详见 [`scoring-principles.md`](scoring-principles.md)。
+> 跨族共振 bonus 按"次族强度 × 递减权重"累计。M9.5 增强：cross-sectional rank
+> + ATR-normalized magnitudes。详见 [`scoring-principles.md`](scoring-principles.md)。
+>
+> **历史重点池关注（§08）**：每日 Tier A（重点池）选股保留过去 15 个交易日的
+> 跟踪记录，展示 T+1/T+3/T+5/T+10 实际收益（仅观察、不止盈止损）。冷启动
+> 场景由 `scripts/ta_backfill.py --start <30d ago> --end <昨日>` 一次性回填。
 
 ---
 

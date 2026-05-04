@@ -41,8 +41,12 @@ def V2_QUIET_COIL(ctx: SetupContext) -> Candidate | None:
     triggers = ["uptrend_stack", "vol_ratio<0.7", "tight_5d_range"]
     score = 0.5
 
-    # Continuous: 缩量程度 — 0.7×→0, 0.3×→full
-    quiet_strength = max(0.0, min(1.0, (0.7 - ctx.volume_ratio) / 0.4))
+    # Cross-sectional 缩量 — rank 越低（市场底端）越是真缩量
+    if ctx.volume_ratio_rank is not None:
+        # rank ≤ 0.3 (bottom 30% of market) → full
+        quiet_strength = max(0.0, min(1.0, (0.3 - ctx.volume_ratio_rank) / 0.3))
+    else:
+        quiet_strength = max(0.0, min(1.0, (0.7 - ctx.volume_ratio) / 0.4))
     score += 0.20 * quiet_strength
     if quiet_strength >= 0.5:
         triggers.append("very_quiet")

@@ -47,14 +47,17 @@ def render_markdown(report: dict) -> str:
         elif t == "candidate_list":
             out.append(f"## {s['title']}")
             if not s["candidates"]:
-                out.append(f"_本日无 {s['stars']} 星级候选。_")
+                out.append(f"_本日无 {s['stars']} 星级股票。_")
             else:
-                out.append("| # | 代码 | Setup | 分 | ★ | 触发条件 |")
+                out.append("| # | 代码 | 名称 | 综合分 | ★ | 触发策略组合 |")
                 out.append("|---|---|---|---|---|---|")
                 for c in s["candidates"]:
                     stars = "★" * c["stars"] + "☆" * (5 - c["stars"])
-                    out.append(f"| {c['rank']} | {c['ts_code']} | {c['setup_name']} | "
-                               f"{c['score']:.2f} | {stars} | {', '.join(c['triggers'])} |")
+                    setups = " · ".join(st["setup_name"] for st in c.get("strategies", []))
+                    fam_str = "/".join(c.get("resonance_families", []))
+                    score = c.get("stock_score", 0.0)
+                    out.append(f"| {c['rank']} | {c['ts_code']} | {c.get('name', '')} | "
+                               f"{score:.2f} | {stars} | {c.get('resonance_count', 0)} 族共振 ({fam_str}) · {setups} |")
             out.append("")
         elif t == "verification":
             out.append(f"## {s['title']}")

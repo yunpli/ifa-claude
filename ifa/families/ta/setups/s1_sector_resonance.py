@@ -41,8 +41,11 @@ def S1_SECTOR_RESONANCE(ctx: SetupContext) -> Candidate | None:
     if l2_strength >= 0.4:
         triggers.append("L2_leading")
 
-    # Continuous: 个股涨幅强度 — 2%→0, 8%→full
-    stock_strength = max(0.0, min(1.0, (stock_ret - 2.0) / 6.0))
+    # Cross-sectional 个股涨幅 rank — 今日全市场 top 20% 才算 full
+    if ctx.today_pct_chg_rank is not None:
+        stock_strength = max(0.0, min(1.0, (ctx.today_pct_chg_rank - 0.7) / 0.25))
+    else:
+        stock_strength = max(0.0, min(1.0, (stock_ret - 2.0) / 6.0))
     score += 0.10 * stock_strength
     if stock_strength >= 0.5:
         triggers.append("stock_strong")

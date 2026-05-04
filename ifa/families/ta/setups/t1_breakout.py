@@ -42,14 +42,28 @@ def T1_BREAKOUT(ctx: SetupContext) -> Candidate | None:
     triggers = ["close>ma20", "ma20>ma60", "20d_breakout"]
     score = 0.5
 
-    # Continuous: 突破强度 — close/ma20 ratio. 1.0× → 0, 1.05×+ → full +0.20
-    break_strength = max(0.0, min(1.0, (ctx.close_today / ctx.ma_qfq_20 - 1.0) / 0.05))
+    # Continuous + ATR-normalized: 突破强度 = (close - ma20) / atr
+    # Stocks with low volatility need smaller % to "break decisively"
+    if ctx.atr_pct_20d and ctx.atr_pct_20d > 0:
+        atr_units = ((ctx.close_today / ctx.ma_qfq_20 - 1.0) * 100) / ctx.atr_pct_20d
+        # 0 ATR units (just at ma20) → 0; 1.5+ ATR units above → full
+        break_strength = max(0.0, min(1.0, atr_units / 1.5))
+    else:
+        # Fallback: pct-based (1.0× → 0, 1.05×+ → full)
+        break_strength = max(0.0, min(1.0, (ctx.close_today / ctx.ma_qfq_20 - 1.0) / 0.05))
     score += 0.20 * break_strength
     if break_strength >= 0.4:
         triggers.append("decisive_above_ma20")
 
-    # Continuous: 量能确认. 1.0×→0, 3.0×+→full +0.10
-    if ctx.volume_ratio is not None:
+    # Cross-sectional: 用今日全市场量能 rank（自适应市况）
+    if ctx.volume_ratio_rank is not None:
+        # Today's pct rank > 0.5 = above-median market activity for this stock
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio_rank - 0.5) / 0.4))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.5:
+            triggers.append("volume_confirmation")
+    elif ctx.volume_ratio is not None:
+        # Fallback to absolute when rank unavailable
         vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 2.0))
         score += 0.10 * vol_strength
         if vol_strength >= 0.25:

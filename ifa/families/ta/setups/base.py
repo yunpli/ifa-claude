@@ -49,6 +49,16 @@ class SetupContext:
     turnover_rate_pct: float | None = None
     volume_ratio: float | None = None
 
+    # Volatility (ATR proxy = 20d std-dev of pct_chg / 100, in % units)
+    atr_pct_20d: float | None = None
+
+    # Cross-sectional ranks (0-1) computed by context_loader at scan time:
+    # rank within today's full tradeable universe, where 1.0 = highest in market.
+    # These let setups use "relatively strong" instead of "absolutely above N",
+    # making strength definitions adaptive to today's market activity.
+    volume_ratio_rank: float | None = None
+    today_pct_chg_rank: float | None = None       # today's stock return percentile
+
     # Market context
     regime: Regime | None = None
 

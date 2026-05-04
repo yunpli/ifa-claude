@@ -51,6 +51,34 @@ html, body {
   padding: 36px 44px 28px;
 }
 
+/* ── Collapsible details/summary — toggle indicator + copy swap ─────── */
+details > summary {
+  list-style: none;             /* hide default disclosure triangle */
+  position: relative;
+  padding-left: 28px !important;
+}
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before {
+  content: "▸";
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: transform 0.15s ease;
+  color: var(--accent);
+  font-weight: 700;
+}
+details[open] > summary::before {
+  transform: translateY(-50%) rotate(90deg);
+}
+/* Swap "展开" → "收起" via data attribute (set in template) */
+details[open] > summary[data-collapse-text]::after {
+  content: " · 点击收起";
+  font-size: 11px;
+  color: var(--ink-muted);
+  font-weight: 400;
+}
+
 /* ── Banner ────────────────────────────────────────────────────────── */
 .ifa-banner {
   border-bottom: 2px solid var(--ink);

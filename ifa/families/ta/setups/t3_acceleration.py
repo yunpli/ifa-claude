@@ -41,8 +41,14 @@ def T3_ACCELERATION(ctx: SetupContext) -> Candidate | None:
     triggers = ["full_ma_stack", "macd_golden", "macd_positive", "5d_ret>=5%"]
     score = 0.5
 
-    # Continuous: 加速强度 — 5d return 5%→0, 15%+→full
-    accel_strength = max(0.0, min(1.0, (ret_5d - 0.05) / 0.10))
+    # ATR-normalized acceleration: 5d return / (5 × ATR_pct/100) = ATR units
+    # Bigger move per unit volatility = stronger genuine acceleration signal
+    if ctx.atr_pct_20d and ctx.atr_pct_20d > 0:
+        atr_units = (ret_5d * 100) / (5 * ctx.atr_pct_20d)
+        # 0.5 ATR units (= matches typical 5d realized vol) → 0; 1.5+ units → full
+        accel_strength = max(0.0, min(1.0, (atr_units - 0.5) / 1.0))
+    else:
+        accel_strength = max(0.0, min(1.0, (ret_5d - 0.05) / 0.10))
     score += 0.20 * accel_strength
     if accel_strength >= 0.5:
         triggers.append("strong_acceleration")

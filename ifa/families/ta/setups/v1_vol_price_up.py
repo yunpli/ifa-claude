@@ -32,14 +32,21 @@ def V1_VOL_PRICE_UP(ctx: SetupContext) -> Candidate | None:
     triggers = ["5d_ret>=5%", "vol_ratio>=1.5", "uptrend_stack"]
     score = 0.5
 
-    # Continuous: 价格强度 — 5%→0, 15%→full
-    price_strength = max(0.0, min(1.0, (ret_5d - 0.05) / 0.10))
+    # ATR-normalized price strength: 5d move / (5 × ATR_pct)
+    if ctx.atr_pct_20d and ctx.atr_pct_20d > 0:
+        atr_units = (ret_5d * 100) / (5 * ctx.atr_pct_20d)
+        price_strength = max(0.0, min(1.0, (atr_units - 0.5) / 1.0))
+    else:
+        price_strength = max(0.0, min(1.0, (ret_5d - 0.05) / 0.10))
     score += 0.20 * price_strength
     if price_strength >= 0.5:
         triggers.append("strong_5d_return")
 
-    # Continuous: 量能强度 — 1.5×→0, 3.5×→full
-    vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.5) / 2.0))
+    # Cross-sectional 量能 — 今日全市场 rank ≥ top 30% = full bonus
+    if ctx.volume_ratio_rank is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio_rank - 0.7) / 0.3))
+    else:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.5) / 2.0))
     score += 0.10 * vol_strength
     if vol_strength >= 0.25:
         triggers.append("volume_exceptional")

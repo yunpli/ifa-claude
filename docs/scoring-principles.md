@@ -95,6 +95,53 @@ instead — same total budget.
 
 ---
 
+## Two professional refinements (M9.5)
+
+Beyond the basic continuous strength function, two enhancements lift scoring
+from "naive continuous" to "institutional-grade":
+
+### 1. Cross-sectional rank (adaptive thresholds)
+
+Absolute thresholds (`vol_ratio ≥ 1.5`) don't account for whether today is a
+low-volume or high-volume day. A stock with `vol_ratio = 3.0` is impressive
+on a quiet day, normal on a busy day.
+
+`context_loader.build_contexts` now computes per-day cross-sectional ranks
+within the tradeable universe:
+
+```python
+volume_ratio_rank: float | None     # 0=lowest, 1=highest in today's universe
+today_pct_chg_rank: float | None    # today's stock return percentile
+```
+
+Setups using these ranks (T1, V1, V2, S1) become **adaptive to market regime
+without parameter changes** — top-30% volume on a quiet day automatically
+qualifies as confirmation, while same absolute level fails on a busy day.
+
+### 2. ATR-normalized magnitudes
+
+A 5% move on a low-volatility stock (5d realized 1%/day) is huge; on a meme
+stock with 8%/day realized vol, it's noise. Pure pct-of-price thresholds
+don't reflect this.
+
+`context_loader` adds `atr_pct_20d = mean(daily intraday range / close × 100)`.
+Setups divide observed moves by this ATR to get **stock-relative magnitudes**:
+
+```python
+# T1 breakout in ATR units
+atr_units = ((close / ma20 - 1.0) × 100) / atr_pct_20d
+break_strength = clip(atr_units / 1.5, 0, 1)    # 1.5+ ATR units → full
+```
+
+Setups using ATR normalization: T1 (breakout magnitude), T3 (5d acceleration),
+V1 (5d run), R3 (drop depth before hammer).
+
+**Both refinements preserve the same external interface** — score budget per
+setup stays at `0.5 + 0.20 + 0.10 = 0.80`, the ranker math doesn't change,
+candidates_daily schema is identical. Internal-only enhancement.
+
+---
+
 ## Multi-stage continuous flow
 
 ```
