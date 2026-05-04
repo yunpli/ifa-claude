@@ -244,12 +244,20 @@ _UPSERT = text("""
 def evaluate_for_date(
     engine: Engine, generation_date: date, *,
     horizon: int = DEFAULT_HORIZON_TRADE_DAYS,
+    top_watchlist_only: bool = False,
 ) -> int:
-    """Evaluate all candidates generated on `generation_date`. Returns row count."""
-    sql = text("""
+    """Evaluate candidates generated on `generation_date`. Returns row count.
+
+    top_watchlist_only=True: only Tier-A in_top_watchlist (live report use).
+    top_watchlist_only=False: ALL candidates regardless of tier (backtest use).
+    """
+    where_clause = "WHERE trade_date = :d AND entry_price IS NOT NULL"
+    if top_watchlist_only:
+        where_clause += " AND in_top_watchlist"
+    sql = text(f"""
         SELECT candidate_id, ts_code, setup_name, entry_price, stop_loss, target_price
         FROM ta.candidates_daily
-        WHERE trade_date = :d AND entry_price IS NOT NULL AND in_top_watchlist
+        {where_clause}
     """)
     with engine.connect() as conn:
         rows = conn.execute(sql, {"d": generation_date}).fetchall()

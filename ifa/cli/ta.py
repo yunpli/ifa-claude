@@ -223,6 +223,40 @@ def backtest_cmd(
         console.print(f"{setup:<24} {n:>6} {wr_s:>6} {ag_s:>7} {mxr_s:>7} {mxd_s:>7} {plr_s:>5}")
 
 
+@app.command("walk-forward", help="M10 P1.4 — walk-forward backtest using position_events.")
+def walk_forward_cmd(
+    start: str = typer.Option(..., "--start", help="Window start YYYY-MM-DD"),
+    end: str = typer.Option(..., "--end", help="Window end YYYY-MM-DD"),
+    skip_scan: bool = typer.Option(False, "--skip-scan",
+                                    help="Don't re-scan; just aggregate existing data"),
+    horizon: int = typer.Option(15, "--horizon", help="Position-tracking horizon (trade days)"),
+) -> None:
+    """Run scan + position-tracking + aggregation for a date range, using
+    the T+15-weighted combined objective (per ta_v2.3.yaml.backtest_objective)."""
+    from ifa.families.ta.backtest import backtest_window
+    engine = get_engine()
+    start_d = date.fromisoformat(start)
+    end_d = date.fromisoformat(end)
+    result = backtest_window(engine, start_d, end_d,
+                              skip_scan=skip_scan, horizon=horizon)
+    console.print(f"\n[bold]Walk-forward backtest[/] {start_d} → {end_d}")
+    console.print(f"  days={result.n_days_processed}  candidates={result.n_candidates_total}  "
+                  f"positions={result.n_positions_total}  setups={len(result.metrics)}")
+    if not result.metrics:
+        console.print("[yellow]no positions in window — try a date range with full T+15 forward data[/]")
+        return
+    console.print("\n[bold]Setups by combined T+15 objective:[/]")
+    console.print(f"{'Setup':<26} {'n':>5} {'wr_t15':>7} {'avg_t15':>8} "
+                  f"{'wr_t5':>7} {'wr_t10':>7} {'combined':>9}")
+    for setup, m in sorted(result.metrics.items(), key=lambda kv: -kv[1]['combined']):
+        console.print(
+            f"{setup:<26} {m['n']:>5} "
+            f"{m['wr_t15']:>6.1f}% {m['avg_ret_t15']:>+7.2f}% "
+            f"{m['wr_t5']:>6.1f}% {m['wr_t10']:>6.1f}% "
+            f"{m['combined']:>9.4f}"
+        )
+
+
 @app.command("evening", help="Alias for evening-report")
 def evening_alias(
     on_date: str = typer.Option(None, "--date"),
