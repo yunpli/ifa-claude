@@ -26,6 +26,8 @@ from datetime import date
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from ifa.core.calendar import trading_days_between
+
 log = logging.getLogger(__name__)
 
 
@@ -64,7 +66,6 @@ def evaluate_for_date(
     until next run).
     """
     with engine.connect() as conn:
-        # Pull candidates from start_date
         candidates = conn.execute(
             text("""
                 SELECT candidate_id, ts_code
@@ -73,32 +74,23 @@ def evaluate_for_date(
             """),
             {"sd": start_date},
         ).fetchall()
-        if not candidates:
-            log.info("no candidates on %s", start_date)
-            return 0
-
-        # Find the eval_date: the (horizon_days)-th trade day after start_date
-        # using smartmoney.raw_daily distinct trade_dates as the trade calendar.
-        eval_date_row = conn.execute(
-            text("""
-                WITH future AS (
-                    SELECT DISTINCT trade_date
-                    FROM smartmoney.raw_daily
-                    WHERE trade_date > :sd
-                    ORDER BY trade_date
-                    LIMIT :h
-                )
-                SELECT trade_date FROM future ORDER BY trade_date DESC LIMIT 1
-            """),
-            {"sd": start_date, "h": horizon_days},
-        ).fetchone()
-
-    if not eval_date_row:
-        log.info("no eval_date %d days after %s — data not loaded yet",
-                 horizon_days, start_date)
+    if not candidates:
+        log.info("no candidates on %s", start_date)
         return 0
 
-    eval_date = eval_date_row[0]
+    # Eval date = h-th trading day strictly after start_date, per smartmoney.trade_cal.
+    # Look up to ~horizon * 2 calendar days forward to absorb weekends + holidays.
+    from datetime import timedelta
+    window_end = start_date + timedelta(days=horizon_days * 2 + 14)
+    forward_days = trading_days_between(engine, start_date, window_end)
+    forward_days = [d for d in forward_days if d > start_date]
+    if len(forward_days) < horizon_days:
+        log.info("only %d trade days available after %s; need %d — refresh trade_cal "
+                 "or wait for raw_daily to load",
+                 len(forward_days), start_date, horizon_days)
+        return 0
+
+    eval_date = forward_days[horizon_days - 1]
 
     # Per-stock prices: entry close (start_date), exit close (eval_date),
     # max_high and min_low between (start_date, eval_date].

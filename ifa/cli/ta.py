@@ -145,19 +145,20 @@ def backfill_regime(
     start_d = date.fromisoformat(start)
     end_d = date.fromisoformat(end) if end else bjt_now().date()
 
-    cur = start_d
+    from ifa.core.calendar import trading_days_between
+    trade_days = trading_days_between(engine, start_d, end_d)
     n_done = 0
-    n_skipped = 0
-    while cur <= end_d:
+    for cur in trade_days:
         ctx = load_regime_context(engine, cur)
-        # market_state_daily uses exact-date match → None on non-trade days
         if ctx.n_up is None:
-            n_skipped += 1
-        else:
-            result = classify_regime(ctx)
-            upsert_regime_daily(engine, cur, result)
-            console.print(f"  {cur} → {result.regime:25} ({result.confidence:.2f})")
-            n_done += 1
-        cur += timedelta(days=1)
+            console.print(f"  [yellow]{cur} skipped[/] — no market_state_daily row "
+                          f"(trade_cal says open; data not loaded yet)")
+            continue
+        result = classify_regime(ctx)
+        upsert_regime_daily(engine, cur, result)
+        console.print(f"  {cur} → {result.regime:25} ({result.confidence:.2f})")
+        n_done += 1
 
-    console.print(f"\n[bold green]Done.[/] {n_done} classified, {n_skipped} non-trade days skipped.")
+    skipped = (end_d - start_d).days + 1 - len(trade_days)
+    console.print(f"\n[bold green]Done.[/] {n_done} classified across {len(trade_days)} trade days "
+                  f"(non-trade days skipped via trade_cal: {skipped}).")
