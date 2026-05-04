@@ -43,7 +43,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore", case_sensitive=False)
 
     # ── Runtime ────────────────────────────────────────────────────────────
-    run_mode: RunMode = Field(default=RunMode.manual, alias="IFA_RUN_MODE")
+    # Default run_mode = production so all real reports (manual + cron-driven)
+    # collect under out/production/<YYYYMMDD>/<family>/. Override with
+    # IFA_RUN_MODE=test for development against ifavr_test, or
+    # IFA_RUN_MODE=manual to preserve the legacy ad-hoc separation.
+    run_mode: RunMode = Field(default=RunMode.production, alias="IFA_RUN_MODE")
     output_root: Path = Field(
         default=Path("/Users/neoclaw/claude/ifaenv/out"), alias="IFA_OUTPUT_ROOT"
     )
