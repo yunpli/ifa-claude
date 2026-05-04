@@ -17,6 +17,7 @@ from ifa.families.ta.setups.context_loader import build_contexts
 from ifa.families.ta.setups.ranker import rank as rank_candidates
 from ifa.families.ta.setups.repo import upsert_candidates
 from ifa.families.ta.setups.scanner import scan as scan_setups
+from ifa.families.ta.setups.tracking import evaluate_for_date
 
 log = logging.getLogger(__name__)
 console = Console()
@@ -115,6 +116,23 @@ def scan_candidates(
     if persist:
         n = upsert_candidates(engine, target, ranked, regime_at_gen=regime)
         console.print(f"\n[green]✓ persisted {n} rows to ta.candidates_daily[/]")
+
+
+@app.command("track-candidates")
+def track_candidates(
+    start: str = typer.Option(..., "--start", help="Candidate generation date YYYY-MM-DD"),
+    horizons: list[int] = typer.Option([1, 3, 10], "--horizon",
+                                       help="Horizons in trade days (repeatable)"),
+) -> None:
+    """For candidates generated on `start`, evaluate T+h outcomes and write ta.candidate_tracking."""
+    engine = get_engine()
+    start_d = date.fromisoformat(start)
+    total = 0
+    for h in horizons:
+        n = evaluate_for_date(engine, start_d, horizon_days=h)
+        console.print(f"  h={h:>2}  tracked {n:>5} candidates")
+        total += n
+    console.print(f"\n[bold green]done.[/] {total} tracking rows written.")
 
 
 @app.command("backfill-regime")
