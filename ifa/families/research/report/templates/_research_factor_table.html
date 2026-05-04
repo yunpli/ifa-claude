@@ -12,7 +12,6 @@
     <thead>
       <tr>
         <th>因子</th>
-        <th>中文名</th>
         <th class="num">值</th>
         <th class="center">状态</th>
         <th class="center">同业排名</th>
@@ -22,7 +21,6 @@
     <tbody>
       {% for r in s.rows %}
       <tr>
-        <td><code>{{ r.name }}</code></td>
         <td>{{ r.name_zh }}</td>
         <td class="num">{{ r.value }}</td>
         <td class="center"><span class="badge badge--{{ r.status }}">{{ r.status | status_icon }}</span></td>

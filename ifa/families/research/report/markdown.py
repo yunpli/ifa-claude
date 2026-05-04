@@ -83,13 +83,13 @@ def _r_factor_table(s: dict) -> str:
     if s.get("narrative"):
         lines.append(f"> {s['narrative']}")
         lines.append("")
-    lines.append("| 因子 | 中文名 | 值 | 状态 | 同业 | 备注 |")
-    lines.append("|---|---|---:|:-:|:-:|---|")
+    lines.append("| 因子 | 值 | 状态 | 同业 | 备注 |")
+    lines.append("|---|---:|:-:|:-:|---|")
     for r in s["rows"]:
         ic = _STATUS_ICON.get(r["status"], "?")
         notes = "; ".join(r["notes"]) if r["notes"] else ""
         peer = _format_peer(r.get("peer_rank"), r.get("peer_percentile"))
-        lines.append(f"| {r['name']} | {r['name_zh']} | {r['value']} | {ic} | {peer} | {notes} |")
+        lines.append(f"| {r['name_zh']} | {r['value']} | {ic} | {peer} | {notes} |")
     return "\n".join(lines)
 
 
