@@ -18,6 +18,7 @@ from ifa.families.ta.setups.ranker import rank as rank_candidates
 from ifa.families.ta.setups.repo import upsert_candidates
 from ifa.families.ta.setups.scanner import scan as scan_setups
 from ifa.families.ta.setups.tracking import evaluate_for_date
+from ifa.families.ta.setups.judgments import evaluate_judgments
 from ifa.families.ta.metrics import compute_setup_metrics
 from ifa.families.ta.report import build_evening_report, render_html, render_markdown
 
@@ -145,7 +146,7 @@ def scan_candidates(
 @app.command("track-candidates")
 def track_candidates(
     start: str = typer.Option(..., "--start", help="Candidate generation date YYYY-MM-DD"),
-    horizons: list[int] = typer.Option([1, 3, 10], "--horizon",
+    horizons: list[int] = typer.Option([1, 3, 5, 10, 30], "--horizon",
                                        help="Horizons in trade days (repeatable)"),
 ) -> None:
     """For candidates generated on `start`, evaluate T+h outcomes and write ta.candidate_tracking."""
@@ -157,6 +158,18 @@ def track_candidates(
         console.print(f"  h={h:>2}  tracked {n:>5} candidates")
         total += n
     console.print(f"\n[bold green]done.[/] {total} tracking rows written.")
+
+
+@app.command("evaluate-judgments")
+def evaluate_judgments_cmd(
+    judgment_date: str = typer.Option(..., "--judgment-date",
+                                      help="Date when the judgment was made (YYYY-MM-DD)"),
+) -> None:
+    """Score pending judgments from a given date against realized data."""
+    target = date.fromisoformat(judgment_date)
+    engine = get_engine()
+    n = evaluate_judgments(engine, target)
+    console.print(f"[green]✓ evaluated {n} judgments from {target}[/]")
 
 
 @app.command("compute-metrics")

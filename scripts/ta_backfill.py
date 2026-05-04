@@ -35,7 +35,8 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger(__name__)
 
 
-def run_backfill(start: date, end: date, *, top_n: int = 20, horizons=(1, 3, 10)) -> None:
+def run_backfill(start: date, end: date, *, top_n: int = 20,
+                 horizons=(1, 3, 5, 10, 30)) -> None:
     engine = get_engine()
     days = trading_days_between(engine, start, end)
     log.info("backfill %s → %s · %d trade days · top_n=%d", start, end, len(days), top_n)
