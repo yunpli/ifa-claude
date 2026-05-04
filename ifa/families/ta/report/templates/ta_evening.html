@@ -2,239 +2,468 @@
 <html lang="zh-Hans">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>{{ report.title }}</title>
-<style>
-body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-       max-width: 920px; margin: 1em auto; padding: 0 1em; color: #222; line-height: 1.55; }
-h1 { font-size: 1.6em; margin-bottom: 0.2em; }
-h2 { font-size: 1.2em; margin-top: 1.8em; padding-bottom: 0.3em; border-bottom: 2px solid #d0d7de; }
-.meta { color: #6e7681; font-size: 0.9em; margin-bottom: 1.5em; }
-table { border-collapse: collapse; width: 100%; margin: 0.6em 0; font-size: 0.92em; }
-th, td { border: 1px solid #d0d7de; padding: 0.4em 0.7em; text-align: left; }
-th { background: #f6f8fa; font-weight: 600; }
-.stars { color: #f5a623; }
-.tag { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.8em;
-       background: #eaeef2; color: #57606a; margin-right: 4px; }
-.kpi { display: inline-block; padding: 4px 10px; background: #f6f8fa; border-radius: 4px;
-       margin-right: 8px; }
-.kpi b { color: #0969da; }
-.status-confirmed { color: #1a7f37; font-weight: 600; }
-.status-partial { color: #1a7f37; }
-.status-invalidated { color: #cf222e; }
-.status-timeout { color: #57606a; }
-.disclaimer { background: #f6f8fa; padding: 0.8em 1em; border-left: 3px solid #d0d7de;
-              font-size: 0.88em; color: #57606a; }
-</style>
+<style>{{ inline_css }}</style>
 </head>
 <body>
+<article class="ifa-page">
 
-<h1>{{ report.title }}</h1>
-<div class="meta">报告生成 · {{ report.report_date_bjt }}</div>
+  {# ── Banner ────────────────────────────────────────── #}
+  <header class="ifa-banner">
+    <div class="ifa-banner__brand">Lindenwood Management LLC · iFA China · Technical Analysis</div>
+    <h1 class="ifa-banner__title">{{ report.title }}</h1>
+    <div class="ifa-banner__subtitle">{{ report.subtitle_en }}</div>
+    <div class="ifa-banner__meta">
+      <span><strong>报告日期</strong> {{ report.report_date_bjt }}</span>
+      <span><strong>交易日</strong> {{ report.trade_date }} 北京时间</span>
+      <span><strong>模板</strong> {{ report.template_version }}</span>
+      <span class="ifa-run-mode-badge ifa-run-mode-badge--{{ report.run_mode }}">
+        {% if report.run_mode == 'test' %}⚠ TEST 测试模式{% elif report.run_mode == 'manual' %}✎ MANUAL 手动运行{% else %}✓ PRODUCTION 生产{% endif %}
+      </span>
+    </div>
+    <div class="ifa-banner__short-disclaimer">
+      由 Lindenwood Management LLC 编制。仅供信息汇总与研究参考，不构成任何投资建议、证券买卖推荐、要约或招揽。
+      <br>
+      Prepared by Lindenwood Management LLC for informational and research purposes only. Not investment advice.
+    </div>
+  </header>
 
-{% for s in report.sections %}
+  {% set ov = report.overview %}
+
+  {# ── §01 Tone card — 今日体制 ─────────────────────── #}
+  <section class="ifa-section">
+    <header class="ifa-section__head">
+      <span class="ifa-section__num">§01</span>
+      <h2 class="ifa-section__title">今日市场体制</h2>
+    </header>
+    <div class="ifa-tone">
+      <span class="ifa-tone__pill" data-tone="{{ ov.regime | regime_tone }}">{{ ov.regime | regime_tone }}</span>
+      <h3 class="ifa-tone__headline">{{ ov.regime | regime_label }}{% if ov.regime_confidence is not none %} · 置信度 {{ '%.2f' | format(ov.regime_confidence) }}{% endif %}</h3>
+      <p class="ifa-tone__summary">{{ ov.regime | regime_description }}</p>
+      <ul class="ifa-tone__bullets">
+        <li class="ifa-tone__bullet">
+          <span class="ifa-tone__bullet-dim">候选总数</span>
+          <span class="ifa-tone__bullet-text">全市场扫描命中 setup 的样本数（不含被治理过滤）</span>
+          <span class="ifa-tone__bullet-conf">{{ ov.total_candidates }}</span>
+        </li>
+        <li class="ifa-tone__bullet">
+          <span class="ifa-tone__bullet-dim">观察池</span>
+          <span class="ifa-tone__bullet-text">综合得分排名前列、纳入次日重点观察的标的</span>
+          <span class="ifa-tone__bullet-conf">{{ ov.top_watchlist_count }}</span>
+        </li>
+        <li class="ifa-tone__bullet">
+          <span class="ifa-tone__bullet-dim">激活 Setup</span>
+          <span class="ifa-tone__bullet-text">今日有触发的策略数量（共 19 种）</span>
+          <span class="ifa-tone__bullet-conf">{{ ov.active_setup_count }} / 19</span>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  {# ── Sections ─────────────────────────────────────── #}
+  {% for s in report.sections %}
 
   {% if s.type == 'overview' %}
-    <h2>§01 市场概览</h2>
-    <div>
-      <span class="kpi">交易日 <b>{{ s.trade_date }}</b></span>
-      <span class="kpi">体制 <b>{{ s.regime }}</b>
-        {% if s.regime_confidence is not none %}({{ '%.2f' | format(s.regime_confidence) }}){% endif %}
-      </span>
-      <span class="kpi">候选总数 <b>{{ s.total_candidates }}</b></span>
-      <span class="kpi">观察池 <b>{{ s.top_watchlist_count }}</b></span>
-      <span class="kpi">激活 setup <b>{{ s.active_setup_count }}</b></span>
-    </div>
+    {# rendered above as tone card #}
+
+  {% elif s.type == 'market_state' %}
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§02</span>
+        <h2 class="ifa-section__title">市场结构盘面</h2>
+      </header>
+      <table class="ifa-panel">
+        <thead>
+          <tr>
+            <th style="width:24%">指标</th>
+            <th style="width:22%; text-align:right">数值</th>
+            <th>解读</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if s.sse_close is not none %}
+          <tr>
+            <td><div class="ifa-panel__indicator">上证指数</div><span class="ifa-panel__period">000001.SH</span></td>
+            <td class="ifa-panel__value">{{ '%.2f' | format(s.sse_close) }}
+              <span class="ifa-panel__delta {% if s.sse_pct_chg and s.sse_pct_chg >= 0 %}ifa-panel__delta--up{% else %}ifa-panel__delta--down{% endif %}">
+                {{ '%+.2f' | format(s.sse_pct_chg) }}%</span>
+            </td>
+            <td>核心宽基 / 大盘风险偏好</td>
+          </tr>
+          {% endif %}
+          {% if s.amount_yi_yuan is not none %}
+          <tr>
+            <td><div class="ifa-panel__indicator">全市场成交</div></td>
+            <td class="ifa-panel__value">{{ '%.0f' | format(s.amount_yi_yuan) }} 亿元</td>
+            <td>量能水平
+              {% if s.amount_pct_60d is not none %}（60 日分位 {{ '%.0f' | format(s.amount_pct_60d) }}%）{% endif %}
+            </td>
+          </tr>
+          {% endif %}
+          {% if s.up_count is not none %}
+          <tr>
+            <td><div class="ifa-panel__indicator">涨跌家数</div></td>
+            <td class="ifa-panel__value">
+              <span class="ifa-panel__delta--up">↑ {{ s.up_count }}</span> /
+              <span class="ifa-panel__delta--down">↓ {{ s.down_count }}</span>
+            </td>
+            <td>市场广度（≥1.3 偏多 / ≤0.7 偏空）</td>
+          </tr>
+          {% endif %}
+          {% if s.limit_up is not none %}
+          <tr>
+            <td><div class="ifa-panel__indicator">涨停 / 跌停</div></td>
+            <td class="ifa-panel__value">
+              <span class="ifa-panel__delta--up">{{ s.limit_up }}</span> /
+              <span class="ifa-panel__delta--down">{{ s.limit_down }}</span>
+              <span class="ifa-panel__period">最高连板 {{ s.consecutive_lb_high }}</span>
+            </td>
+            <td>短线情绪温度</td>
+          </tr>
+          {% endif %}
+          {% if s.blow_up_count %}
+          <tr>
+            <td><div class="ifa-panel__indicator">炸板</div></td>
+            <td class="ifa-panel__value">{{ s.blow_up_count }}
+              <span class="ifa-panel__period">炸板率 {{ '%.1f' | format(s.blow_up_rate) }}%</span>
+            </td>
+            <td>追板成本与情绪健康度</td>
+          </tr>
+          {% endif %}
+          {% if s.north_yi_yuan is not none %}
+          <tr>
+            <td><div class="ifa-panel__indicator">北向资金</div></td>
+            <td class="ifa-panel__value
+              {% if s.north_yi_yuan >= 0 %}ifa-panel__delta--up{% else %}ifa-panel__delta--down{% endif %}">
+              {{ '%+.1f' | format(s.north_yi_yuan) }} 亿元
+            </td>
+            <td>外资当日净流入</td>
+          </tr>
+          {% endif %}
+          {% if s.market_state %}
+          <tr>
+            <td><div class="ifa-panel__indicator">SmartMoney 市态</div></td>
+            <td class="ifa-panel__value">{{ s.market_state }}</td>
+            <td>姊妹模型当日定性</td>
+          </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </section>
+
+  {% elif s.type == 'narrative' %}
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">{{ s.title.split(' ')[0] }}</span>
+        <h2 class="ifa-section__title">{{ s.title.split(' ', 1)[1] if ' ' in s.title else s.title }}</h2>
+      </header>
+      <div class="ifa-tone" style="border-left-color: var(--accent-2);">
+        <p class="ifa-tone__summary">{{ s.body }}</p>
+      </div>
+    </section>
 
   {% elif s.type == 'candidate_list' %}
-    <h2>{{ s.title }}</h2>
-    {% if s.candidates %}
-    <table>
-      <tr><th>#</th><th>代码</th><th>Setup</th><th>分</th><th>★</th><th>触发条件</th></tr>
-      {% for c in s.candidates %}
-      <tr>
-        <td>{{ c.rank }}</td>
-        <td>{{ c.ts_code }}</td>
-        <td>{{ c.setup_name }}</td>
-        <td>{{ '%.2f' | format(c.score) }}</td>
-        <td class="stars">{{ '★' * c.stars }}{{ '☆' * (5 - c.stars) }}</td>
-        <td>{% for t in c.triggers %}<span class="tag">{{ t }}</span>{% endfor %}</td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% else %}
-      <p style="color: #6e7681;">本日无 {{ s.stars }} 星级候选。</p>
-    {% endif %}
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">{{ s.title.split(' ')[0] }}</span>
+        <h2 class="ifa-section__title">{{ s.title.split(' ', 1)[1] if ' ' in s.title else s.title }}</h2>
+      </header>
+      {% if s.candidates %}
+      <table class="ifa-panel">
+        <thead>
+          <tr>
+            <th style="width:6%">排名</th>
+            <th style="width:14%">代码</th>
+            <th style="width:22%">策略类型</th>
+            <th style="width:8%; text-align:right">得分</th>
+            <th style="width:12%">星级</th>
+            <th>触发要点</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for c in s.candidates %}
+        <tr>
+          <td>{{ c.rank }}</td>
+          <td><div class="ifa-panel__indicator">{{ c.ts_code }}</div></td>
+          <td>
+            <div class="ifa-panel__indicator">{{ c.setup_name | setup_label }}</div>
+            <span class="ifa-panel__period">{{ c.setup_name | setup_family }}族</span>
+          </td>
+          <td class="ifa-panel__value">{{ '%.2f' | format(c.score) }}</td>
+          <td>{{ '★' * c.stars }}{{ '☆' * (5 - c.stars) }}</td>
+          <td style="font-size:12.5px;">
+            {% for t in c.triggers %}{{ t | trigger_label }}{% if not loop.last %} · {% endif %}{% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="ifa-section__intro">本日无 {{ s.stars }} 星级候选。</p>
+      {% endif %}
+    </section>
+
+  {% elif s.type == 'family_grid' %}
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§07</span>
+        <h2 class="ifa-section__title">候选股池（按策略族）</h2>
+      </header>
+      <table class="ifa-panel">
+        <thead>
+          <tr>
+            <th style="width:18%">策略族</th>
+            <th style="width:10%; text-align:right">命中数</th>
+            <th style="width:10%; text-align:right">≥4★</th>
+            <th>主导策略</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for fam_name, f in s.families.items() %}
+          {% if f.n > 0 %}
+          <tr>
+            <td><div class="ifa-panel__indicator">{{ fam_name }}</div></td>
+            <td class="ifa-panel__value">{{ f.n }}</td>
+            <td class="ifa-panel__value">{{ f.top }}</td>
+            <td style="font-size:12.5px;">
+              {% for setup in f.setups[:3] %}{{ setup.name | setup_label }} ({{ setup.n }}){% if not loop.last %} · {% endif %}{% endfor %}
+            </td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
 
   {% elif s.type == 'verification' %}
-    <h2>{{ s.title }}</h2>
-    {% if s.prev_date %}
-      <div class="meta">基准：{{ s.prev_date }} 观察池 → 今日实际 T+1</div>
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§08</span>
+        <h2 class="ifa-section__title">昨日观察池验证（T+1）</h2>
+      </header>
+      {% if s.prev_date %}
+      <p class="ifa-section__intro">基准：<b>{{ s.prev_date }}</b> 观察池 → 今日实际 T+1 收益分布。</p>
       {% if s.summary %}
-      <div>
+      <div style="margin-bottom:14px; display:flex; gap:18px; flex-wrap:wrap;">
         {% for status, n in s.summary.items() %}
-          <span class="kpi"><span class="status-{{ status }}">{{ status }}</span>: <b>{{ n }}</b></span>
+        <div style="font-size:13.5px;">
+          {% if status == 'confirmed' %}<span style="color:var(--up); font-weight:600;">达标 (≥+5%)</span>
+          {% elif status == 'partial' %}<span style="color:var(--up);">部分达标 (+2~+5%)</span>
+          {% elif status == 'invalidated' %}<span style="color:var(--down); font-weight:600;">失败 (≤-3%)</span>
+          {% else %}<span style="color:var(--ink-soft);">观望 (-3%~+2%)</span>{% endif %}
+          <b>{{ n }}</b>
+        </div>
         {% endfor %}
       </div>
       {% endif %}
       {% if s.candidates %}
-      <table>
-        <tr><th>#</th><th>代码</th><th>Setup</th><th>分</th><th>T+1 收益</th><th>状态</th></tr>
+      <table class="ifa-panel">
+        <thead>
+          <tr>
+            <th style="width:6%">#</th>
+            <th style="width:14%">代码</th>
+            <th style="width:22%">策略</th>
+            <th style="width:8%; text-align:right">得分</th>
+            <th style="width:12%; text-align:right">T+1 收益</th>
+            <th>判定</th>
+          </tr>
+        </thead>
+        <tbody>
         {% for c in s.candidates %}
         <tr>
-          <td>{{ c.rank }}</td><td>{{ c.ts_code }}</td><td>{{ c.setup_name }}</td>
-          <td>{{ '%.2f' | format(c.score) }}</td>
-          <td>{% if c.return_pct is not none %}{{ '%+.2f' | format(c.return_pct) }}%{% else %}-{% endif %}</td>
-          <td><span class="status-{{ c.status }}">{{ c.status or '-' }}</span></td>
+          <td>{{ c.rank }}</td>
+          <td>{{ c.ts_code }}</td>
+          <td>{{ c.setup_name | setup_label }}</td>
+          <td class="ifa-panel__value">{{ '%.2f' | format(c.score) }}</td>
+          <td class="ifa-panel__value
+            {% if c.return_pct and c.return_pct >= 0 %}ifa-panel__delta--up
+            {% elif c.return_pct and c.return_pct < 0 %}ifa-panel__delta--down{% endif %}">
+            {% if c.return_pct is not none %}{{ '%+.2f' | format(c.return_pct) }}%{% else %}-{% endif %}
+          </td>
+          <td>
+            {% if c.status == 'confirmed' %}<span style="color:var(--up); font-weight:600;">达标</span>
+            {% elif c.status == 'partial' %}<span style="color:var(--up);">部分达标</span>
+            {% elif c.status == 'invalidated' %}<span style="color:var(--down); font-weight:600;">失败</span>
+            {% elif c.status == 'timeout' %}<span style="color:var(--ink-soft);">观望</span>
+            {% else %}-{% endif %}
+          </td>
         </tr>
         {% endfor %}
+        </tbody>
       </table>
       {% endif %}
-    {% else %}
-      <p style="color: #6e7681;">无前一交易日数据可供验证。</p>
-    {% endif %}
+      {% else %}
+      <p class="ifa-section__intro">无前一交易日数据可供验证。</p>
+      {% endif %}
+    </section>
 
   {% elif s.type == 'metrics_table' %}
-    <h2>{{ s.title }}</h2>
-    {% if s.rows %}
-    <table>
-      <tr><th>Setup</th><th>样本</th><th>胜率 60d</th><th>均收益 60d</th><th>盈亏比</th><th>胜率 250d</th><th>衰减</th></tr>
-      {% for r in s.rows %}
-      <tr>
-        <td>{{ r.setup_name }}</td>
-        <td>{{ r.n if r.n is not none else '-' }}</td>
-        <td>{% if r.winrate_60d is not none %}{{ '%.1f' | format(r.winrate_60d) }}%{% else %}-{% endif %}</td>
-        <td>{% if r.avg_return_60d is not none %}{{ '%+.2f' | format(r.avg_return_60d) }}%{% else %}-{% endif %}</td>
-        <td>{% if r.pl_ratio is not none %}{{ '%.2f' | format(r.pl_ratio) }}{% else %}-{% endif %}</td>
-        <td>{% if r.winrate_250d is not none %}{{ '%.1f' | format(r.winrate_250d) }}%{% else %}-{% endif %}</td>
-        <td>{% if r.decay is not none %}{{ '%+.1f' | format(r.decay) }}{% else %}-{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% endif %}
-
-  {% elif s.type == 'market_state' %}
-    <h2>{{ s.title }}</h2>
-    <div>
-      {% if s.sse_close is not none %}
-      <span class="kpi">SSE 收 <b>{{ '%.2f' | format(s.sse_close) }}</b>
-        ({{ '%+.2f' | format(s.sse_pct_chg) }}%)</span>
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§10</span>
+        <h2 class="ifa-section__title">策略边际滚动统计</h2>
+      </header>
+      <p class="ifa-section__intro">每个策略基于近 60 日 / 250 日 T+10 实际表现的胜率与盈亏比；衰减 = 60d 胜率 - 250d 胜率（负值表示该策略边际正在退化）。</p>
+      {% if s.rows %}
+      <table class="ifa-panel">
+        <thead>
+          <tr>
+            <th>策略</th>
+            <th style="text-align:right">样本</th>
+            <th style="text-align:right">胜率 60d</th>
+            <th style="text-align:right">均收益 60d</th>
+            <th style="text-align:right">盈亏比</th>
+            <th style="text-align:right">胜率 250d</th>
+            <th style="text-align:right">衰减</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in s.rows %}
+        <tr>
+          <td><div class="ifa-panel__indicator">{{ r.setup_name | setup_label }}</div></td>
+          <td class="ifa-panel__value">{{ r.n if r.n is not none else '-' }}</td>
+          <td class="ifa-panel__value">{% if r.winrate_60d is not none %}{{ '%.1f' | format(r.winrate_60d) }}%{% else %}-{% endif %}</td>
+          <td class="ifa-panel__value
+            {% if r.avg_return_60d and r.avg_return_60d >= 0 %}ifa-panel__delta--up
+            {% elif r.avg_return_60d and r.avg_return_60d < 0 %}ifa-panel__delta--down{% endif %}">
+            {% if r.avg_return_60d is not none %}{{ '%+.2f' | format(r.avg_return_60d) }}%{% else %}-{% endif %}
+          </td>
+          <td class="ifa-panel__value">{% if r.pl_ratio is not none %}{{ '%.2f' | format(r.pl_ratio) }}{% else %}-{% endif %}</td>
+          <td class="ifa-panel__value">{% if r.winrate_250d is not none %}{{ '%.1f' | format(r.winrate_250d) }}%{% else %}-{% endif %}</td>
+          <td class="ifa-panel__value
+            {% if r.decay and r.decay >= 0 %}ifa-panel__delta--up
+            {% elif r.decay and r.decay < 0 %}ifa-panel__delta--down{% endif %}">
+            {% if r.decay is not none %}{{ '%+.1f' | format(r.decay) }}{% else %}-{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
       {% endif %}
-      {% if s.amount_yi_yuan is not none %}
-      <span class="kpi">成交 <b>{{ '%.0f' | format(s.amount_yi_yuan) }} 亿</b>
-        {% if s.amount_pct_60d is not none %}(60d {{ '%.0f' | format(s.amount_pct_60d) }}%){% endif %}</span>
-      {% endif %}
-      {% if s.up_count is not none %}
-      <span class="kpi">涨 <b>{{ s.up_count }}</b> 跌 <b>{{ s.down_count }}</b>
-        {% if s.flat_count %}平 <b>{{ s.flat_count }}</b>{% endif %}</span>
-      {% endif %}
-      {% if s.limit_up is not none %}
-      <span class="kpi">涨停 <b>{{ s.limit_up }}</b> 跌停 <b>{{ s.limit_down }}</b>
-        最高连板 <b>{{ s.consecutive_lb_high }}</b></span>
-      {% endif %}
-      {% if s.blow_up_count %}
-      <span class="kpi">炸板 <b>{{ s.blow_up_count }}</b>
-        ({{ '%.1f' | format(s.blow_up_rate) }}%)</span>
-      {% endif %}
-      {% if s.north_yi_yuan is not none %}
-      <span class="kpi">北向 <b>{{ '%+.1f' | format(s.north_yi_yuan) }} 亿</b></span>
-      {% endif %}
-      {% if s.market_state %}
-      <span class="kpi">市态 <b>{{ s.market_state }}</b></span>
-      {% endif %}
-    </div>
-
-  {% elif s.type == 'family_grid' %}
-    <h2>{{ s.title }}</h2>
-    <table>
-      <tr><th>族</th><th>命中</th><th>≥4★</th><th>主导 Setup</th></tr>
-      {% for fam_name, f in s.families.items() %}
-      {% if f.n > 0 %}
-      <tr>
-        <td><b>{{ fam_name }}</b></td>
-        <td>{{ f.n }}</td>
-        <td>{{ f.top }}</td>
-        <td>{% for setup in f.setups[:3] %}<span class="tag">{{ setup.name }} ({{ setup.n }})</span>{% endfor %}</td>
-      </tr>
-      {% endif %}
-      {% endfor %}
-    </table>
+    </section>
 
   {% elif s.type == 'attribution' %}
-    <h2>{{ s.title }}</h2>
-    <div class="meta">窗口：{{ s.window_start }} → 今日（T+1 实际收益）</div>
-    {% if s.rows %}
-    <table>
-      <tr><th>Setup</th><th>样本</th><th>胜率</th><th>均收益</th></tr>
-      {% for r in s.rows %}
-      <tr>
-        <td>{{ r.setup_name }}</td>
-        <td>{{ r.n }}</td>
-        <td>{% if r.win_rate is not none %}{{ '%.1f' | format(r.win_rate) }}%{% else %}-{% endif %}</td>
-        <td>{% if r.avg_return_pct is not none %}{{ '%+.2f' | format(r.avg_return_pct) }}%{% else %}-{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% else %}
-      <p style="color: #6e7681;">窗口内无可归因样本。</p>
-    {% endif %}
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§11</span>
+        <h2 class="ifa-section__title">近期表现归因</h2>
+      </header>
+      <p class="ifa-section__intro">窗口 <b>{{ s.window_start }}</b> → 今日，按 T+1 实际收益分组各策略的表现。</p>
+      {% if s.rows %}
+      <table class="ifa-panel">
+        <thead>
+          <tr><th>策略</th><th style="text-align:right">样本</th><th style="text-align:right">胜率</th><th style="text-align:right">均收益</th></tr>
+        </thead>
+        <tbody>
+        {% for r in s.rows %}
+        <tr>
+          <td><div class="ifa-panel__indicator">{{ r.setup_name | setup_label }}</div></td>
+          <td class="ifa-panel__value">{{ r.n }}</td>
+          <td class="ifa-panel__value">{% if r.win_rate is not none %}{{ '%.1f' | format(r.win_rate) }}%{% else %}-{% endif %}</td>
+          <td class="ifa-panel__value
+            {% if r.avg_return_pct and r.avg_return_pct >= 0 %}ifa-panel__delta--up
+            {% elif r.avg_return_pct and r.avg_return_pct < 0 %}ifa-panel__delta--down{% endif %}">
+            {% if r.avg_return_pct is not none %}{{ '%+.2f' | format(r.avg_return_pct) }}%{% else %}-{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="ifa-section__intro">窗口内无可归因样本。</p>
+      {% endif %}
+    </section>
 
   {% elif s.type == 'risk_scan' %}
-    <h2>{{ s.title }}</h2>
-    {% if s.climax_warning %}
-    <p style="background: #fff8c5; border-left: 3px solid #d4a72c; padding: 0.6em 1em;">
-      ⚠ {{ s.climax_warning }}
-    </p>
-    {% endif %}
-    <p>筹码松动候选 (C2)：<b>{{ s.chip_loose_count }}</b></p>
-    {% if s.decaying_setups %}
-    <p><b>衰退 Setup（decay ≤ -5pp）</b>：</p>
-    <table>
-      <tr><th>Setup</th><th>衰减</th><th>胜率 60d</th></tr>
-      {% for d in s.decaying_setups %}
-      <tr>
-        <td>{{ d.setup_name }}</td>
-        <td>{{ '%+.1f' | format(d.decay) }}</td>
-        <td>{% if d.winrate_60d is not none %}{{ '%.1f' | format(d.winrate_60d) }}%{% else %}-{% endif %}</td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% else %}
-      <p>当前无 setup 衰减超过 -5pp 阈值。</p>
-    {% endif %}
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§13</span>
+        <h2 class="ifa-section__title">风险扫描</h2>
+      </header>
+      {% if s.climax_warning %}
+      <div class="ifa-tone" style="border-left-color: var(--down); background: var(--down-soft);">
+        <span class="ifa-tone__pill" data-tone="谨慎">⚠ 体制警示</span>
+        <p class="ifa-tone__summary">{{ s.climax_warning }}</p>
+      </div>
+      {% endif %}
+      <p class="ifa-section__intro" style="margin-top:14px;">
+        筹码松动候选数：<b>{{ s.chip_loose_count }}</b>
+        ｜衰退策略数（衰减 ≤ -5pp）：<b>{{ s.decaying_setups | length }}</b>
+      </p>
+      {% if s.decaying_setups %}
+      <table class="ifa-panel">
+        <thead><tr><th>策略</th><th style="text-align:right">衰减</th><th style="text-align:right">胜率 60d</th></tr></thead>
+        <tbody>
+        {% for d in s.decaying_setups %}
+        <tr>
+          <td><div class="ifa-panel__indicator">{{ d.setup_name | setup_label }}</div></td>
+          <td class="ifa-panel__value ifa-panel__delta--down">{{ '%+.1f' | format(d.decay) }} pp</td>
+          <td class="ifa-panel__value">{% if d.winrate_60d is not none %}{{ '%.1f' | format(d.winrate_60d) }}%{% else %}-{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </section>
 
   {% elif s.type == 'hypotheses' %}
-    <h2>{{ s.title }}</h2>
-    <div class="meta">下个交易日实际收益将在 T+1 自动评估，结果写入 <code>ta.report_judgments</code>。</div>
-    {% if s.hypotheses %}
-    <table>
-      <tr><th>代码</th><th>Setup</th><th>分</th><th>假设陈述</th></tr>
-      {% for h in s.hypotheses %}
-      <tr>
-        <td>{{ h.ts_code }}</td>
-        <td>{{ h.setup_name }}</td>
-        <td>{{ '%.2f' | format(h.score) }}</td>
-        <td>{{ h.statement }}</td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% else %}
-      <p style="color: #6e7681;">本日无 5★ 候选可生成假设。</p>
-    {% endif %}
-
-  {% elif s.type == 'narrative' %}
-    <h2>{{ s.title }}</h2>
-    <p style="background: #f0f7ff; border-left: 3px solid #0969da; padding: 0.6em 1em; line-height: 1.7;">
-      {{ s.body }}
-    </p>
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§14</span>
+        <h2 class="ifa-section__title">下一交易日可证伪假设</h2>
+      </header>
+      <p class="ifa-section__intro">每条假设将在下一交易日自动评估实际收益，结果写入 <code>ta.report_judgments</code> 供回测追踪。</p>
+      {% if s.hypotheses %}
+      <table class="ifa-panel">
+        <thead><tr><th style="width:14%">代码</th><th style="width:22%">策略</th><th style="width:8%; text-align:right">得分</th><th>陈述</th></tr></thead>
+        <tbody>
+        {% for h in s.hypotheses %}
+        <tr>
+          <td><div class="ifa-panel__indicator">{{ h.ts_code }}</div></td>
+          <td>{{ h.setup_name | setup_label }}</td>
+          <td class="ifa-panel__value">{{ '%.2f' | format(h.score) }}</td>
+          <td style="font-size:13px;">
+            {{ h.ts_code }} 触发<b>{{ h.setup_name | setup_label }}</b>，假设 T+1 上涨 ≥ {{ h.threshold_pct }}%
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="ifa-section__intro">本日无 5★ 候选可生成假设。</p>
+      {% endif %}
+    </section>
 
   {% elif s.type == 'disclaimer' %}
-    <h2>{{ s.title }}</h2>
-    <div class="disclaimer">{{ s.body }}</div>
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§16</span>
+        <h2 class="ifa-section__title">免责声明 / Disclaimer</h2>
+      </header>
+      <div style="font-size:12.5px; color:var(--ink-2); line-height:1.7;">
+        {% for p in s.paragraphs_zh %}
+        <p style="margin: 0 0 10px 0;">{{ p }}</p>
+        {% endfor %}
+        <hr style="border:none; border-top:1px dashed var(--rule); margin:16px 0;">
+        <div style="font-style:italic; color:var(--ink-muted);">
+          {% for p in s.paragraphs_en %}
+          <p style="margin: 0 0 10px 0;">{{ p }}</p>
+          {% endfor %}
+        </div>
+      </div>
+    </section>
 
   {% endif %}
 
-{% endfor %}
+  {% endfor %}
 
+  {# ── Footer ────────────────────────────────────────── #}
+  <footer style="margin-top:36px; padding-top:14px; border-top:1px solid var(--rule); text-align:center; font-size:11px; color:var(--ink-soft); letter-spacing:0.04em;">
+    <strong style="color:var(--ink-2);">Lindenwood Management LLC</strong> ｜ For informational purposes only. Not investment advice. Investment involves risk.<br>
+    完整免责声明见报告末尾 §16. ｜ Generated {{ report.report_date_bjt }} 北京时间 · {{ report.template_version }}
+  </footer>
+
+</article>
 </body>
 </html>

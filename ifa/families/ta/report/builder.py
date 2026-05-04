@@ -70,10 +70,19 @@ def build_evening_report(engine: Engine, on_date: date,
                              "body": narrative})
     sections.extend([hypotheses, disclaimer])
 
+    # Banner-level fields (consumed by template header)
+    from ifa.config import get_settings
+    settings = get_settings()
+
     return {
-        "title": f"TA 晚报 · {on_date}",
+        "title": f"TA 晚报 · {on_date.strftime('%Y年%m月%d日')}",
+        "subtitle_en": f"China A-Share Technical Analysis Evening Briefing · {on_date}",
         "report_date_bjt": fmt_bjt(bjt_now()),
         "trade_date": on_date.isoformat(),
+        "template_version": "ta-v2.2",
+        "slot": "evening",
+        "run_mode": settings.run_mode.value,
+        "overview": overview,    # banner consumes this directly (regime hero)
         "sections": sections,
     }
 
@@ -415,12 +424,12 @@ def _section_hypotheses(engine: Engine, on_date: date) -> dict:
 
 
 def _section_disclaimer() -> dict:
+    from ifa.core.report.disclaimer import (
+        DISCLAIMER_PARAGRAPHS_ZH, DISCLAIMER_PARAGRAPHS_EN,
+    )
     return {
         "type": "disclaimer",
-        "title": "免责声明",
-        "body": (
-            "本报告由 iFA TA Family 算法生成，所有候选标的及指标均基于历史数据回测，"
-            "不构成投资建议。技术分析存在固有局限性，市场变化迅速，过往表现不代表未来收益。"
-            "投资者应结合自身情况独立判断、谨慎决策，自行承担投资风险。"
-        ),
+        "title": "§16 免责声明 / Disclaimer",
+        "paragraphs_zh": DISCLAIMER_PARAGRAPHS_ZH,
+        "paragraphs_en": DISCLAIMER_PARAGRAPHS_EN,
     }

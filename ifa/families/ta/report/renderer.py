@@ -5,6 +5,11 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from ifa.families.ta.report.labels import (
+    regime_label, regime_tone, regime_description,
+    setup_label, setup_family, trigger_label,
+)
+
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _env = Environment(
     loader=FileSystemLoader(_TEMPLATES_DIR),
@@ -12,10 +17,19 @@ _env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+_env.filters["regime_label"] = regime_label
+_env.filters["regime_tone"] = regime_tone
+_env.filters["regime_description"] = regime_description
+_env.filters["setup_label"] = setup_label
+_env.filters["setup_family"] = setup_family
+_env.filters["trigger_label"] = trigger_label
+_INLINE_CSS = (_TEMPLATES_DIR / "styles.css").read_text(encoding="utf-8")
 
 
 def render_html(report: dict) -> str:
-    return _env.get_template("ta_evening.html").render(report=report)
+    return _env.get_template("ta_evening.html").render(
+        report=report, inline_css=_INLINE_CSS,
+    )
 
 
 def render_markdown(report: dict) -> str:
@@ -155,6 +169,14 @@ def render_markdown(report: dict) -> str:
             out.append("")
         elif t == "disclaimer":
             out.append(f"## {s['title']}")
-            out.append("> " + s["body"])
+            for p in s.get("paragraphs_zh", []):
+                out.append("> " + p)
+                out.append(">")
+            out.append("")
+            out.append("---")
+            out.append("")
+            for p in s.get("paragraphs_en", []):
+                out.append("> _" + p + "_")
+                out.append(">")
             out.append("")
     return "\n".join(out)
