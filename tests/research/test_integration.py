@@ -178,6 +178,56 @@ class TestTiers:
         assert not _MockAugmenter.called, \
             "Quick tier must NOT call augmenter (saves API cost)"
 
+    def test_financial_analysis_types_are_labeled(self, cached_snap):
+        from ifa.families.research.report import build_research_report
+        results, params, scoring = self._build_results(cached_snap)
+
+        expected = {
+            "quarterly": "季报分析",
+            "annual": "年报分析",
+        }
+        for analysis_type, label in expected.items():
+            report = build_research_report(
+                cached_snap, results, scoring, params,
+                tier="standard", analysis_type=analysis_type,
+            )
+            assert report["analysis_type"] == analysis_type
+            assert report["analysis_type_label"] == label
+            dash = [s for s in report["sections"] if s["type"] == "research_financial_dashboard"]
+            assert dash and dash[0]["analysis_type_label"] == label
+            period = [s for s in report["sections"] if s["type"] == "research_period_analysis"]
+            assert period and period[0]["analysis_type_label"] == label
+
+    def test_quick_vs_deep_period_windows(self, cached_snap):
+        from ifa.families.research.report import build_research_report
+        results, params, scoring = self._build_results(cached_snap)
+
+        q_quick = build_research_report(
+            cached_snap, results, scoring, params,
+            tier="quick", analysis_type="quarterly",
+        )
+        q_deep = build_research_report(
+            cached_snap, results, scoring, params,
+            tier="deep", analysis_type="quarterly",
+        )
+        a_quick = build_research_report(
+            cached_snap, results, scoring, params,
+            tier="quick", analysis_type="annual",
+        )
+        a_deep = build_research_report(
+            cached_snap, results, scoring, params,
+            tier="deep", analysis_type="annual",
+        )
+
+        def _period_rows(report):
+            sec = next(s for s in report["sections"] if s["type"] == "research_period_analysis")
+            return sec["rows"]
+
+        assert len(_period_rows(q_quick)) <= 1
+        assert len(_period_rows(q_deep)) <= 12
+        assert len(_period_rows(a_quick)) <= 1
+        assert len(_period_rows(a_deep)) <= 3
+
 
 class TestScoreAndRender:
     def test_full_pipeline_renders_html(self, cached_snap):

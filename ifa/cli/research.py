@@ -35,6 +35,7 @@ from ifa.families.research.peer_scan import scan_l2_universe, scan_universe
 from ifa.families.research.jobs.company_events import extract_events_for_company
 from ifa.families.research.report import build_research_report, render_markdown
 from ifa.families.research.report.html import HtmlRenderer
+from ifa.families.research.memory import find_reusable_report, record_report_asset
 from ifa.families.research.resolver import (
     AmbiguousCompanyError,
     CompanyNotFoundError,
@@ -85,6 +86,35 @@ def _resolve_or_bootstrap(query: str, engine) -> CompanyRef:
     raise CompanyNotFoundError(query)
 
 
+def _analyze_company(engine, query: str, cutoff_date: date, *, no_persist: bool = False) -> dict:
+    """Resolve, fetch, compute, and score one company."""
+    company = _resolve_or_bootstrap(query, engine)
+    fetch_all(engine, company.ts_code, company.exchange, verbose=False)
+    snap = load_company_snapshot(engine, company, data_cutoff_date=cutoff_date)
+    params = load_params()
+    results_by_family = {
+        "profitability": compute_profitability(snap, params),
+        "growth":        compute_growth(snap, params),
+        "cash_quality":  compute_cash_quality(snap, params),
+        "balance":       compute_balance(snap, params),
+        "governance":    compute_governance(snap, params),
+    }
+    if not no_persist:
+        persist_all_families(engine, company.ts_code, results_by_family)
+    for results in results_by_family.values():
+        attach_peer_ranks(engine, results, snap)
+    if not no_persist:
+        persist_all_families(engine, company.ts_code, results_by_family)
+    scoring = score_results(results_by_family, params)
+    return {
+        "company": company,
+        "snap": snap,
+        "params": params,
+        "results_by_family": results_by_family,
+        "scoring": scoring,
+    }
+
+
 # ─── report ───────────────────────────────────────────────────────────────────
 
 @app.command("report")
@@ -102,8 +132,14 @@ def cmd_report(
                              help="Report tier: quick (rules-only, ~5s) | "
                                   "standard (default, +trends/timeline) | "
                                   "deep (+watchpoints, requires --llm)"),
+    analysis_type: str = typer.Option(
+        "annual", "--analysis-type",
+        help="Financial statement lens: quarterly | annual",
+    ),
     pdf: bool = typer.Option(False, "--pdf",
                              help="Also produce a PDF (requires Chrome installed)"),
+    reuse: bool = typer.Option(True, "--reuse/--fresh",
+                               help="Reuse an existing succeeded report asset when available"),
 ) -> None:
     """Generate a single-stock research report.
 
@@ -113,6 +149,8 @@ def cmd_report(
     logging.basicConfig(level=logging.WARNING,
                         format="%(asctime)s %(levelname)s %(message)s")
     engine = _engine()
+    from ifa.config import get_settings
+    settings = get_settings()
     cutoff_date = date.fromisoformat(cutoff) if cutoff else bjt_now().date()
 
     try:
@@ -122,31 +160,44 @@ def cmd_report(
         raise typer.Exit(1)
 
     console.print(f"[bold]{company.name}[/bold] · {company.ts_code} · {company.exchange}")
-
-    fetch_all(engine, company.ts_code, company.exchange, verbose=False)
-    snap = load_company_snapshot(engine, company, data_cutoff_date=cutoff_date)
-
-    params = load_params()
-    results_by_family = {
-        "profitability": compute_profitability(snap, params),
-        "growth":        compute_growth(snap, params),
-        "cash_quality":  compute_cash_quality(snap, params),
-        "balance":       compute_balance(snap, params),
-        "governance":    compute_governance(snap, params),
-    }
-
-    if not no_persist:
-        persist_all_families(engine, company.ts_code, results_by_family)
-    for results in results_by_family.values():
-        attach_peer_ranks(engine, results, snap)
-    if not no_persist:
-        persist_all_families(engine, company.ts_code, results_by_family)
-
-    scoring = score_results(results_by_family, params)
-
     if tier not in ("quick", "standard", "deep"):
         console.print(f"[red]✗[/red] Invalid --tier {tier!r}; must be quick|standard|deep")
         raise typer.Exit(1)
+    if analysis_type not in ("quarterly", "annual"):
+        console.print(f"[red]✗[/red] Invalid --analysis-type {analysis_type!r}; must be quarterly|annual")
+        raise typer.Exit(1)
+
+    analysis = _analyze_company(engine, company.ts_code, cutoff_date, no_persist=no_persist)
+    snap = analysis["snap"]
+    params = analysis["params"]
+    results_by_family = analysis["results_by_family"]
+    scoring = analysis["scoring"]
+
+    latest_period = _latest_period_for_lens(snap, analysis_type)
+    if reuse and output != "-":
+        reusable = find_reusable_report(
+            engine,
+            ts_code=company.ts_code,
+            analysis_type=analysis_type,
+            tier=tier,
+            latest_period=latest_period,
+        )
+        if reusable and reusable.get("output_html_path") and Path(str(reusable["output_html_path"])).exists():
+            console.print("[green]✓[/green] 已找到可复用报告，不重新生成。")
+            console.print(f"[green]✓[/green] HTML → {reusable['output_html_path']}")
+            if reusable.get("output_pdf_path"):
+                console.print(f"[green]✓[/green] PDF  → {reusable['output_pdf_path']}")
+            scope = reusable.get("scope_json") or {}
+            if scope.get("md_path"):
+                console.print(f"[green]✓[/green] MD   → {scope['md_path']}")
+            console.print(
+                f"[dim]run_id={reusable['run_id']} "
+                f"latest_period={scope.get('latest_period') or latest_period or 'unknown'} "
+                f"source_run_mode={reusable.get('run_mode') or 'unknown'}[/dim]"
+            )
+            return
+        if reusable:
+            console.print("[yellow]⚠[/yellow]  DB 中有历史报告记录，但文件路径不存在；将重新生成。")
 
     # Quick tier never invokes LLM (saves API cost; the whole point is fast).
     augmenter = None
@@ -163,7 +214,8 @@ def cmd_report(
 
     report = build_research_report(
         snap, results_by_family, scoring, params,
-        tier=tier, augmenter=augmenter, engine=engine,
+        tier=tier, analysis_type=analysis_type, augmenter=augmenter, engine=engine,
+        run_mode=settings.run_mode.value,
     )
 
     if output == "-":
@@ -173,13 +225,12 @@ def cmd_report(
     if output == str(_DEFAULT_OUTPUT):
         # Default: route to the unified output structure
         # <output_root>/<mode>/<YYYYMMDD>/research/
-        from ifa.config import get_settings
         from ifa.core.report.output import output_dir_for_family
-        out_dir = output_dir_for_family(get_settings(), "research", bjt_now().date())
+        out_dir = output_dir_for_family(settings, "research", bjt_now().date())
     else:
         out_dir = Path(output)
         out_dir.mkdir(parents=True, exist_ok=True)
-    suffix = f"-{tier}" if tier != "standard" else ""
+    suffix = f"-{analysis_type}-{tier}"
     stamp = bjt_now().strftime("%Y%m%d")
     base = f"Stock-Analysis-{company.ts_code}-{stamp}{suffix}"
     html_path = out_dir / f"{base}.html"
@@ -205,6 +256,16 @@ def cmd_report(
     console.print(f"[green]✓[/green] MD   → {md_path}")
     if pdf_path:
         console.print(f"[green]✓[/green] PDF  → {pdf_path}")
+    if not no_persist:
+        run_id = record_report_asset(
+            engine,
+            report=report,
+            html_path=str(html_path),
+            md_path=str(md_path),
+            pdf_path=str(pdf_path) if pdf_path else None,
+            triggered_by="manual",
+        )
+        console.print(f"[dim]registered report_run={run_id}[/dim]")
 
 
 # ─── peer-scan ────────────────────────────────────────────────────────────────
@@ -1215,3 +1276,21 @@ def _print_score_summary(company: CompanyRef, scoring) -> None:
     overall = f"{scoring.overall_score:.1f}" if scoring.overall_score is not None else "—"
     console.print(f"[bold]总分 {overall} {icons.get(scoring.overall_status.value, '?')} "
                   f"{scoring.overall_label_zh}[/bold]")
+
+
+def _latest_period_for_lens(snap, analysis_type: str) -> str | None:
+    periods: set[str] = set()
+    for ts in (
+        getattr(snap, "revenue_series", None),
+        getattr(snap, "n_income_series", None),
+        getattr(snap, "cfo_series", None),
+        getattr(snap, "roe_series", None),
+        getattr(snap, "gpm_series", None),
+    ):
+        if ts is not None:
+            periods.update(str(p) for p in ts.periods)
+    if analysis_type == "annual":
+        periods = {p for p in periods if p.endswith("1231")}
+    if periods:
+        return sorted(periods)[-1]
+    return getattr(snap, "latest_period", None)

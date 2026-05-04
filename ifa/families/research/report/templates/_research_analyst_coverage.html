@@ -41,6 +41,43 @@
     {% endif %}
   </div>
 
+  {% if s.recent_reports %}
+  <div class="ac-recent">
+    <div class="ac-recent__label">最近研报明细</div>
+    <div class="table-scroll">
+      <table class="ac-recent__table">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>机构</th>
+            <th>作者</th>
+            <th>标题</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in s.recent_reports %}
+          <tr>
+            <td class="ac-recent__date">{{ r.date }}</td>
+            <td>{{ r.institution or '—' }}</td>
+            <td>{{ r.author or '—' }}</td>
+            <td>
+              {% if r.url %}<a href="{{ r.url }}">{{ r.title or '未命名研报' }}</a>{% else %}{{ r.title or '未命名研报' }}{% endif %}
+              {% if r.pdf_key_points %}
+              <ul class="ac-pdf-points">
+                {% for p in r.pdf_key_points %}<li>{{ p }}</li>{% endfor %}
+              </ul>
+              {% elif r.pdf_extractable is sameas false %}
+              <div class="ac-pdf-status">PDF 正文未能抽取{% if r.pdf_error %}: {{ r.pdf_error }}{% endif %}</div>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
   {% if s.themes %}
   <div class="ac-themes">
     <div class="ac-themes__label">卖方研究主题（LLM 聚类）</div>

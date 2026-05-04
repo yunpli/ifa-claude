@@ -8,15 +8,21 @@ All notable changes to iFA China Market Report System.
 
 ## [2.2.0] — 2026-05-04 (in development)
 
-### Added — Three new families: Research / TA / Stock Intel (planned)
+### Added — Research core complete; TA in progress; Stock Intel deferred
 
-**Research family — single-stock equity research reports**
+**Research family — single-stock financial-statement reports**
 - 28 financial factors across 5 families (profitability / growth / cash quality / balance / governance)
 - SW L2 peer percentile via `sw_member_monthly` PIT JOIN
-- Three tiers: quick / standard / deep
+- Four delivered report lenses: quarterly quick, annual quick, quarterly deep, annual deep
+- Deep reports compare up to 12 quarters / 3 annual reports with YoY and QoQ / prior-year analysis
 - LLM watchpoints + cross-cutting tensions (§09) + analyst coverage (§10) + investor concerns (§11)
-- 30-stock golden set + regression script (4 metrics, all gating thresholds passing)
-- Output: `Stock-Analysis-{ts_code}-{YYYYMMDD}[-{tier}].html`
+- Analyst-report PDF extraction cache with key points
+- Durable Postgres fundamental memory: `research.period_factor_decomposition`
+- Durable PDF memory: `research.pdf_extract_cache`
+- Report asset registry and reuse via `research.report_runs` / `research.report_sections`; manual and production share the same reuse pool unless `--fresh` is passed
+- Stock Intel / TA integration boundary: `ifa.families.research.memory.load_fundamental_lineup(...)`
+- Output: `Stock-Analysis-{ts_code}-{YYYYMMDD}-{analysis_type}-{tier}.html`
+- V2.2 defers HTTP API, Telegram, quota, dashboard, and manual golden-set gates to V2.3 / later productionization
 
 **TA family — 晚盘技术面 evening report**
 - 9-regime classifier (trend_continuation / early_risk_on / weak_rebound / range_bound / sector_rotation / emotional_climax / distribution_risk / cooldown / high_difficulty) with Laplace-smoothed transition matrix

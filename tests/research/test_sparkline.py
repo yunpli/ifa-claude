@@ -20,15 +20,15 @@ class TestRenderSparkline:
         assert "M" in out
         assert "L" in out
 
-    def test_uptrend_uses_green_color(self):
+    def test_uptrend_uses_china_red_color(self):
         out = render_sparkline([1, 2, 3, 4, 5])
-        # _COLOR_UP = "#2e7d32"
-        assert "#2e7d32" in out
+        # A-share convention: up/rising is red.
+        assert "#991b1b" in out
 
-    def test_downtrend_uses_red_color(self):
+    def test_downtrend_uses_china_green_color(self):
         out = render_sparkline([5, 4, 3, 2, 1])
-        # _COLOR_DOWN = "#c62828"
-        assert "#c62828" in out
+        # A-share convention: down/falling is green.
+        assert "#166534" in out
 
     def test_flat_uses_gray_color(self):
         # ±2% considered flat

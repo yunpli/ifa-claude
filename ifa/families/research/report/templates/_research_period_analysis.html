@@ -1,0 +1,66 @@
+<section class="section ifa-section research-period-analysis">
+  <header class="ifa-section__head">
+    <span class="ifa-section__num">§04</span>
+    <h2 class="section__title ifa-section__title">{{ s.title }}</h2>
+  </header>
+  <p class="ifa-section__intro">{{ s.coverage_note }}</p>
+
+  {% if s.charts %}
+  <div class="period-chart-grid">
+    {% for c in s.charts %}
+    <article class="period-chart-card">
+      <div class="period-chart-card__head">
+        <span>{{ c.label }}</span>
+        <strong>{{ c.latest }}</strong>
+      </div>
+      <div class="period-chart-card__meta">
+        <span>{{ c.unit }}</span>
+        <span class="{% if c.change.startswith('+') %}delta-up{% elif c.change.startswith('-') %}delta-down{% else %}delta-flat{% endif %}">
+          {{ c.change }}
+        </span>
+      </div>
+      {{ c.svg | safe }}
+    </article>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if s.rows %}
+  <div class="table-scroll">
+    <table class="period-table">
+      <thead>
+        <tr>
+          <th>报告期</th>
+          <th class="num">营收</th>
+          <th class="num">营收 YoY</th>
+          <th class="num">营收 {{ s.period_change_label }}</th>
+          <th class="num">净利润</th>
+          <th class="num">净利 YoY</th>
+          <th class="num">净利 {{ s.period_change_label }}</th>
+          <th class="num">CFO</th>
+          <th class="num">ROE</th>
+          <th class="num">毛利率</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in s.rows %}
+        <tr>
+          <td><strong>{{ r.period }}</strong></td>
+          <td class="num">{{ r.revenue }}</td>
+          <td class="num">{{ r.revenue_yoy }}</td>
+          <td class="num">{{ r.revenue_period_change }}</td>
+          <td class="num">{{ r.n_income }}</td>
+          <td class="num">{{ r.n_income_yoy }}</td>
+          <td class="num">{{ r.n_income_period_change }}</td>
+          <td class="num">{{ r.cfo }}</td>
+          <td class="num">{{ r.roe }}</td>
+          <td class="num">{{ r.gpm }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">暂无可用报告期序列。</p>
+  {% endif %}
+</section>

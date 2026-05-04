@@ -266,26 +266,26 @@ ifa ningbo
 
 ## Research — 个股深度研究 (separate)
 
-**Purpose.** Single-stock research reports built from financials + announcements + IRM Q&A + analyst research reports. Three tiers: `quick` (5 sections, no LLM), `standard` (10 sections, light LLM), `deep` (12 sections incl. LLM watchpoints + cross-cutting tensions + analyst themes + investor concerns).
+**Purpose.** Single-stock financial-statement research reports built from Tushare fundamentals, disclosures, IRM Q&A, and analyst research reports. V2.2 delivers the core财报 analysis matrix: `quarterly quick`, `annual quick`, `quarterly deep`, and `annual deep`. Cross-stock comparison is out of scope for this module.
 
 **Sections (deep).** §01 overview · §02-§07 5-family factor tables (profitability / growth / cash quality / balance / governance) · §08 timeline · §09 cross-cutting tensions · §10 analyst coverage + themes · §11 investor concerns · §12 trend grid · §13 red flags · §14 5-dim radar · §15 watchpoints · §16 next-disclosure · §17 data completeness · §18 disclaimer.
 
-**Key data sources.** Tushare `stock_basic`, `fina_indicator`, `forecast`, `express`, `top10_holders`, `pledge_stat`, `stk_holdertrade`, `irm_qa_sh/sz`, `report_rc`, `anns_*`. SW L2 peer ranking via `sw_member_monthly`.
+**Key data sources.** Tushare `stock_basic`, `fina_indicator`, `forecast`, `express`, `top10_holders`, `pledge_stat`, `stk_holdertrade`, `irm_qa_sh/sz`, `report_rc`, `anns_*`. SW L2 peer ranking via `sw_member_monthly`. Derived period factors persist to `research.period_factor_decomposition`; analyst PDF extracts persist to `research.pdf_extract_cache`.
 
 **CLI.**
 
 ```
 ifa research
-├── report <name-or-code> [--tier quick/standard/deep] [--llm] [--output tmp/]
+├── report <name-or-code> [--analysis-type quarterly/annual] [--tier quick/standard/deep] [--fresh] [--llm] [--output tmp/]
 ├── peer-scan <name-or-code> [--max-peers N] [--full]
 ├── peer-rank-refresh
 ├── batch <code1> <code2> ...
 └── scan-* (industry-view / cleanup / status)
 ```
 
-**Filename schema:** `Stock-Analysis-{ts_code}-{YYYYMMDD}[-{tier}].html`
+**Filename schema:** `Stock-Analysis-{ts_code}-{YYYYMMDD}-{analysis_type}-{tier}.html`
 
-**Quality gate.** 30-stock golden set (`tests/golden_set/research_v22.json`), 4 metrics ≥ thresholds: verdict alignment ≥80%, dimension agreement ≥70%, watchpoint precision ≥70%, watchpoint recall ≥60%. Run `uv run python scripts/research_regression.py` before release.
+**Reuse / quality gate.** Reports are reusable assets registered in `research.report_runs` / `research.report_sections`. Manual and production runs share the same reuse pool; run mode only changes output location. Current core gate: `tests/research/` green, manual matrix run, DB memory verification, and desktop/mobile layout check. The 30-stock golden set remains available for later scoring/LLM tuning but is deferred from the V2.2 core completion gate.
 
 详见 [`research-deep-dive.md`](./research-deep-dive.md)。
 

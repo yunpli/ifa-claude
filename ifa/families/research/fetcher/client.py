@@ -79,24 +79,24 @@ def fetch_stock_company(engine: Any, ts_code: str) -> list[dict]:
                   ts_code=ts_code)
 
 
-def fetch_income(engine: Any, ts_code: str, *, period: str | None = None, limit: int = 8) -> list[dict]:
+def fetch_income(engine: Any, ts_code: str, *, period: str | None = None, limit: int = 16) -> list[dict]:
     kwargs: dict = {"ts_code": ts_code, "limit": limit}
     if period:
         kwargs["period"] = period
     return _fetch(engine, ts_code, "income", "income", **kwargs)
 
 
-def fetch_balancesheet(engine: Any, ts_code: str, *, limit: int = 8) -> list[dict]:
+def fetch_balancesheet(engine: Any, ts_code: str, *, limit: int = 16) -> list[dict]:
     return _fetch(engine, ts_code, "balancesheet", "balancesheet",
                   ts_code=ts_code, limit=limit)
 
 
-def fetch_cashflow(engine: Any, ts_code: str, *, limit: int = 8) -> list[dict]:
+def fetch_cashflow(engine: Any, ts_code: str, *, limit: int = 16) -> list[dict]:
     return _fetch(engine, ts_code, "cashflow", "cashflow",
                   ts_code=ts_code, limit=limit)
 
 
-def fetch_fina_indicator(engine: Any, ts_code: str, *, limit: int = 8) -> list[dict]:
+def fetch_fina_indicator(engine: Any, ts_code: str, *, limit: int = 16) -> list[dict]:
     return _fetch(engine, ts_code, "fina_indicator", "fina_indicator",
                   ts_code=ts_code, limit=limit)
 

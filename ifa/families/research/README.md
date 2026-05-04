@@ -8,8 +8,12 @@ Per-stock equity research reports built from Tushare fundamentals.
 # Single stock report
 uv run ifa research report 智微智能
 uv run ifa research report 600519 --llm                      # add LLM narratives
-uv run ifa research report 智微智能 --tier quick --pdf       # rules-only + PDF
-uv run ifa research report 智微智能 --tier deep --llm        # all sections + watchpoints
+uv run ifa research report 智微智能 --analysis-type quarterly --tier quick
+uv run ifa research report 智微智能 --analysis-type annual --tier quick
+uv run ifa research report 智微智能 --analysis-type quarterly --tier deep --llm
+uv run ifa research report 智微智能 --analysis-type annual --tier deep --llm
+uv run ifa research report 智微智能 --analysis-type quarterly --tier quick --pdf
+uv run ifa research report 智微智能 --analysis-type annual --tier deep --fresh  # force rerun
 
 # Peer cohort (one anchor's L2)
 uv run ifa research peer-scan 智微智能 --max-peers 20
@@ -59,11 +63,35 @@ attach_peer_ranks (research.factor_value × smartmoney.sw_member_monthly PIT JOI
 score_results — 5-dim weighted blend of `0.5 × status_base + 0.5 × peer_pct`
     │
     ▼
+period/PDF memory → research.period_factor_decomposition + research.pdf_extract_cache
+    │
+    ▼
 build_research_report → ResearchReport (typed dict)
     │       │
     │       ├── markdown.render(report) → str
     │       └── HtmlRenderer().render(report=report) → str (inline CSS + SVG sparklines)
 ```
+
+Reports are assets, not disposable render side effects. By default the CLI
+checks `research.report_runs` for the same stock / statement lens / tier /
+latest filing period and returns the existing HTML/MD path when it exists.
+Manual and production runs share this reuse pool; their output directories are
+different, but run mode is not a forced-rerun boundary. Use `--fresh` for a
+forced rerun. New runs are registered with their section JSON so downstream
+systems can list and reuse them.
+
+## Report taxonomy
+
+Research 财报分析固定为“报表类型 × 深度档位”的单股报告，不生成跨股票比较报告。
+
+| 类型 | CLI | 财务读取窗口 |
+|---|---|---|
+| Quarterly Quick | `--analysis-type quarterly --tier quick` | 只读最新季报 |
+| Annual Quick | `--analysis-type annual --tier quick` | 只读最新年报 |
+| Quarterly Deep | `--analysis-type quarterly --tier deep` | 最多最近 12 个季度；逐季看 YoY + QoQ |
+| Annual Deep | `--analysis-type annual --tier deep` | 最多最近 3 份年报；看 YoY + 较上年变化 |
+
+`standard` 仍保留为中间档，主要用于研发/批量扫描时带趋势和时间线但不启用 deep watchpoints。
 
 ## Layout
 
@@ -107,7 +135,18 @@ families/research/
 | `api_cache` | Tushare responses (TTL'd) | ~22 rows × stocks scanned |
 | `computed_cache` | LLM narrative cache (SHA256-keyed) | ~6 rows / stock with --llm |
 | `factor_value` | persisted FactorResult; backs peer rank | 28 rows × stocks scanned |
+| `period_factor_decomposition` | period-level derived financial factors for report composition and Stock Intel lineup | ~5 factors × 12 quarters + 3 years / stock |
+| `pdf_extract_cache` | analyst-report PDF extraction cache with key points / text hash | top recent PDFs / stock |
 | `scan_run` | per-L2 audit trail (run_id, status, durations) | ~1 row / L2 / day |
+
+`ifa.families.research.memory.load_fundamental_lineup(engine, ts_code)` is the
+public interface for Stock Intel / TA composition. It reads canonical Postgres
+memory, not rendered HTML. DuckDB is reserved for scratch / OLAP workloads and
+is not the authority for Research fundamentals.
+
+Report asset reuse goes through
+`ifa.families.research.memory.find_reusable_report(...)`; generation code should
+call `record_report_asset(...)` after writing HTML/MD/PDF.
 
 ## Key design decisions
 
@@ -184,7 +223,7 @@ uv run python -m pytest tests/research/ -v
 - Pure-function tests (factors / trends / sparkline / scoring)
 - Integration smoke tests (skip cleanly if DB or fixture data unavailable)
 - Tier filtering tests (quick / standard / deep)
-- Total: ~1s, 65 tests as of last commit
+- Total: 109 tests in the current Research suite.
 
 ## Future enhancements (deferred)
 

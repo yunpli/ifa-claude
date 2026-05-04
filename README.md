@@ -1,6 +1,6 @@
 # ifa-claude — iFA China Market Report System
 
-**Version 2.1.3** · AI-native, structured, source-anchored daily intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
+**Version 2.2.0 in progress** · AI-native, structured, source-anchored intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
 
 ---
 
@@ -74,10 +74,10 @@ The main `market` family is 总指挥型 — it summarises the day. The three au
 | **Tech** (aux) | `ifa generate tech` | morning / evening | 12 | Yes (5-layer SW L2 mapping) | AI 五层蛋糕 — 算力/模型/应用/终端/生态 |
 | **SmartMoney** (separate) | `ifa smartmoney evening` | evening | 14 | Yes (SW L2 sector flow) | Institutional 板块资金流, ML 信号, 假设回顾 |
 | **Ningbo** (separate) | `ifa ningbo evening` | evening | 5 | Yes (SW L2 member lookup) | 短线策略三轨 — 启发式 / ML 激进 / ML 稳健，★1-★5 共识矩阵，15 日追踪 |
-| **Research** (V2.2, separate) | `ifa research report` | quick / standard / deep | 18 | Yes (SW L2 peer rank) | 个股深度研究 — 28 因子 / 5 维度 / LLM 警示 / 横切张力 |
+| **Research** (V2.2, separate) | `ifa research report` | quarterly/annual × quick/standard/deep | 18 | Yes (SW L2 peer rank) | 个股财报分析 — 四类报告 / 5 维度 / 研报 PDF 摘要 / Postgres 基本面记忆 / 报告资产复用 |
 | **TA** (V2.2, separate) | `ifa ta evening` | evening | 11 + 3 LLM | Yes (SW L1/L2 sector) | 晚盘技术面 — 9 体制 + 19 setup + T+N 追踪 + 衰减门控 |
 
-All families share the same reporting tables (`report_runs`, `report_sections`, `report_judgments`, `model_outputs`) and the same `ReportRun` lifecycle.
+Most families share the core reporting tables (`report_runs`, `report_sections`, `report_judgments`, `model_outputs`) and the same `ReportRun` lifecycle. Research additionally owns `research.report_runs` / `research.report_sections` as a single-stock report asset registry plus `research.period_factor_decomposition` and `research.pdf_extract_cache` for reusable fundamental memory.
 
 ---
 

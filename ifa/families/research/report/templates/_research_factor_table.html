@@ -1,10 +1,11 @@
-<section class="section">
-  <h2 class="section__title">
-    {{ s.family_label_zh }}
+<section class="section ifa-section">
+  <header class="ifa-section__head">
+    <span class="ifa-section__num">财务维度</span>
+    <h2 class="section__title ifa-section__title">{{ s.family_label_zh }}</h2>
     <span class="badge badge--{{ s.family_status }}">
       {{ s.family_status | status_icon }} {{ s.family_score | fmt_score }}
     </span>
-  </h2>
+  </header>
   {% if s.narrative %}
   <div class="narrative">{{ s.narrative }}</div>
   {% endif %}
@@ -15,7 +16,7 @@
         <th class="num">值</th>
         <th class="center">状态</th>
         <th class="center">同业排名</th>
-        <th>备注</th>
+        <th>解读</th>
       </tr>
     </thead>
     <tbody>
@@ -25,18 +26,11 @@
         <td class="num">{{ r.value }}</td>
         <td class="center"><span class="badge badge--{{ r.status }}">{{ r.status | status_icon }}</span></td>
         <td class="center">
-          {% if r.peer_rank %}
-            <strong>{{ r.peer_rank[0] }}</strong>/{{ r.peer_rank[1] }}
-            {% if r.peer_percentile is not none %}
-              <div style="color:#666;font-size:11px">P{{ '%.0f' | format(r.peer_percentile) }}</div>
-            {% endif %}
-          {% else %}<span style="color:#bbb">—</span>{% endif %}
+          {% if r.peer_label and r.peer_label != '—' %}
+            {{ r.peer_label }}
+          {% else %}<span class="muted">—</span>{% endif %}
         </td>
-        <td>
-          {% if r.notes %}
-            {% for n in r.notes %}<div>{{ n }}</div>{% endfor %}
-          {% else %}<span style="color:#bbb">—</span>{% endif %}
-        </td>
+        <td>{{ r.interpretation }}</td>
       </tr>
       {% endfor %}
     </tbody>

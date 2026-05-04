@@ -33,6 +33,12 @@ _EXCHANGE_MAP: Final[dict[str, str]] = {
     "9": "BJ",  # 920xxx
 }
 
+_COMMON_NAME_ALIASES: Final[dict[str, str]] = {
+    # Common homophone / IME slips seen in manual research requests.
+    "智威智能": "智微智能",
+    "智尚科技": "致尚科技",
+}
+
 
 class CompanyNotFoundError(ValueError):
     pass
@@ -54,7 +60,7 @@ def resolve(query: str, engine: Engine) -> CompanyRef:
 
     *query* may be: "001339.SZ", "001339", "智微智能", "智微" (fuzzy).
     """
-    q = query.strip()
+    q = _COMMON_NAME_ALIASES.get(query.strip(), query.strip())
 
     # 1. Exact ts_code with suffix
     if _SUFFIX_PATTERN.match(q):

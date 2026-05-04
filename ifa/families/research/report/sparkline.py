@@ -9,8 +9,8 @@ Design choices:
     HTML goes (browser, email, PDF).
   · Auto-scaled to data range (0% / 100% bands hidden — keeps the line visible).
   · None values cause the path to break (gap), so missing periods are visible.
-  · Color-coded by overall direction: green if last > first, red if last <
-    first, gray if flat (within ±2%).
+  · Color-coded by A-share market convention for direction: red if last >
+    first, green if last < first, gray if flat (within ±2%).
   · Last point highlighted with a small dot to anchor the eye.
 
 API:
@@ -25,8 +25,8 @@ _DEFAULT_WIDTH = 100
 _DEFAULT_HEIGHT = 24
 _PADDING_Y = 2     # vertical breathing room
 
-_COLOR_UP = "#2e7d32"
-_COLOR_DOWN = "#c62828"
+_COLOR_UP = "#991b1b"
+_COLOR_DOWN = "#166534"
 _COLOR_FLAT = "#888"
 _COLOR_BG_GUIDE = "#e0e0e0"  # mid-line guide
 

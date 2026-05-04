@@ -28,6 +28,7 @@ class AnalystCoverage:
     total_reports: int = 0
     reports_by_month: list[dict] = field(default_factory=list)  # [{month: '202604', count: 3}, ...]
     top_institutions: list[dict] = field(default_factory=list)  # [{name, count, latest_date}, ...]
+    recent_reports: list[dict] = field(default_factory=list)  # newest metadata rows for analyst reading
     latest_report_date: str | None = None
     days_since_latest: int | None = None
     coverage_gap_warning: bool = False
@@ -71,6 +72,16 @@ def compute_coverage(
     cov.latest_report_date = latest_d.strftime("%Y-%m-%d")
     cov.days_since_latest = (on_date - latest_d).days
     cov.coverage_gap_warning = cov.days_since_latest > gap_threshold_days
+    cov.recent_reports = [
+        {
+            "date": d.strftime("%Y-%m-%d"),
+            "title": str(r.get("title") or "").strip(),
+            "institution": str(r.get("inst_csname") or r.get("institution") or "").strip(),
+            "author": str(r.get("author") or "").strip(),
+            "url": str(r.get("url") or "").strip(),
+        }
+        for d, r in parsed[:top_n]
+    ]
 
     # Bucket by month for the trailing window
     cutoff = on_date.replace(day=1)

@@ -157,6 +157,13 @@ The full semantic detail lives in [`run-modes.md`](run-modes.md). Architecturall
 - **Output paths mirror the mode** so test artifacts can be cleaned up independently.
 - **No mock layer.** Test mode hits real LLM + TuShare; only the DB and output dir are isolated.
 
+Research report assets are an explicit exception to "output path implies rerun":
+manual and production output folders differ, but `research.report_runs` is shared
+as a product-asset registry. A later request reuses an existing Research report
+when `ts_code + analysis_type + tier + latest_period` match, regardless of the
+source `run_mode`, unless the caller passes `--fresh` or a new filing period is
+detected.
+
 ---
 
 ## Mermaid: family-to-table dependency

@@ -93,6 +93,45 @@ def _r_factor_table(s: dict) -> str:
     return "\n".join(lines)
 
 
+def _r_financial_dashboard(s: dict) -> str:
+    lines = [f"### 财务质量总览（最新报告期 {s.get('latest_period') or '—'}）"]
+    if s.get("key_metrics"):
+        lines.append("")
+        lines.append("| 核心指标 | 值 | 状态 | 同业 |")
+        lines.append("|---|---:|:-:|---|")
+        for m in s["key_metrics"]:
+            ic = _STATUS_ICON.get(m.get("status"), "?")
+            lines.append(f"| {m['label']} | {m['value']} | {ic} | {m.get('peer') or '—'} |")
+    if s.get("cards"):
+        lines.append("")
+        for c in s["cards"]:
+            ic = _STATUS_ICON.get(c.get("status"), "?")
+            score = c.get("score")
+            score_s = f"{score:.1f}" if score is not None else "—"
+            lines.append(f"- {ic} **{c['label']} {score_s}**: {c['verdict']}")
+            for e in c.get("evidence", [])[:2]:
+                lines.append(f"  - 证据: {e}")
+            if c.get("next_watch"):
+                lines.append(f"  - 下一观察点: {c['next_watch']}")
+    return "\n".join(lines)
+
+
+def _r_period_analysis(s: dict) -> str:
+    lines = [f"### {s.get('title') or '报告期序列'}"]
+    if s.get("coverage_note"):
+        lines.append(f"> {s['coverage_note']}")
+        lines.append("")
+    lines.append("| 报告期 | 营收 | 营收 YoY | 营收 " + s.get("period_change_label", "环比") + " | 净利润 | 净利 YoY | 净利 " + s.get("period_change_label", "环比") + " | CFO | ROE | 毛利率 |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    for r in s.get("rows", []):
+        lines.append(
+            f"| {r['period']} | {r['revenue']} | {r['revenue_yoy']} | {r['revenue_period_change']} | "
+            f"{r['n_income']} | {r['n_income_yoy']} | {r['n_income_period_change']} | "
+            f"{r['cfo']} | {r['roe']} | {r['gpm']} |"
+        )
+    return "\n".join(lines)
+
+
 def _format_peer(peer_rank, peer_percentile) -> str:
     if peer_rank is None:
         return "—"
@@ -182,6 +221,17 @@ def _r_analyst_coverage(s: dict) -> str:
         for inst in s["top_institutions"]:
             lines.append(f"- {inst['name']} · {inst['count']} 份 · 最新 {inst['latest_date']}")
 
+    if s.get("recent_reports"):
+        lines.append("")
+        lines.append("**最近研报明细**:")
+        for r in s["recent_reports"][:5]:
+            title = r.get("title") or "未命名研报"
+            inst = r.get("institution") or "—"
+            author = r.get("author") or "—"
+            lines.append(f"- {r.get('date') or '—'} · {inst} · {author} · {title}")
+            for p in r.get("pdf_key_points", [])[:3]:
+                lines.append(f"  - {p}")
+
     if s.get("themes"):
         lines.append("")
         lines.append("**研究主题（LLM 聚类）**:")
@@ -239,6 +289,8 @@ def _r_disclaimer(s: dict) -> str:
 _RENDERERS = {
     "research_overview": _r_overview,
     "research_radar": _r_radar,
+    "research_financial_dashboard": _r_financial_dashboard,
+    "research_period_analysis": _r_period_analysis,
     "research_factor_table": _r_factor_table,
     "research_trend_grid": _r_trend_grid,
     "research_red_flags": _r_red_flags,

@@ -1,11 +1,12 @@
 # IFAVR — Database Schema Reference
 
-Two logical schemas live in the same PostgreSQL 16 cluster (port 55432):
+Multiple logical schemas live in the same PostgreSQL 16 cluster (port 55432):
 
 | Schema | DB | Purpose |
 |---|---|---|
 | `public` | `ifavr` / `ifavr_test` | Core reporting tables — shared across all report families |
 | `smartmoney` | `ifavr` / `ifavr_test` | SmartMoney-specific ETL, factor, ML, and backtest tables |
+| `research` | `ifavr` / `ifavr_test` | Research family company identity, cache, report assets, factor memory, and PDF extract memory |
 
 All migrations are managed by Alembic (`alembic upgrade head`).
 All timestamps are `TIMESTAMPTZ` stored in UTC; rendering converts to `Asia/Shanghai`.
@@ -307,6 +308,25 @@ All raw tables follow TuShare column shapes exactly. PK is typically
 | `prob_up` | NUMERIC(10,6) | P(next day up) |
 | `label_scheme` | TEXT | `binary_up`, `binary_up5d` |
 | `predicted_at` | TIMESTAMPTZ | |
+
+## Part 3 — Research schema (`research.*`)
+
+Research owns its own product memory because single-stock financial statements are sparse and reusable. A report generated in manual mode can satisfy a later production request when the stock / statement lens / tier / latest filing period match.
+
+| Table | Purpose |
+|---|---|
+| `company_identity` | Resolver lookup for `ts_code`, name, exchange, list status, and SW identity hints |
+| `api_cache` | TTL'd Tushare endpoint responses |
+| `computed_cache` | Deterministic / LLM computed payload cache keyed by input hash |
+| `factor_value` | Persisted rule-layer factor results used for peer rank and industry scans |
+| `period_factor_decomposition` | Canonical period-level fundamental memory for profitability / growth / cash quality / balance / governance |
+| `pdf_extract_cache` | Analyst-report PDF extraction cache, including key points and text hash |
+| `report_runs` | Research report asset registry with `output_html_path`, `output_pdf_path`, `scope_json` (`analysis_type`, `tier`, `latest_period`, `md_path`) |
+| `report_sections` | Section JSON for each registered Research report asset |
+| `company_event_memory` | LLM-extracted company events from announcements / IRM / reports |
+| `scan_run` | SW L2 peer-scan audit trail |
+
+Primary reuse key for report assets: `ts_code + scope_json.analysis_type + report_type + scope_json.latest_period`. `run_mode` is audit metadata, not a forced-rerun boundary.
 
 ---
 

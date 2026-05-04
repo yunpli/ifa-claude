@@ -1,6 +1,9 @@
 {# Five-dimension radar pentagon — pure SVG, no JS. #}
-<section class="section">
-  <h2 class="section__title">5 维评分</h2>
+<section class="section ifa-section">
+  <header class="ifa-section__head">
+    <span class="ifa-section__num">§02</span>
+    <h2 class="section__title ifa-section__title">5 维评分</h2>
+  </header>
   {% if s.narrative %}
   <div class="narrative narrative--overall">{{ s.narrative }}</div>
   {% endif %}
@@ -15,7 +18,7 @@
     {% set angle_sin = [-1.0, -0.309, 0.809, 0.809, -0.309] %}
     {% set label_pad = 22 %}
 
-    <div style="display: grid; grid-template-columns: 420px 1fr; gap: 24px; align-items: start;">
+    <div class="radar-layout">
       <svg viewBox="0 0 400 380" width="400" height="380" role="img" aria-label="5 维评分雷达图"
            xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, sans-serif" font-size="12">
 

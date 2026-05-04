@@ -203,13 +203,17 @@ def _read_all_cache(engine: Engine, ts_code: str) -> dict[str, list[dict]]:
 
 def _build_series(
     rows: list[dict], value_field: str, name: str, unit: str, *,
-    api_name: str | None = None, last_n: int = 8,
+    api_name: str | None = None, last_n: int = 16,
     period_field: str = "end_date",
 ) -> TimeSeries:
     """Build TimeSeries from list of period rows. Computes YoY against shift(4)."""
     # Sort by period ascending
     valid = [r for r in rows if r.get(period_field) and r.get(value_field) is not None]
     valid.sort(key=lambda r: r[period_field])
+    by_period: dict[str, dict] = {}
+    for r in valid:
+        by_period[str(r[period_field])] = r
+    valid = [by_period[p] for p in sorted(by_period)]
     valid = valid[-last_n:] if last_n else valid
 
     periods = [str(r[period_field]) for r in valid]

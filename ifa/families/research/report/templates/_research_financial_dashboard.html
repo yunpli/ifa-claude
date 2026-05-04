@@ -1,0 +1,108 @@
+<section class="section ifa-section research-financial-dashboard">
+  <header class="ifa-section__head">
+    <span class="ifa-section__num">§03</span>
+    <h2 class="section__title ifa-section__title">财务质量总览</h2>
+  </header>
+  <p class="ifa-section__intro">
+    <strong>{{ s.analysis_type_label }}</strong> · {{ s.lens_intro }}
+    先看核心数字，再看每个维度的短板、支撑项和下一期需要验证的触发点。
+  </p>
+
+  {% if s.key_metrics %}
+  <div class="fd-metrics">
+    {% for m in s.key_metrics %}
+    <div class="fd-metric fd-metric--{{ m.status }}">
+      <div class="fd-metric__label">{{ m.label }}</div>
+      <div class="fd-metric__value">{{ m.value }}</div>
+      <div class="fd-metric__meta">
+        <span class="badge badge--{{ m.status }}">{{ m.status | status_icon }} {{ m.status | status_label_zh }}</span>
+        {% if m.peer and m.peer != '—' %}<span>{{ m.peer }}</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="fd-cards">
+    {% for c in s.cards %}
+    <article class="fd-card fd-card--{{ c.status }}">
+      <div class="fd-card__head">
+        <span class="fd-card__label">{{ c.label }}</span>
+        <span class="badge badge--{{ c.status }}">{{ c.status | status_icon }} {{ c.score | fmt_score }}</span>
+      </div>
+      <p class="fd-card__verdict">{{ c.verdict }}</p>
+      {% if c.evidence %}
+      <ul class="fd-card__evidence">
+        {% for e in c.evidence %}
+        <li>{{ e }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if c.sparkline_svg %}
+      <div class="fd-card__spark">
+        <span>{{ c.sparkline_label }}趋势</span>
+        {{ c.sparkline_svg | safe }}
+        {% if c.sparkline_note %}<small>{{ c.sparkline_note }}</small>{% endif %}
+      </div>
+      {% endif %}
+      <div class="fd-card__watch"><strong>下一观察点</strong>{{ c.next_watch }}</div>
+    </article>
+    {% endfor %}
+  </div>
+
+  {% if s.dimension_charts %}
+  <div class="fd-dimension-compare">
+    <div class="fd-dimension-compare__title">五维历史对比</div>
+    <div class="fd-dimension-compare__grid">
+      {% for d in s.dimension_charts %}
+      <article class="fd-dimension fd-dimension--{{ d.status }}">
+        <div class="fd-dimension__head">
+          <span>{{ d.label }}</span>
+          <strong>{{ d.score | fmt_score }}</strong>
+        </div>
+        <div class="fd-dimension__factor">{{ d.factor }}</div>
+        <div class="fd-dimension__spark">{{ d.sparkline_svg | safe }}</div>
+        {% if d.periods %}<div class="fd-dimension__periods">{{ d.periods }}</div>{% endif %}
+        {% if d.note %}<div class="fd-dimension__note">{{ d.note }}</div>{% endif %}
+      </article>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if s.flags %}
+  <div class="table-scroll">
+  <table class="fd-risk-table">
+    <thead>
+      <tr>
+        <th>维度</th>
+        <th>指标</th>
+        <th>状态</th>
+        <th class="num">数值</th>
+        <th>同业位置</th>
+        <th>解读 / 证据</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in s.flags %}
+      <tr class="fd-risk-table__row fd-risk-table__row--{{ f.status }}">
+        <td>{{ f.family_label }}</td>
+        <td><strong>{{ f.factor }}</strong></td>
+        <td><span class="badge badge--{{ f.status }}">{{ f.status | status_icon }} {{ f.status | status_label_zh }}</span></td>
+        <td class="num">{{ f.value }}</td>
+        <td>{{ f.peer }}</td>
+        <td>{{ f.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+
+  {% if s.data_gaps %}
+  <div class="fd-data-gaps">
+    <strong>数据缺口</strong>
+    <span>{{ s.data_gaps | join(' / ') }}</span>
+  </div>
+  {% endif %}
+</section>

@@ -1,5 +1,8 @@
-<section class="section">
-  <h2 class="section__title">公司概况</h2>
+<section class="section ifa-section">
+  <header class="ifa-section__head">
+    <span class="ifa-section__num">§01</span>
+    <h2 class="section__title ifa-section__title">公司概况</h2>
+  </header>
   <table class="radar-table">
     <tr><th style="width:120px">代码 / 名称</th><td>{{ s.ts_code }} · {{ s.name or '—' }}</td></tr>
     {% if s.sw_l1 or s.sw_l2 %}
