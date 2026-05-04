@@ -268,6 +268,116 @@
       </div>
     </section>
 
+  {% elif s.type == 'sector_flow_gate' %}
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§04</span>
+        <h2 class="ifa-section__title">资金流闸门 — SmartMoney 板块过滤</h2>
+      </header>
+      <p class="ifa-section__intro">
+        TA 选股不在所有股票上盲扫 — <b>先看 SmartMoney 资金流</b>。
+        当前 {{ s.n_sectors_total }} 个 SW L2 板块中 <b>{{ s.n_sectors_excluded }}</b> 个被识别为退潮 (phase/role)，
+        其成员股直接剔除出 TA 扫描范围；剩余板块的资金流强度作为连续乘数 (0.6-1.0) 调整最终综合分。
+      </p>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:18px; margin-top:14px;">
+        <div>
+          <h3 style="font-family:var(--font-serif); font-size:14px; color:var(--up); margin-bottom:8px;">
+            ▲ 净流入前 5 板块
+          </h3>
+          <table class="ifa-panel" style="font-size:12px;">
+            <thead>
+              <tr><th>板块</th><th>角色</th><th>相位</th><th style="text-align:right">净流入</th></tr>
+            </thead>
+            <tbody>
+            {% for s2 in s.top_inflow %}
+            <tr>
+              <td><b>{{ s2.l2_name }}</b></td>
+              <td><span class="ifa-panel__period">{{ s2.role or '-' }}</span></td>
+              <td><span class="ifa-panel__period">{{ s2.phase or '-' }}</span></td>
+              <td class="ifa-panel__value ifa-panel__delta--up">
+                {% if s2.net_amount_yi %}+{{ '%.1f' | format(s2.net_amount_yi) }} 亿{% else %}-{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h3 style="font-family:var(--font-serif); font-size:14px; color:var(--down); margin-bottom:8px;">
+            ▼ 净流出前 5 板块
+          </h3>
+          <table class="ifa-panel" style="font-size:12px;">
+            <thead>
+              <tr><th>板块</th><th>角色</th><th>相位</th><th style="text-align:right">净流出</th></tr>
+            </thead>
+            <tbody>
+            {% for s2 in s.top_outflow %}
+            <tr>
+              <td><b>{{ s2.l2_name }}</b></td>
+              <td><span class="ifa-panel__period">{{ s2.role or '-' }}</span></td>
+              <td><span class="ifa-panel__period">{{ s2.phase or '-' }}</span></td>
+              <td class="ifa-panel__value ifa-panel__delta--down">
+                {% if s2.net_amount_yi %}{{ '%.1f' | format(s2.net_amount_yi) }} 亿{% else %}-{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {% if s.excluded_sectors %}
+      <details style="margin-top:14px;">
+        <summary data-collapse-text="1" style="cursor:pointer; padding:8px 14px; background: var(--down-soft); border:1px solid var(--rule); border-radius:4px; font-size:12.5px; color:var(--down); font-weight:500; user-select:none;">
+          ▸ 展开 {{ s.n_sectors_excluded }} 个被剔除的退潮板块
+        </summary>
+        <table class="ifa-panel" style="margin-top:8px; font-size:12px;">
+          <thead><tr><th>板块名</th><th>角色</th><th>相位</th></tr></thead>
+          <tbody>
+          {% for s2 in s.excluded_sectors %}
+          <tr><td>{{ s2.l2_name }}</td><td>{{ s2.role or '-' }}</td><td>{{ s2.phase or '-' }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </details>
+      {% endif %}
+
+      {% if s.phase_scores %}
+      <h3 style="font-family:var(--font-serif); font-size:14px; margin:18px 0 8px;">
+        相位历史评分（数据反推，非手工常量）
+      </h3>
+      <p class="ifa-section__intro" style="font-size:11.5px;">
+        基于 60 日滚动窗口、各相位实测 T+15 累计收益数据反推。Score 越高 = 该相位历史上后续 15 日表现越好；TA 综合分按此连续加权。
+      </p>
+      <table class="ifa-panel" style="font-size:12px;">
+        <thead>
+          <tr>
+            <th>相位</th>
+            <th style="text-align:right">样本</th>
+            <th style="text-align:right">均 T+15</th>
+            <th style="text-align:right">胜率</th>
+            <th style="text-align:right">分数</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for p in s.phase_scores %}
+        <tr>
+          <td><b>{{ p.phase }}</b></td>
+          <td class="ifa-panel__value">{{ p.n }}</td>
+          <td class="ifa-panel__value
+            {% if p.avg_t15 and p.avg_t15 >= 0 %}ifa-panel__delta--up
+            {% elif p.avg_t15 and p.avg_t15 < 0 %}ifa-panel__delta--down{% endif %}">
+            {% if p.avg_t15 is not none %}{{ '%+.2f' | format(p.avg_t15) }}%{% else %}-{% endif %}
+          </td>
+          <td class="ifa-panel__value">{% if p.win_rate is not none %}{{ '%.0f' | format(p.win_rate) }}%{% else %}-{% endif %}</td>
+          <td class="ifa-panel__value">{% if p.score is not none %}{{ '%.3f' | format(p.score) }}{% else %}-{% endif %}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </section>
+
   {% elif s.type == 'tier_list' %}
     {% set tier_pill = {'A': ('重点 · 高 conviction', 'var(--up)', 'var(--up-soft)'),
                          'B': ('候选 · 中等信心', 'var(--accent)', 'var(--accent-soft)'),

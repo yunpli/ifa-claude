@@ -70,6 +70,14 @@ class SetupContext:
     # Same-day pct_change for L2 peers, indexed by ts_code (excludes self).
     sector_peers_pct_change: dict | None = None
 
+    # M9.7 — SmartMoney sector flow integration
+    # sector_quality ∈ [0, 1] computed from L2 net_amount rank + cycle_phase
+    # (data-derived score) + SmartMoney confidence. Set None when SmartMoney
+    # data missing — ranker falls back to no adjustment.
+    sector_quality: float | None = None
+    sector_role: str | None = None         # 主线/中军/轮动/防守/催化/退潮/未识别
+    sector_cycle_phase: str | None = None  # 冷/点火/确认/扩散/高潮/分歧/退潮
+
     # Chip distribution (from ta.cyq_perf_daily); set when available, else None.
     chip_concentration_pct: float | None = None     # smaller = more concentrated
     chip_winner_rate_pct: float | None = None       # 0-100, % of float in profit

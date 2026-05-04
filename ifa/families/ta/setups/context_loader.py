@@ -26,17 +26,38 @@ log = logging.getLogger(__name__)
 LOOKBACK_DAYS = 95    # need 60 trade days; 95 calendar accommodates weekends + CN holidays
 
 
+def _rank_dict(values: dict) -> dict[str, float]:
+    """Returns key → percentile rank (0..1) within values dict."""
+    if not values:
+        return {}
+    sorted_vals = sorted(values.values())
+    n = len(sorted_vals)
+    out: dict[str, float] = {}
+    for key, v in values.items():
+        lo, hi = 0, n
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if sorted_vals[mid] < v:
+                lo = mid + 1
+            else:
+                hi = mid
+        out[key] = lo / max(n - 1, 1)
+    return out
+
+
 def _tradeable_universe(engine: Engine, on_date: date) -> set[str]:
     """Return ts_codes meeting universe filter: not suspended + min liquidity.
-    Uses params.yaml universe.* thresholds.
+
+    M9.7: also applies sector_flow Layer 1 — excludes stocks whose SW L2
+    sector is in 退潮 cycle_phase or 退潮/未识别 role (governance toggles).
     """
     from ifa.families.ta.params import load_params
     p = load_params().get("universe", {}) or {}
+    sf = load_params().get("sector_flow", {}) or {}
     min_amt_qy = (p.get("min_avg_amount_yi", 0.2) * 1e8) / 1000.0
-    # raw_daily.amount unit = 千元; 0.2 亿 = 20000 千元
     min_coverage = p.get("min_coverage_pct", 90) / 100.0
 
-    sql = text("""
+    sql_liquid = text("""
         WITH window20 AS (
             SELECT ts_code,
                    COUNT(*) AS n_rows,
@@ -56,13 +77,44 @@ def _tradeable_universe(engine: Engine, on_date: date) -> set[str]:
     """)
     from datetime import timedelta as _td
     with engine.connect() as conn:
-        rows = conn.execute(sql, {
+        rows = conn.execute(sql_liquid, {
             "on_date": on_date,
-            "start": on_date - _td(days=30),   # ~20 trade days
+            "start": on_date - _td(days=30),
             "min_amt": min_amt_qy,
             "min_cov": min_coverage,
         }).fetchall()
-    return {r[0] for r in rows}
+    universe = {r[0] for r in rows}
+
+    # Layer 1 — SmartMoney sector flow exclusions
+    excluded_phases = {"退潮"} if sf.get("exclude_retreat_phase", True) else set()
+    excluded_roles = set()
+    if sf.get("exclude_retreat_role", True):
+        excluded_roles.add("退潮")
+    if sf.get("exclude_unidentified_role", False):
+        excluded_roles.add("未识别")
+
+    if excluded_phases or excluded_roles:
+        sql_sector_state = text("""
+            SELECT m.ts_code
+            FROM smartmoney.sw_member_monthly m
+            JOIN smartmoney.sector_state_daily s
+              ON s.sector_code = m.l2_code
+             AND s.sector_source = 'sw_l2'
+             AND s.trade_date = :on_date
+            WHERE m.snapshot_month = date_trunc('month', CAST(:on_date AS date))
+              AND (s.cycle_phase = ANY(:bad_phases) OR s.role = ANY(:bad_roles))
+        """)
+        with engine.connect() as conn:
+            excluded = {r[0] for r in conn.execute(sql_sector_state, {
+                "on_date": on_date,
+                "bad_phases": list(excluded_phases) or [""],
+                "bad_roles": list(excluded_roles) or [""],
+            })}
+        universe -= excluded
+        log.info("sector_flow Layer 1 excluded %d stocks (phases=%s, roles=%s)",
+                 len(excluded), excluded_phases, excluded_roles)
+
+    return universe
 
 
 def build_contexts(
@@ -106,6 +158,15 @@ def build_contexts(
         FROM ta.factor_pro_daily
         WHERE trade_date = :on_date
     """)
+    # M9.7 — SmartMoney sector flow per L2 code
+    sql_sector_flow = text("""
+        SELECT s.sector_code, s.role, s.cycle_phase, s.role_confidence, s.phase_confidence,
+               mf.net_amount
+        FROM smartmoney.sector_state_daily s
+        LEFT JOIN smartmoney.sector_moneyflow_sw_daily mf
+               ON mf.l2_code = s.sector_code AND mf.trade_date = s.trade_date
+        WHERE s.sector_source = 'sw_l2' AND s.trade_date = :on_date
+    """)
     # Chip distribution
     sql_chip = text("""
         SELECT ts_code,
@@ -143,6 +204,42 @@ def build_contexts(
             }
             for r in conn.execute(sql_chip, {"on_date": on_date})
         }
+        sector_flow_raw = {
+            r[0]: {
+                "role": r[1], "cycle_phase": r[2],
+                "role_conf": r[3], "phase_conf": r[4],
+                "net_amount": float(r[5]) if r[5] is not None else None,
+            }
+            for r in conn.execute(sql_sector_flow, {"on_date": on_date})
+        }
+
+    # Build sector_quality per L2 sector — combines net_amount rank,
+    # data-derived phase score, SmartMoney confidence
+    from ifa.families.ta.params import load_params
+    from ifa.families.ta.sector_phase_metrics import load_phase_scores
+    sf_params = load_params().get("sector_flow", {})
+    rank_w = sf_params.get("rank_weight", 0.5)
+    phase_w = sf_params.get("phase_weight", 0.3)
+    conf_w = sf_params.get("confidence_weight", 0.2)
+    phase_scores = load_phase_scores(engine, on_date)   # data-derived
+
+    # net_amount cross-sectional rank within today's L2 universe
+    flow_amts = {l2: rec["net_amount"] for l2, rec in sector_flow_raw.items()
+                 if rec["net_amount"] is not None}
+    flow_rank_dict = _rank_dict(flow_amts) if flow_amts else {}
+
+    _CONF = {"high": 1.0, "medium": 0.6, "low": 0.3}
+    sector_quality_by_l2: dict[str, float] = {}
+    for l2, rec in sector_flow_raw.items():
+        rank_score = flow_rank_dict.get(l2, 0.5)
+        phase_score = phase_scores.get(rec["cycle_phase"], 0.5) if rec["cycle_phase"] else 0.5
+        # Use phase_confidence (not role_confidence) since cycle_phase drives quality
+        conf_score = _CONF.get((rec["phase_conf"] or "").lower(), 0.6)
+        sector_quality_by_l2[l2] = (
+            rank_w * rank_score
+            + phase_w * phase_score
+            + conf_w * conf_score
+        )
 
     # Build per-L2 peer dict for sector_peers_pct_change
     l2_to_members: dict[str, list[str]] = defaultdict(list)
@@ -158,25 +255,6 @@ def build_contexts(
         v = fp.get("volume_ratio_tushare")
         if v is not None:
             vol_ratio_today[ts_code] = v
-
-    def _rank_dict(values: dict[str, float]) -> dict[str, float]:
-        """Returns ts_code → percentile rank (0..1) within values."""
-        if not values:
-            return {}
-        sorted_vals = sorted(values.values())
-        n = len(sorted_vals)
-        out: dict[str, float] = {}
-        for ts_code, v in values.items():
-            # Number of values strictly less than v
-            lo, hi = 0, n
-            while lo < hi:
-                mid = (lo + hi) // 2
-                if sorted_vals[mid] < v:
-                    lo = mid + 1
-                else:
-                    hi = mid
-            out[ts_code] = lo / max(n - 1, 1)   # 0 = lowest, 1 = highest
-        return out
 
     vol_ratio_rank_dict = _rank_dict(vol_ratio_today)
 
@@ -274,6 +352,9 @@ def build_contexts(
             sw_l1_pct_change=l1_pct,
             sw_l2_pct_change=l2_pct,
             sector_peers_pct_change=peers,
+            sector_quality=sector_quality_by_l2.get(l2_code) if l2_code else None,
+            sector_role=sector_flow_raw.get(l2_code, {}).get("role") if l2_code else None,
+            sector_cycle_phase=sector_flow_raw.get(l2_code, {}).get("cycle_phase") if l2_code else None,
             chip_concentration_pct=cp.get("concentration_pct"),
             chip_winner_rate_pct=cp.get("winner_rate_pct"),
         )

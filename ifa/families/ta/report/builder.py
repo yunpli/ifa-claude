@@ -41,6 +41,7 @@ def build_evening_report(engine: Engine, on_date: date,
     index_panel = _section_index_panel(engine, on_date)
     market_state = _section_market_state(engine, on_date)
     methodology = _section_methodology()
+    sector_flow_gate = _section_sector_flow_gate(engine, on_date)
     strategy_spotlight = _section_strategy_spotlight(engine, on_date)
     tier_a = _section_tier(engine, on_date, tier="A", title="§04 重点池 (Tier A)")
     tier_b = _section_tier(engine, on_date, tier="B", title="§05 候选池 (Tier B)")
@@ -66,6 +67,7 @@ def build_evening_report(engine: Engine, on_date: date,
             sections.append({"type": "narrative", "title": "§02-N 体制解读",
                              "body": narrative})
     sections.append(methodology)
+    sections.append(sector_flow_gate)             # §04 — macro filter, before Tier A/B
     sections.extend([tier_a, tier_b, tier_c, strategy_spotlight])
     # NOTE: §14 hypotheses removed — redundant with §04 重点池 (same picks)
     if augmenter is not None:
@@ -560,6 +562,72 @@ def _section_index_panel(engine: Engine, on_date: date) -> dict:
                 "spark_svg": sparkline_svg(history_closes, width=110, height=26) if history_closes else "",
             })
     return {"type": "index_panel", "title": "§02 主要指数收盘", "rows": rows}
+
+
+def _section_sector_flow_gate(engine: Engine, on_date: date) -> dict:
+    """§04 资金流闸门 — show SmartMoney sector context that gates TA universe."""
+    sql = text("""
+        SELECT s.sector_code, s.sector_name, s.role, s.cycle_phase,
+               s.role_confidence, s.phase_confidence,
+               mf.net_amount, mf.stock_count
+        FROM smartmoney.sector_state_daily s
+        LEFT JOIN smartmoney.sector_moneyflow_sw_daily mf
+               ON mf.l2_code = s.sector_code AND mf.trade_date = s.trade_date
+        WHERE s.sector_source = 'sw_l2' AND s.trade_date = :d
+        ORDER BY mf.net_amount DESC NULLS LAST
+    """)
+    sql_phase_scores = text("""
+        SELECT cycle_phase, n_observations, avg_t15_return_pct,
+               win_rate_t15_pct, derived_score
+        FROM ta.sector_phase_metrics_daily
+        WHERE trade_date = (
+            SELECT MAX(trade_date) FROM ta.sector_phase_metrics_daily
+            WHERE trade_date <= :d
+        )
+        ORDER BY derived_score DESC
+    """)
+    with engine.connect() as conn:
+        sectors = conn.execute(sql, {"d": on_date}).fetchall()
+        phase_rows = conn.execute(sql_phase_scores, {"d": on_date}).fetchall()
+
+    # Top 5 inflow + top 5 outflow + 退潮 count
+    sectors_with_flow = [s for s in sectors if s[6] is not None]
+    sectors_with_flow.sort(key=lambda r: float(r[6]), reverse=True)
+    top_inflow = sectors_with_flow[:5]
+    top_outflow = sectors_with_flow[-5:][::-1] if len(sectors_with_flow) >= 5 else []
+
+    # Excluded (退潮 phase or role)
+    excluded = [s for s in sectors if s[2] == "退潮" or s[3] == "退潮"]
+
+    return {
+        "type": "sector_flow_gate",
+        "title": "§04 资金流闸门",
+        "n_sectors_total": len(sectors),
+        "n_sectors_excluded": len(excluded),
+        "top_inflow": [
+            {"l2_code": s[0], "l2_name": s[1], "role": s[2], "phase": s[3],
+             "net_amount_yi": float(s[6]) / 1e4 if s[6] else None,   # 万元 → 亿
+             "stock_count": int(s[7]) if s[7] else None}
+            for s in top_inflow
+        ],
+        "top_outflow": [
+            {"l2_code": s[0], "l2_name": s[1], "role": s[2], "phase": s[3],
+             "net_amount_yi": float(s[6]) / 1e4 if s[6] else None,
+             "stock_count": int(s[7]) if s[7] else None}
+            for s in top_outflow
+        ],
+        "excluded_sectors": [
+            {"l2_name": s[1], "role": s[2], "phase": s[3]}
+            for s in excluded[:15]
+        ],
+        "phase_scores": [
+            {"phase": r[0], "n": int(r[1]) if r[1] else 0,
+             "avg_t15": float(r[2]) if r[2] is not None else None,
+             "win_rate": float(r[3]) if r[3] is not None else None,
+             "score": float(r[4]) if r[4] is not None else None}
+            for r in phase_rows
+        ],
+    }
 
 
 def _section_methodology() -> dict:

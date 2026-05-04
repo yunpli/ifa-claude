@@ -48,9 +48,17 @@ def upsert_candidates(
                 "triggers": list(c.triggers),
                 "governance_status": rc.governance_status,
                 "stock_score": rc.stock_score,
+                "raw_stock_score": rc.raw_stock_score,
+                "sector_factor": rc.sector_factor,
                 "resonance_count": rc.resonance_count,
                 "resonance_families": list(rc.resonance_families),
                 "tier": rc.tier,
+                # M9.7 — entry_close locked at scan time (推荐价 immutable)
+                "entry_close": (c.evidence or {}).get("close")
+                              if isinstance(c.evidence, dict) else None,
+                # SmartMoney sector context for transparency
+                "sector_role": rc.sector_role,
+                "sector_phase": rc.sector_cycle_phase,
             }
             conn.execute(sql_insert, {
                 "trade_date": on_date,

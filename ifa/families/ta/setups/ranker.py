@@ -42,7 +42,11 @@ class RankedCandidate:
     star_rating: int         # 1-5 (based on stock_score)
     in_top_watchlist: bool   # legacy — True if Tier A (重点)
     governance_status: str   # 'active' | 'observation_only' | 'suspended'
-    stock_score: float       # per-stock aggregate (max + family bonus)
+    stock_score: float       # per-stock aggregate (after sector_factor)
+    raw_stock_score: float   # before sector_factor applied — for audit
+    sector_factor: float     # M9.7 multiplier ∈ [quality_min, quality_max]
+    sector_role: str | None  # SmartMoney sector role (主线/中军/...)
+    sector_cycle_phase: str | None
     resonance_count: int     # # of distinct families confirming this stock
     resonance_families: tuple[str, ...]   # e.g. ("T", "V", "S")
     tier: str                # 'A' (重点 top10) | 'B' (候选 next20) | 'C' (观察 next100) | ''
@@ -146,6 +150,26 @@ def rank(
 
         enriched.append((adj_score, c, status, overall_wr))
 
+    # M9.7 — sector_flow Layer 2 multiplier params
+    from ifa.families.ta.params import load_params
+    sf_params = load_params().get("sector_flow", {})
+    quality_min = sf_params.get("quality_weight_min", 0.6)
+    quality_max = sf_params.get("quality_weight_max", 1.0)
+    quality_span = quality_max - quality_min
+
+    # M9.7 — track sector_role/phase/quality per stock from candidate.evidence
+    # (scanner injects these from SetupContext)
+    sector_role_by_stock: dict[str, str | None] = {}
+    sector_phase_by_stock: dict[str, str | None] = {}
+    sector_quality_by_stock: dict[str, float | None] = {}
+    for adj_score, c, status, _wr in enriched:
+        if c.ts_code in sector_role_by_stock:
+            continue
+        ev = c.evidence if isinstance(c.evidence, dict) else {}
+        sector_role_by_stock[c.ts_code] = ev.get("sector_role")
+        sector_phase_by_stock[c.ts_code] = ev.get("sector_cycle_phase")
+        sector_quality_by_stock[c.ts_code] = ev.get("sector_quality")
+
     # Pass 2: per-stock aggregation with **Bayesian resonance** (M9.6):
     # Each family's confirming signal is weighted by:
     #   (a) its own adj_score (continuous strength)
@@ -158,6 +182,7 @@ def rank(
             "rows": [],
             "family_best": {},     # fam → (best_adj_score, winrate_of_that_setup)
             "any_active": False,
+            "sector_quality": sector_quality_by_stock.get(c.ts_code),
         })
         rec["rows"].append((adj_score, c, status))
         fam = _family_of(c.setup_name)
@@ -188,7 +213,18 @@ def rank(
             else:
                 wr_factor = 1.0
             bonus += score_i * base_w * wr_factor
-        rec["stock_score"] = primary_score + bonus
+        raw_stock_score = primary_score + bonus
+        # M9.7 sector_quality multiplier — institutional discipline:
+        # TA signal in poor-flow sector is fundamentally weaker
+        sq = rec.get("sector_quality")
+        if sq is not None:
+            sector_factor = quality_min + quality_span * max(0.0, min(1.0, sq))
+        else:
+            # Cold-start (SmartMoney data missing): neutral midpoint
+            sector_factor = (quality_min + quality_max) / 2.0
+        rec["raw_stock_score"] = raw_stock_score
+        rec["stock_score"] = raw_stock_score * sector_factor
+        rec["sector_factor"] = sector_factor
         rec["resonance_count"] = len(rec["family_best"])
         rec["resonance_families"] = tuple(sorted(rec["family_best"].keys()))
         rec["max_score"] = primary_score
@@ -256,6 +292,10 @@ def rank(
             in_top_watchlist=in_top,
             governance_status=status,
             stock_score=stock_score,
+            raw_stock_score=rec.get("raw_stock_score", stock_score),
+            sector_factor=rec.get("sector_factor", 1.0),
+            sector_role=sector_role_by_stock.get(c.ts_code),
+            sector_cycle_phase=sector_phase_by_stock.get(c.ts_code),
             resonance_count=rec["resonance_count"],
             resonance_families=rec["resonance_families"],
             tier=tier,
