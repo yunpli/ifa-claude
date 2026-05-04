@@ -31,6 +31,10 @@ app.add_typer(ningbo_app, name="ningbo")
 from ifa.cli.research import app as research_app  # noqa: E402
 app.add_typer(research_app, name="research")
 
+# TA family — technical analysis & regime
+from ifa.cli.ta import app as ta_app  # noqa: E402
+app.add_typer(ta_app, name="ta")
+
 
 if __name__ == "__main__":
     app()
