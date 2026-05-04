@@ -524,8 +524,14 @@ uv run alembic current
 17. ✅ Tushare `fina_indicator` 调用脚手架（`ta.fina_indicator_quarterly` + ETL,等回填后 ROE 自动启用）
 
 **P2 调参（用户已要求 P2/P3 互换,即调参在前）**
-- ⏳ 90d-IS / 252d-OOS walk-forward 跑 → 冻结新 v2.3 参数
-- ⏳ Q8.1 setup 相关性去重（用历史命中矩阵)
+- ✅ **所有 28 setup 阈值 YAML 化** — `setups:` 段在 ta_v2.3.yaml,覆盖 ~50 个 gate
+  阈值;每个 setup 通过 `setup_param(name, key, default)` 读取(`setups/_params.py`)
+- ✅ Tushare `fina_indicator` 6 季度回填(45,501 行)→ ROE 4Q 检查激活
+- ✅ Jan-April events + blacklist + candidates 全量回填(78 d × 28 setup)
+- ✅ Position state machine 跑全 65 天(9,452 positions, fill rate 68.5%, 真实 T+15 信息率)
+- ✅ tune 脚本 `scripts/ta_setup_param_tune.py` 50+ axes + greedy 1-axis 搜索
+- ⏳ 跑 60-day backtest baseline + tune iteration → 冻结新 v2.3 参数
+- ⏳ Q8.1 setup 相关性去重(用历史命中矩阵)
 
 **P3 装饰性历史回放**
 - ⏳ 4 月 SmartMoney compute backfill + 报告生成 + TA 报告生成

@@ -1,0 +1,31 @@
+
+Walk-forward backtest 2026-01-15 → 2026-04-14
+  days=57  candidates=0  positions=0  setups=25
+
+Setups by combined T+15 objective:
+Setup                          n  wr_t15  avg_t15   wr_t5  wr_t10  combined
+P1_MA20_PULLBACK             108   33.3%   +2.77%   21.3%   29.6%    0.5888
+E1_EVENT_CATALYST            121   28.9%   +1.39%   20.7%   24.0%    0.2000
+S3_LAGGARD_CATCHUP           636   29.4%   +0.51%   23.1%   30.2%    0.0798
+R3_HAMMER                      2    0.0%   -8.22%    0.0%    0.0%   -0.0000
+V2_QUIET_COIL                  2    0.0%   -0.74%    0.0%    0.0%   -0.0000
+Z2_OVERSOLD_REBOUND            2    0.0%   -3.57%    0.0%    0.0%   -0.0000
+F3_RECTANGLE                 309   19.7%   -0.16%   16.5%   20.1%   -0.0697
+P3_TIGHT_CONSOLIDATION        24   12.5%   -1.46%    8.3%   12.5%   -0.1422
+R2_HS_BOTTOM                 636   22.5%   -0.46%   21.7%   25.3%   -0.1564
+O2_LHB_INST_BUY              150   29.3%   -0.39%   29.3%   34.0%   -0.2148
+T2_PULLBACK_RESUME          3981   23.3%   -1.31%   23.8%   26.0%   -0.2962
+O1_INST_PERSISTENT_BUY      1015   24.5%   -1.24%   29.3%   28.9%   -0.3136
+C1_CHIP_CONCENTRATED        3164   22.4%   -1.48%   23.4%   24.9%   -0.3211
+S1_SECTOR_RESONANCE         2560   24.8%   -1.39%   23.3%   27.3%   -0.3252
+P2_GAP_FILL                  496   27.8%   -1.15%   25.0%   30.6%   -0.3423
+R1_DOUBLE_BOTTOM            2018   22.9%   -1.72%   25.9%   25.4%   -0.3594
+F1_FLAG                      118   19.5%   -1.81%   15.2%   18.6%   -0.3699
+O3_LIMIT_SEAL_STRENGTH       178   29.8%   -1.14%   26.4%   29.8%   -0.3828
+T1_BREAKOUT                 3184   21.5%   -1.94%   24.5%   24.1%   -0.3924
+S2_LEADER_FOLLOWTHROUGH     1357   25.4%   -1.68%   24.9%   28.5%   -0.4086
+T3_ACCELERATION             2359   21.7%   -2.45%   25.5%   25.5%   -0.4937
+Z1_ZSCORE_EXTREME            574   21.9%   -2.69%   24.2%   22.8%   -0.5799
+V1_VOL_PRICE_UP             1999   21.0%   -3.01%   23.0%   24.8%   -0.5890
+C2_CHIP_LOOSE                312   18.6%   -3.77%   28.9%   25.0%   -0.7009
+F2_TRIANGLE                  100   24.0%   -4.31%   18.0%   26.0%   -0.8543
