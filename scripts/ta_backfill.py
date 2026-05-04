@@ -76,7 +76,7 @@ def run_backfill(start: date, end: date, *, top_n: int = 20,
             if latest:
                 for row in conn.execute(
                     text("""SELECT setup_name, decay_score, suitable_regimes,
-                                   winrate_60d, regime_winrates
+                                   winrate_60d, regime_winrates, combined_score_60d
                             FROM ta.setup_metrics_daily WHERE trade_date = :d"""),
                     {"d": latest},
                 ):
@@ -85,6 +85,7 @@ def run_backfill(start: date, end: date, *, top_n: int = 20,
                         "suitable_regimes": list(row[2]) if row[2] else [],
                         "winrate_60d": float(row[3]) if row[3] is not None else None,
                         "regime_winrates": (row[4] if isinstance(row[4], dict) else {}),
+                        "combined_score_60d": float(row[5]) if row[5] is not None else None,
                     }
 
         ranked = rank_candidates(candidates, top_n=top_n,

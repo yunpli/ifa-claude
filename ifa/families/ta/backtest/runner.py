@@ -122,7 +122,7 @@ def _scan_and_persist_one_day(engine: Engine, on_date: date) -> int:
         if latest:
             for r in conn.execute(text("""
                 SELECT setup_name, decay_score, suitable_regimes,
-                       winrate_60d, regime_winrates
+                       winrate_60d, regime_winrates, combined_score_60d
                 FROM ta.setup_metrics_daily WHERE trade_date = :d
             """), {"d": latest}):
                 setup_metrics[r[0]] = {
@@ -130,6 +130,7 @@ def _scan_and_persist_one_day(engine: Engine, on_date: date) -> int:
                     "suitable_regimes": list(r[2]) if r[2] else [],
                     "winrate_60d": float(r[3]) if r[3] else None,
                     "regime_winrates": r[4] if isinstance(r[4], dict) else {},
+                    "combined_score_60d": float(r[5]) if r[5] is not None else None,
                 }
     ctxs = build_contexts(engine, on_date, regime=regime)
     if not ctxs:

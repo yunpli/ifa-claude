@@ -109,7 +109,7 @@ def scan_candidates(
         if latest:
             for row in _conn.execute(
                 _text("""SELECT setup_name, decay_score, suitable_regimes,
-                                winrate_60d, regime_winrates
+                                winrate_60d, regime_winrates, combined_score_60d
                          FROM ta.setup_metrics_daily WHERE trade_date = :d"""),
                 {"d": latest},
             ):
@@ -118,6 +118,7 @@ def scan_candidates(
                     "suitable_regimes": list(row[2]) if row[2] else [],
                     "winrate_60d": float(row[3]) if row[3] is not None else None,
                     "regime_winrates": (row[4] if isinstance(row[4], dict) else {}),
+                    "combined_score_60d": float(row[5]) if row[5] is not None else None,
                 }
     if setup_metrics:
         console.print(f"  metrics from {latest}: {len(setup_metrics)} setups")
@@ -306,6 +307,43 @@ def walk_forward_cmd(
             f"{m['wr_t15']:>6.1f}% {m['avg_ret_t15']:>+7.2f}% "
             f"{m['wr_t5']:>6.1f}% {m['wr_t10']:>6.1f}% "
             f"{m['combined']:>9.4f}"
+        )
+
+
+@app.command("tier-perf", help="M10 P2 — Tier A/B portfolio performance over a window.")
+def tier_perf_cmd(
+    start: str = typer.Option(..., "--start", help="YYYY-MM-DD"),
+    end: str = typer.Option(..., "--end", help="YYYY-MM-DD"),
+) -> None:
+    """Aggregate Tier A and Tier B equal-weight portfolio T+5/T+10/T+15
+    returns from position_events_daily; print combined-objective summary."""
+    from ifa.families.ta.backtest import analyze_tier_perf
+    engine = get_engine()
+    s = date.fromisoformat(start); e = date.fromisoformat(end)
+    console.print(f"\n[bold]Tier portfolio performance {s} → {e}[/]")
+    console.print(f"\n[bold cyan]State-machine outcomes (real fill→exit, T+15 horizon):[/]")
+    console.print(f"{'Tier':<5} {'picks':>6} {'fill%':>6} "
+                  f"{'target_hit':>11} {'stop_hit':>9} {'time_exit':>10} "
+                  f"{'success%':>9} {'realized':>9}")
+    for tier in ("A", "B"):
+        perf = analyze_tier_perf(engine, start=s, end=e, tier=tier)
+        console.print(
+            f"{tier:<5} {perf.n_positions:>6} {perf.fill_rate*100:>5.1f}% "
+            f"{perf.n_target_hit:>11} {perf.n_stop_hit:>9} {perf.n_time_exit:>10} "
+            f"{perf.success_rate*100:>8.1f}% "
+            f"{perf.avg_realized_return:>+8.2f}%"
+        )
+    console.print(f"\n[bold cyan]Close-based forward returns (no exit, all filled positions):[/]")
+    console.print(f"{'Tier':<5} {'avg_t5':>7} {'avg_t10':>8} {'avg_t15':>8} "
+                  f"{'wr_t5':>6} {'wr_t10':>7} {'wr_t15':>7} "
+                  f"{'avgDD':>6} {'combined':>9}")
+    for tier in ("A", "B"):
+        perf = analyze_tier_perf(engine, start=s, end=e, tier=tier)
+        console.print(
+            f"{tier:<5} "
+            f"{perf.avg_t5:>+6.2f}% {perf.avg_t10:>+7.2f}% {perf.avg_t15:>+7.2f}% "
+            f"{perf.wr_t5:>5.1f}% {perf.wr_t10:>6.1f}% {perf.wr_t15:>6.1f}% "
+            f"{perf.avg_max_dd:>+5.1f}% {perf.combined:>9.4f}"
         )
 
 
