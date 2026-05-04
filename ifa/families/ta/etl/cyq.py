@@ -100,8 +100,9 @@ def _store_perf(engine: Engine, ts_code: str, trade_date: str) -> bool:
         return False
 
     r = df.iloc[0]
-    raw_wr = r.get("winner_rate")
-    winner_rate_pct = _safe(raw_wr) * 100 if _safe(raw_wr) is not None else None
+    # Tushare cyq_perf returns winner_rate as 0-100 percentage already (this
+    # API version); do not multiply.
+    winner_rate_pct = _safe(r.get("winner_rate"))
 
     with engine.begin() as conn:
         conn.execute(
@@ -150,3 +151,59 @@ def fetch_cyq_batch(engine: Engine, ts_codes: list[str], trade_date: date | str)
     for ts_code in ts_codes:
         results[ts_code] = fetch_and_store_cyq(engine, ts_code, td)
     return results
+
+
+def fetch_cyq_perf_full_market(engine: Engine, trade_date: date | str) -> int:
+    """Fetch cyq_perf for the entire market in a single Tushare call.
+
+    Tushare's `cyq_perf` accepts `trade_date` only (no ts_code) and returns
+    every covered stock for that day. Much faster than per-stock calls;
+    use this for backfill / nightly ETL.
+    """
+    td = trade_date if isinstance(trade_date, str) else trade_date.strftime("%Y%m%d")
+    df = _get_pro().cyq_perf(trade_date=td)
+    if df is None or df.empty:
+        log.info("cyq_perf: no data for %s", td)
+        return 0
+
+    rows = []
+    for _, r in df.iterrows():
+        wr_raw = _safe(r.get("winner_rate"))
+        # Tushare cyq_perf returns winner_rate already as 0-100 percentage in
+        # this API version; do not multiply.
+        rows.append({
+            "td": td,
+            "tc": r["ts_code"],
+            "his_low": _safe(r.get("his_low")),
+            "his_high": _safe(r.get("his_high")),
+            "c5": _safe(r.get("cost_5pct")),
+            "c15": _safe(r.get("cost_15pct")),
+            "c50": _safe(r.get("cost_50pct")),
+            "c85": _safe(r.get("cost_85pct")),
+            "c95": _safe(r.get("cost_95pct")),
+            "wa": _safe(r.get("weight_avg")),
+            "wr": wr_raw,
+        })
+
+    sql = text("""
+        INSERT INTO ta.cyq_perf_daily
+            (trade_date, ts_code, his_low, his_high,
+             cost_5pct, cost_15pct, cost_50pct, cost_85pct, cost_95pct,
+             weight_avg, winner_rate_pct)
+        VALUES
+            (:td, :tc, :his_low, :his_high,
+             :c5, :c15, :c50, :c85, :c95, :wa, :wr)
+        ON CONFLICT (trade_date, ts_code) DO UPDATE SET
+            his_low = EXCLUDED.his_low,
+            his_high = EXCLUDED.his_high,
+            cost_5pct = EXCLUDED.cost_5pct,
+            cost_15pct = EXCLUDED.cost_15pct,
+            cost_50pct = EXCLUDED.cost_50pct,
+            cost_85pct = EXCLUDED.cost_85pct,
+            cost_95pct = EXCLUDED.cost_95pct,
+            weight_avg = EXCLUDED.weight_avg,
+            winner_rate_pct = EXCLUDED.winner_rate_pct
+    """)
+    with engine.begin() as conn:
+        conn.execute(sql, rows)
+    return len(rows)

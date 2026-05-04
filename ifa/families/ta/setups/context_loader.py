@@ -56,6 +56,23 @@ def build_contexts(
         FROM smartmoney.sw_member_monthly
         WHERE snapshot_month = date_trunc('month', CAST(:on_date AS date))
     """)
+    # MACD/RSI/turnover_rate/volume_ratio (already computed by Tushare)
+    sql_factor_pro = text("""
+        SELECT ts_code, macd_qfq, macd_dea_qfq, macd_dif_qfq,
+               rsi_qfq_6, turnover_rate_pct, volume_ratio
+        FROM ta.factor_pro_daily
+        WHERE trade_date = :on_date
+    """)
+    # Chip distribution
+    sql_chip = text("""
+        SELECT ts_code,
+               CASE WHEN weight_avg > 0
+                    THEN (cost_85pct - cost_15pct) / weight_avg * 100
+               END AS concentration_pct,
+               winner_rate_pct
+        FROM ta.cyq_perf_daily
+        WHERE trade_date = :on_date
+    """)
 
     by_stock: dict[str, list] = defaultdict(list)
     with engine.connect() as conn:
@@ -65,6 +82,24 @@ def build_contexts(
                       for r in conn.execute(sql_sector_pct, {"on_date": on_date})}
         members = {r[0]: (r[1], r[2])
                    for r in conn.execute(sql_member, {"on_date": on_date})}
+        factor_pro = {
+            r[0]: {
+                "macd_qfq": float(r[1]) if r[1] is not None else None,
+                "macd_dea_qfq": float(r[2]) if r[2] is not None else None,
+                "macd_dif_qfq": float(r[3]) if r[3] is not None else None,
+                "rsi_qfq_6": float(r[4]) if r[4] is not None else None,
+                "turnover_rate_pct": float(r[5]) if r[5] is not None else None,
+                "volume_ratio_tushare": float(r[6]) if r[6] is not None else None,
+            }
+            for r in conn.execute(sql_factor_pro, {"on_date": on_date})
+        }
+        chip = {
+            r[0]: {
+                "concentration_pct": float(r[1]) if r[1] is not None else None,
+                "winner_rate_pct": float(r[2]) if r[2] is not None else None,
+            }
+            for r in conn.execute(sql_chip, {"on_date": on_date})
+        }
 
     # Build per-L2 peer dict for sector_peers_pct_change
     l2_to_members: dict[str, list[str]] = defaultdict(list)
@@ -117,6 +152,11 @@ def build_contexts(
             if not peers:
                 peers = None
 
+        fp = factor_pro.get(ts_code, {})
+        cp = chip.get(ts_code, {})
+        # Prefer Tushare's volume_ratio when present; fall back to our own.
+        vol_ratio_final = fp.get("volume_ratio_tushare") or vol_ratio
+
         contexts[ts_code] = SetupContext(
             ts_code=ts_code,
             trade_date=on_date,
@@ -129,13 +169,20 @@ def build_contexts(
             ma_qfq_10=ma10,
             ma_qfq_20=ma20,
             ma_qfq_60=ma60,
-            volume_ratio=vol_ratio,
+            macd_qfq=fp.get("macd_qfq"),
+            macd_dea_qfq=fp.get("macd_dea_qfq"),
+            macd_dif_qfq=fp.get("macd_dif_qfq"),
+            rsi_qfq_6=fp.get("rsi_qfq_6"),
+            turnover_rate_pct=fp.get("turnover_rate_pct"),
+            volume_ratio=vol_ratio_final,
             regime=regime,
             sw_l1_code=l1_code,
             sw_l2_code=l2_code,
             sw_l1_pct_change=l1_pct,
             sw_l2_pct_change=l2_pct,
             sector_peers_pct_change=peers,
+            chip_concentration_pct=cp.get("concentration_pct"),
+            chip_winner_rate_pct=cp.get("winner_rate_pct"),
         )
 
     log.info("built %d setup contexts for %s", len(contexts), on_date)
