@@ -1,8 +1,11 @@
 # TA Strategy Deep Dive — 技术策略晚盘报告家族
 
-> **状态**：V2.2 设计稿（未实现）
+> **状态**：V2.2 已实现 + 持续优化中
 > **定位**：iFA 第一个**自上而下、跨家族汇聚**型策略产品 — 不是新策略，而是**策略元层**
 > **关键差异**：不替代 Smart Money、不放大 Ningbo、不黑盒 AI 选股，是**纪律化的次日交易准备文档**
+>
+> **打分原则**：所有 19 个策略的内部加分均为 **连续 strength function**（非 boolean）；
+> 跨族共振 bonus 按"次族强度 × 递减权重"累计。详见 [`scoring-principles.md`](scoring-principles.md)。
 
 ---
 

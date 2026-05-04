@@ -2,6 +2,10 @@
 
 > **状态**：V2.1.2+ — 已迁移到 SW L2 主路径，需要 recompute + retrain 才能用
 > **核心价值**：揭示当日主力（超大单+大单）资金流向、龙头股、ML 预测信号
+>
+> **打分原则**：`factors/liquidity.py` 的 attack/retreat/defense 评分已切到
+> **连续 strength function**（2026-05-04, commit `ec3df2d`）；factors/flow/role/cycle
+> 原本就是 rank-based × 权重的连续设计。详见 [`scoring-principles.md`](scoring-principles.md)。
 
 ---
 
