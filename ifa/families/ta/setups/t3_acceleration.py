@@ -15,6 +15,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def T3_ACCELERATION(ctx: SetupContext) -> Candidate | None:
@@ -34,8 +35,9 @@ def T3_ACCELERATION(ctx: SetupContext) -> Candidate | None:
     if ctx.macd_qfq <= 0:
         return None
 
+    ret_5d_min = setup_param("T3_ACCELERATION", "ret_5d_min", 0.05)
     ret_5d = ctx.close_today / ctx.closes[-6] - 1.0
-    if ret_5d < 0.05:
+    if ret_5d < ret_5d_min:
         return None
 
     triggers = ["full_ma_stack", "macd_golden", "macd_positive", "5d_ret>=5%"]

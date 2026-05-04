@@ -18,22 +18,26 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def R1_DOUBLE_BOTTOM(ctx: SetupContext) -> Candidate | None:
     if (ctx.close_today is None or len(ctx.lows) < 30 or len(ctx.highs) < 30):
         return None
 
+    bottom_diff_max = setup_param("R1_DOUBLE_BOTTOM", "bottom_diff_max", 0.03)
+    bottom_to_peak_min = setup_param("R1_DOUBLE_BOTTOM", "bottom_to_peak_min", 0.05)
+    bottom_separation_min = setup_param("R1_DOUBLE_BOTTOM", "bottom_separation_min", 5)
+
     window_lows = list(ctx.lows[-30:-1])
     if not window_lows:
         return None
 
-    # Find the lowest low and the second-lowest at least 5 days away
     sorted_idx = sorted(range(len(window_lows)), key=lambda i: window_lows[i])
     low1_idx = sorted_idx[0]
     low2_idx = None
     for j in sorted_idx[1:]:
-        if abs(j - low1_idx) >= 5:
+        if abs(j - low1_idx) >= bottom_separation_min:
             low2_idx = j
             break
     if low2_idx is None:
@@ -41,7 +45,7 @@ def R1_DOUBLE_BOTTOM(ctx: SetupContext) -> Candidate | None:
 
     low1 = window_lows[low1_idx]
     low2 = window_lows[low2_idx]
-    if abs(low1 - low2) / max(low1, 1e-9) > 0.03:
+    if abs(low1 - low2) / max(low1, 1e-9) > bottom_diff_max:
         return None
 
     peak_start = min(low1_idx, low2_idx)
@@ -49,7 +53,7 @@ def R1_DOUBLE_BOTTOM(ctx: SetupContext) -> Candidate | None:
     if peak_end <= peak_start:
         return None
     peak = max(ctx.highs[-30:-1][peak_start:peak_end + 1])
-    if peak / min(low1, low2) - 1 < 0.05:
+    if peak / min(low1, low2) - 1 < bottom_to_peak_min:
         return None
 
     if ctx.close_today <= peak:
@@ -58,15 +62,13 @@ def R1_DOUBLE_BOTTOM(ctx: SetupContext) -> Candidate | None:
     triggers = ["double_bottom_pattern", "neckline_reclaim"]
     score = 0.5
 
-    # Continuous: 颈线突破力度 close/peak ratio. 1.0→0, 1.04+→full
     neckline_strength = max(0.0, min(1.0, (ctx.close_today / peak - 1.0) / 0.04))
     score += 0.10 * neckline_strength
     if neckline_strength >= 0.3:
         triggers.append("decisive_neckline_break")
 
-    # Continuous: 双底相似度 — abs diff/low1, 0%→1.0, 3%+→0
     low_diff_pct = abs(low1 - low2) / max(low1, 1e-9)
-    similarity = max(0.0, min(1.0, (0.03 - low_diff_pct) / 0.03))
+    similarity = max(0.0, min(1.0, (bottom_diff_max - low_diff_pct) / max(bottom_diff_max, 1e-6)))
     score += 0.10 * similarity
     if similarity >= 0.5:
         triggers.append("symmetric_bottoms")

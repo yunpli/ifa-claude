@@ -16,6 +16,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def F1_FLAG(ctx: SetupContext) -> Candidate | None:
@@ -25,19 +26,24 @@ def F1_FLAG(ctx: SetupContext) -> Candidate | None:
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
 
+    pole_min = setup_param("F1_FLAG", "pole_min", 0.08)
+    flag_range_max = setup_param("F1_FLAG", "flag_range_max", 0.09)
+    drift_min = setup_param("F1_FLAG", "flag_drift_min", -0.08)
+    drift_max = setup_param("F1_FLAG", "flag_drift_max", 0.03)
+
     pole = ctx.closes[-11] / ctx.closes[-21] - 1.0
-    if pole < 0.08:
+    if pole < pole_min:
         return None
 
     flag_window = list(ctx.closes[-10:])
     flag_high = max(flag_window)
     flag_low = min(flag_window)
     flag_range_pct = (flag_high - flag_low) / flag_high if flag_high > 0 else 1.0
-    if flag_range_pct > 0.09:
+    if flag_range_pct > flag_range_max:
         return None
 
     drift = ctx.closes[-1] / ctx.closes[-10] - 1.0
-    if drift < -0.08 or drift > 0.03:
+    if drift < drift_min or drift > drift_max:
         return None
 
     p70 = sorted(flag_window)[int(len(flag_window) * 0.7)]

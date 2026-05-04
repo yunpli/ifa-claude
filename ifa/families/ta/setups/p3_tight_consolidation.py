@@ -15,6 +15,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def P3_TIGHT_CONSOLIDATION(ctx: SetupContext) -> Candidate | None:
@@ -24,14 +25,18 @@ def P3_TIGHT_CONSOLIDATION(ctx: SetupContext) -> Candidate | None:
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
 
+    prior_gain_min = setup_param("P3_TIGHT_CONSOLIDATION", "prior_gain_min", 0.10)
+    box_range_max = setup_param("P3_TIGHT_CONSOLIDATION", "box_range_max", 0.05)
+    drying_vr_max = setup_param("P3_TIGHT_CONSOLIDATION", "drying_volume_ratio_max", 0.8)
+
     prior_gain = ctx.closes[-1] / ctx.closes[-21] - 1.0
-    if prior_gain < 0.10:
+    if prior_gain < prior_gain_min:
         return None
 
     box_high = max(ctx.highs[-5:])
     box_low = min(ctx.lows[-5:])
     box_range_pct = (box_high - box_low) / box_high if box_high > 0 else 1.0
-    if box_range_pct > 0.05:
+    if box_range_pct > box_range_max:
         return None
 
     if ctx.close_today < min(ctx.closes[-5:]):
@@ -40,15 +45,13 @@ def P3_TIGHT_CONSOLIDATION(ctx: SetupContext) -> Candidate | None:
     triggers = ["prior_20d_gain>=10%", "tight_5d_box<=5%", "uptrend_stack"]
     score = 0.5
 
-    # Continuous: 箱体紧密度 — 5%→0, 1%→full
-    tightness = max(0.0, min(1.0, (0.05 - box_range_pct) / 0.04))
+    tightness = max(0.0, min(1.0, (box_range_max - box_range_pct) / max(box_range_max - 0.01, 1e-6)))
     score += 0.20 * tightness
     if tightness >= 0.5:
         triggers.append("very_tight_box")
 
-    # Continuous: 缩量程度 — 1.0×→0, 0.4×→full
     if ctx.volume_ratio is not None:
-        drying_strength = max(0.0, min(1.0, (1.0 - ctx.volume_ratio) / 0.6))
+        drying_strength = max(0.0, min(1.0, (drying_vr_max - ctx.volume_ratio) / max(drying_vr_max - 0.2, 1e-6)))
         score += 0.10 * drying_strength
         if drying_strength >= 0.3:
             triggers.append("volume_drying")

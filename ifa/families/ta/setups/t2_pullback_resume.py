@@ -15,6 +15,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def T2_PULLBACK_RESUME(ctx: SetupContext) -> Candidate | None:
@@ -26,8 +27,12 @@ def T2_PULLBACK_RESUME(ctx: SetupContext) -> Candidate | None:
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
 
+    touch_max_x = setup_param("T2_PULLBACK_RESUME", "ma20_touch_max_x", 1.02)
+    rsi_lower = setup_param("T2_PULLBACK_RESUME", "rsi_lower", 30)
+    rsi_upper = setup_param("T2_PULLBACK_RESUME", "rsi_upper", 60)
+
     recent_low = min(ctx.lows[-5:])
-    if recent_low > 1.02 * ctx.ma_qfq_20:
+    if recent_low > touch_max_x * ctx.ma_qfq_20:
         return None
     if ctx.close_today <= ctx.ma_qfq_5:
         return None
@@ -37,16 +42,16 @@ def T2_PULLBACK_RESUME(ctx: SetupContext) -> Candidate | None:
     triggers = ["uptrend_stack", "touched_ma20", "back_above_ma5"]
     score = 0.5
 
-    # Continuous: how deeply touched MA20. ratio recent_low/ma20:
-    # 1.02 → 0 (just near), 1.0 → 0.5, 0.98 → 1.0 (decisive break-and-recover)
-    touch_strength = max(0.0, min(1.0, (1.02 - recent_low / ctx.ma_qfq_20) / 0.04))
+    touch_strength = max(0.0, min(1.0,
+        (touch_max_x - recent_low / ctx.ma_qfq_20) / max(touch_max_x - 0.98, 1e-6)))
     score += 0.20 * touch_strength
     if touch_strength >= 0.5:
         triggers.append("actual_ma20_touch")
 
-    # Continuous: RSI 越接近 45 越好（健康回踩区中点）, 偏离两端递减
     if ctx.rsi_qfq_6 is not None:
-        rsi_strength = max(0.0, min(1.0, 1 - abs(ctx.rsi_qfq_6 - 45) / 15))
+        rsi_mid = (rsi_lower + rsi_upper) / 2
+        rsi_strength = max(0.0, min(1.0,
+            1 - abs(ctx.rsi_qfq_6 - rsi_mid) / max((rsi_upper - rsi_lower) / 2, 1)))
         score += 0.10 * rsi_strength
         if rsi_strength >= 0.5:
             triggers.append("rsi_balanced")

@@ -16,6 +16,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def F3_RECTANGLE(ctx: SetupContext) -> Candidate | None:
@@ -25,12 +26,14 @@ def F3_RECTANGLE(ctx: SetupContext) -> Candidate | None:
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
 
+    box_range_max = setup_param("F3_RECTANGLE", "box_range_max", 0.08)
+
     box_high = max(ctx.highs[-15:-1])
     box_low = min(ctx.lows[-15:-1])
     if box_high <= 0:
         return None
     box_range_pct = (box_high - box_low) / box_high
-    if box_range_pct > 0.08:
+    if box_range_pct > box_range_max:
         return None
 
     if ctx.close_today <= box_high:
@@ -39,8 +42,7 @@ def F3_RECTANGLE(ctx: SetupContext) -> Candidate | None:
     triggers = ["uptrend_stack", "rectangle_box", "upside_breakout"]
     score = 0.5
 
-    # Continuous: 箱体紧密度 — 8%→0, 2%→full
-    tightness = max(0.0, min(1.0, (0.08 - box_range_pct) / 0.06))
+    tightness = max(0.0, min(1.0, (box_range_max - box_range_pct) / max(box_range_max - 0.02, 1e-6)))
     score += 0.20 * tightness
     if tightness >= 0.4:
         triggers.append("very_tight_box")

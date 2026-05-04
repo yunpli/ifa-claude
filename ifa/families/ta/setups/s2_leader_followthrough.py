@@ -16,6 +16,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def S2_LEADER_FOLLOWTHROUGH(ctx: SetupContext) -> Candidate | None:
@@ -27,11 +28,14 @@ def S2_LEADER_FOLLOWTHROUGH(ctx: SetupContext) -> Candidate | None:
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
 
-    if ctx.sw_l2_pct_change < 2.0:
+    l2_min = setup_param("S2_LEADER_FOLLOWTHROUGH", "l2_pct_min", 2.0)
+    outperform_pp = setup_param("S2_LEADER_FOLLOWTHROUGH", "outperform_l2_min_pp", 2.0)
+
+    if ctx.sw_l2_pct_change < l2_min:
         return None
 
     stock_ret = (ctx.close_today / ctx.closes[-2] - 1.0) * 100
-    if stock_ret < ctx.sw_l2_pct_change + 2.0:
+    if stock_ret < ctx.sw_l2_pct_change + outperform_pp:
         return None
 
     peers = sorted(ctx.sector_peers_pct_change.values(), reverse=True)

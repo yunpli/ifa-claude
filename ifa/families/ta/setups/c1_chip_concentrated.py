@@ -15,6 +15,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def C1_CHIP_CONCENTRATED(ctx: SetupContext) -> Candidate | None:
@@ -23,7 +24,10 @@ def C1_CHIP_CONCENTRATED(ctx: SetupContext) -> Candidate | None:
         return None
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
-    if ctx.chip_concentration_pct > 15.0:
+
+    conc_max = setup_param("C1_CHIP_CONCENTRATED", "concentration_pct_max", 15.0)
+
+    if ctx.chip_concentration_pct > conc_max:
         return None
     if ctx.close_today < ctx.ma_qfq_20:
         return None
@@ -31,8 +35,7 @@ def C1_CHIP_CONCENTRATED(ctx: SetupContext) -> Candidate | None:
     triggers = ["uptrend_stack", "chip_concentrated<=15%", "above_ma20"]
     score = 0.5
 
-    # Continuous: 集中度 — 15%→0, 5%→full（越窄越好）
-    concentration_strength = max(0.0, min(1.0, (15.0 - ctx.chip_concentration_pct) / 10.0))
+    concentration_strength = max(0.0, min(1.0, (conc_max - ctx.chip_concentration_pct) / max(conc_max - 5.0, 1e-6)))
     score += 0.20 * concentration_strength
     if concentration_strength >= 0.5:
         triggers.append("very_concentrated")

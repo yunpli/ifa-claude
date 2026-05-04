@@ -24,6 +24,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def R3_HAMMER(ctx: SetupContext) -> Candidate | None:
@@ -31,8 +32,12 @@ def R3_HAMMER(ctx: SetupContext) -> Candidate | None:
             or not ctx.highs or not ctx.lows):
         return None
 
+    body_pct_max = setup_param("R3_HAMMER", "body_pct_max", 0.35)
+    shadow_to_body_min = setup_param("R3_HAMMER", "shadow_to_body_min", 2.0)
+    downtrend_max = setup_param("R3_HAMMER", "downtrend_max", -0.08)
+
     ret_20d = ctx.close_today / ctx.closes[-21] - 1.0
-    if ret_20d > -0.08:
+    if ret_20d > downtrend_max:
         return None
 
     today_high = ctx.highs[-1]
@@ -40,15 +45,15 @@ def R3_HAMMER(ctx: SetupContext) -> Candidate | None:
     if today_high <= today_low:
         return None
 
-    open_proxy = ctx.closes[-2]    # yesterday's close ≈ today's open
+    open_proxy = ctx.closes[-2]
     body = abs(ctx.close_today - open_proxy)
     bar_range = today_high - today_low
-    if body / bar_range > 0.35:
+    if body / bar_range > body_pct_max:
         return None
 
     body_low = min(ctx.close_today, open_proxy)
     lower_shadow = body_low - today_low
-    if lower_shadow < 2 * body:
+    if lower_shadow < shadow_to_body_min * body:
         return None
     if ctx.close_today < open_proxy:
         return None

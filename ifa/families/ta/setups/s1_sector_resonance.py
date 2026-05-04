@@ -15,6 +15,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def S1_SECTOR_RESONANCE(ctx: SetupContext) -> Candidate | None:
@@ -25,11 +26,15 @@ def S1_SECTOR_RESONANCE(ctx: SetupContext) -> Candidate | None:
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
 
-    if ctx.sw_l1_pct_change < 1.0 or ctx.sw_l2_pct_change < 1.5:
+    l1_min = setup_param("S1_SECTOR_RESONANCE", "l1_pct_min", 1.0)
+    l2_min = setup_param("S1_SECTOR_RESONANCE", "l2_pct_min", 1.5)
+    stock_min = setup_param("S1_SECTOR_RESONANCE", "stock_ret_min_pct", 2.0)
+
+    if ctx.sw_l1_pct_change < l1_min or ctx.sw_l2_pct_change < l2_min:
         return None
 
     stock_ret = (ctx.close_today / ctx.closes[-2] - 1.0) * 100
-    if stock_ret < 2.0:
+    if stock_ret < stock_min:
         return None
 
     triggers = ["uptrend_stack", "L1>=1%", "L2>=1.5%", "stock_ret>=2%"]

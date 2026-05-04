@@ -13,6 +13,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def O1_INST_PERSISTENT_BUY(ctx: SetupContext) -> Candidate | None:
@@ -20,9 +21,13 @@ def O1_INST_PERSISTENT_BUY(ctx: SetupContext) -> Candidate | None:
         return None
     if ctx.ma_qfq_20 < ctx.ma_qfq_60:
         return None
-    if ctx.super_large_net_buy_5d_pct < 1.0:
+
+    flow_min = setup_param("O1_INST_PERSISTENT_BUY", "flow_5d_pct_min", 1.0)
+    pct_chg_min = setup_param("O1_INST_PERSISTENT_BUY", "pct_chg_min", -3.0)
+
+    if ctx.super_large_net_buy_5d_pct < flow_min:
         return None
-    if ctx.today_pct_chg is not None and ctx.today_pct_chg < -3.0:
+    if ctx.today_pct_chg is not None and ctx.today_pct_chg < pct_chg_min:
         return None
 
     triggers = ["inst_5d_inflow>=1%", "uptrend_stack"]

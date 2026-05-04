@@ -14,6 +14,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def V1_VOL_PRICE_UP(ctx: SetupContext) -> Candidate | None:
@@ -23,10 +24,13 @@ def V1_VOL_PRICE_UP(ctx: SetupContext) -> Candidate | None:
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
 
+    ret_5d_min = setup_param("V1_VOL_PRICE_UP", "ret_5d_min", 0.05)
+    vol_ratio_min = setup_param("V1_VOL_PRICE_UP", "vol_ratio_min", 1.5)
+
     ret_5d = ctx.close_today / ctx.closes[-6] - 1.0
-    if ret_5d < 0.05:
+    if ret_5d < ret_5d_min:
         return None
-    if ctx.volume_ratio < 1.5:
+    if ctx.volume_ratio < vol_ratio_min:
         return None
 
     triggers = ["5d_ret>=5%", "vol_ratio>=1.5", "uptrend_stack"]

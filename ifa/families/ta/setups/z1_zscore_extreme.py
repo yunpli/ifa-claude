@@ -17,12 +17,17 @@ from __future__ import annotations
 import math
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def Z1_ZSCORE_EXTREME(ctx: SetupContext) -> Candidate | None:
     closes = ctx.closes
     if len(closes) < 22 or ctx.close_today is None:
         return None
+
+    z_abs_min = setup_param("Z1_ZSCORE_EXTREME", "z_abs_min", 2.0)
+    short_runup_min_pct = setup_param("Z1_ZSCORE_EXTREME", "short_runup_min_pct", 15.0)
+
     rets = [closes[i] / closes[i - 1] - 1.0 for i in range(-20, 0) if closes[i - 1]]
     if len(rets) < 18:
         return None
@@ -33,21 +38,21 @@ def Z1_ZSCORE_EXTREME(ctx: SetupContext) -> Candidate | None:
         return None
     today_ret = closes[-1] / closes[-2] - 1.0
     z = (today_ret - mean) / sd
-    if abs(z) < 2.0:
+    if abs(z) < z_abs_min:
         return None
 
-    direction = "long" if z <= -2.0 else "short"
+    direction = "long" if z <= -z_abs_min else "short"
     if direction == "long":
         if ctx.ma_qfq_20 is None or ctx.ma_qfq_60 is None or ctx.ma_qfq_20 < ctx.ma_qfq_60:
             return None
     else:
         ret_20d = (closes[-1] / closes[-21] - 1.0) * 100
-        if ret_20d < 15.0:
+        if ret_20d < short_runup_min_pct:
             return None
 
     triggers = [f"z_extreme_{direction}", f"|z|>={abs(z):.1f}"]
     score = 0.5
-    strength = max(0.0, min(1.0, (abs(z) - 2.0) / 1.5))
+    strength = max(0.0, min(1.0, (abs(z) - z_abs_min) / max(z_abs_min * 0.75, 1e-6)))
     score += 0.20 * strength
     if strength >= 0.5:
         triggers.append("very_extreme")

@@ -14,6 +14,7 @@ Score (bearish — ranker handles separately or LLM warns):
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def D1_DOUBLE_TOP(ctx: SetupContext) -> Candidate | None:
@@ -22,6 +23,11 @@ def D1_DOUBLE_TOP(ctx: SetupContext) -> Candidate | None:
         return None
     window = closes[-40:]
     n = len(window)
+
+    peak_diff_max = setup_param("D1_DOUBLE_TOP", "peak_diff_max", 0.02)
+    trough_drop_min = setup_param("D1_DOUBLE_TOP", "trough_drop_min", 0.05)
+    break_depth_min_pct = setup_param("D1_DOUBLE_TOP", "break_depth_min_pct", 1.0)
+    ret_20d_min_pct = setup_param("D1_DOUBLE_TOP", "ret_20d_min_pct", 10.0)
 
     peak_idxs: list[int] = []
     for i in range(2, n - 2):
@@ -38,11 +44,11 @@ def D1_DOUBLE_TOP(ctx: SetupContext) -> Candidate | None:
             if not (5 <= b - a <= 20):
                 continue
             pa, pb = window[a], window[b]
-            if abs(pa - pb) / max(pa, pb) > 0.02:
+            if abs(pa - pb) / max(pa, pb) > peak_diff_max:
                 continue
             trough = min(window[a + 1:b])
             avg_peak = (pa + pb) / 2
-            if (avg_peak - trough) / avg_peak < 0.05:
+            if (avg_peak - trough) / avg_peak < trough_drop_min:
                 continue
             found = (a, b, avg_peak, trough)
     if not found:
@@ -51,10 +57,10 @@ def D1_DOUBLE_TOP(ctx: SetupContext) -> Candidate | None:
     if ctx.close_today >= trough * 0.99:
         return None
     break_depth = (trough - ctx.close_today) / trough * 100
-    if break_depth < 1.0:
+    if break_depth < break_depth_min_pct:
         return None
     ret_20d = (window[-1] / window[-21] - 1.0) * 100 if n >= 21 else 0
-    if ret_20d < 10.0:
+    if ret_20d < ret_20d_min_pct:
         return None
 
     triggers = ["double_top", "neckline_break", "post_runup"]

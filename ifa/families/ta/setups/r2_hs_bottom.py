@@ -19,11 +19,16 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def R2_HS_BOTTOM(ctx: SetupContext) -> Candidate | None:
     if (ctx.close_today is None or len(ctx.lows) < 40 or len(ctx.highs) < 40):
         return None
+
+    above_head_min = setup_param("R2_HS_BOTTOM", "shoulder_above_head_min", 0.03)
+    diff_max = setup_param("R2_HS_BOTTOM", "shoulder_diff_max", 0.05)
+    sym_max = setup_param("R2_HS_BOTTOM", "shoulder_diff_symmetric_max", 0.03)
 
     lows = list(ctx.lows[-40:-1])
     highs = list(ctx.highs[-40:-1])
@@ -43,10 +48,9 @@ def R2_HS_BOTTOM(ctx: SetupContext) -> Candidate | None:
     left = left_zone[left_idx_local]
     right = right_zone[right_idx_local]
 
-    # shoulders >= 3% above head, within 5% of each other
-    if min(left, right) / head - 1 < 0.03:
+    if min(left, right) / head - 1 < above_head_min:
         return None
-    if abs(left - right) / max(left, 1e-9) > 0.05:
+    if abs(left - right) / max(left, 1e-9) > diff_max:
         return None
 
     left_idx = max(0, head_idx - 15) + left_idx_local
@@ -60,9 +64,9 @@ def R2_HS_BOTTOM(ctx: SetupContext) -> Candidate | None:
     triggers = ["inverse_hs", "neckline_break"]
     score = 0.5
 
-    # Continuous: 肩部对称度 — 0% diff→full, 5%→0
+    # Continuous: shoulder symmetry, scaled to diff_max
     shoulder_diff = abs(left - right) / max(left, 1e-9)
-    symmetry = max(0.0, min(1.0, (0.05 - shoulder_diff) / 0.05))
+    symmetry = max(0.0, min(1.0, (diff_max - shoulder_diff) / max(diff_max, 1e-6)))
     score += 0.20 * symmetry
     if symmetry >= 0.4:
         triggers.append("symmetric_shoulders")

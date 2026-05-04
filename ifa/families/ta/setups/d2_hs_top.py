@@ -15,6 +15,7 @@ Score (bearish warning):
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def D2_HS_TOP(ctx: SetupContext) -> Candidate | None:
@@ -23,6 +24,12 @@ def D2_HS_TOP(ctx: SetupContext) -> Candidate | None:
         return None
     window = closes[-60:]
     n = len(window)
+
+    diff_max = setup_param("D2_HS_TOP", "shoulder_diff_max", 0.05)
+    above_min = setup_param("D2_HS_TOP", "head_above_shoulder_min", 0.03)
+    above_max = setup_param("D2_HS_TOP", "head_above_shoulder_max", 0.20)
+    break_depth_min_pct = setup_param("D2_HS_TOP", "break_depth_min_pct", 1.0)
+    ret_30d_min_pct = setup_param("D2_HS_TOP", "ret_30d_min_pct", 8.0)
 
     peaks = []
     for i in range(2, n - 2):
@@ -42,11 +49,11 @@ def D2_HS_TOP(ctx: SetupContext) -> Candidate | None:
                 la, head, ra = window[a], window[b], window[c]
                 if head <= la or head <= ra:
                     continue
-                if abs(la - ra) / max(la, ra) > 0.05:
+                if abs(la - ra) / max(la, ra) > diff_max:
                     continue
-                if not (0.03 <= (head - la) / head <= 0.20):
+                if not (above_min <= (head - la) / head <= above_max):
                     continue
-                if not (0.03 <= (head - ra) / head <= 0.20):
+                if not (above_min <= (head - ra) / head <= above_max):
                     continue
                 trough_ab = min(window[a + 1:b])
                 trough_bc = min(window[b + 1:c])
@@ -59,10 +66,10 @@ def D2_HS_TOP(ctx: SetupContext) -> Candidate | None:
     if ctx.close_today >= neckline * 0.99:
         return None
     break_depth = (neckline - ctx.close_today) / neckline * 100
-    if break_depth < 1.0:
+    if break_depth < break_depth_min_pct:
         return None
     ret_30d = (window[-1] / window[-31] - 1.0) * 100 if n >= 31 else 0
-    if ret_30d < 8.0:
+    if ret_30d < ret_30d_min_pct:
         return None
 
     triggers = ["hs_top", "neckline_break", "post_runup"]

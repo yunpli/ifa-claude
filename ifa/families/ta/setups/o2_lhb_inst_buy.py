@@ -12,13 +12,17 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def O2_LHB_INST_BUY(ctx: SetupContext) -> Candidate | None:
+    pct_float_min = setup_param("O2_LHB_INST_BUY", "pct_float_min", 0.5)
+    inst_days_min = setup_param("O2_LHB_INST_BUY", "inst_days_min", 1)
+
     pct_float = ctx.lhb_net_buy_pct_float_today
-    if pct_float is None or pct_float < 0.5:
+    if pct_float is None or pct_float < pct_float_min:
         return None
-    if not ctx.lhb_inst_buy_days_5d or ctx.lhb_inst_buy_days_5d < 1:
+    if not ctx.lhb_inst_buy_days_5d or ctx.lhb_inst_buy_days_5d < inst_days_min:
         return None
 
     triggers = ["lhb_net_buy>=0.5%float", "lhb_inst_seat_today"]

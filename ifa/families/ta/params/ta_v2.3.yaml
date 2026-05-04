@@ -127,3 +127,132 @@ position_tracking:
   exit_priority: ["stop_hit", "target_hit", "time_exit"]
   fill_window_trade_days: 1          # T+1 不成交 → unfilled
   unfilled_max_premium_pct: 0.5      # T+1 open > entry × 1.005 → 视作 unfilled (避免追涨成交)
+
+# ─── M10 P2 — Setup-level tunable thresholds (every gate is dynamic) ──────
+# Every "if X < N: return None" gate in a setup file reads from here.
+# When a key is missing, the setup falls back to its hardcoded default
+# (preserving backward compat). Use `ta_setup_param_tune.py` to grid-search
+# these against combined T+15/T+10/T+5 objective.
+setups:
+  T1_BREAKOUT:
+    # No filter gates beyond MA-stack + 20d high; all numeric below are
+    # scoring/strength clamps, intentionally fixed (not tuned).
+
+  T2_PULLBACK_RESUME:
+    ma20_touch_max_x: 1.02            # recent_low > X × ma20 → not a pullback
+    rsi_lower: 30                      # RSI mid-band entry
+    rsi_upper: 60
+
+  T3_ACCELERATION:
+    ret_5d_min: 0.05                   # 5-day return floor
+
+  P1_MA20_PULLBACK:
+    ma20_touch_max_x: 1.01
+    panic_volume_ratio_max: 1.2        # not panic — vol_ratio < this
+    rsi_max: 50                        # RSI ceiling for "still has room"
+
+  P2_GAP_FILL:
+    # Pure pattern detection — no scalar gates beyond price relationships.
+
+  P3_TIGHT_CONSOLIDATION:
+    prior_gain_min: 0.10               # prior 20d ≥ this
+    box_range_max: 0.05                # 5d box ≤ this fraction
+    drying_volume_ratio_max: 0.8
+
+  R1_DOUBLE_BOTTOM:
+    bottom_diff_max: 0.03              # two lows within 3% of each other
+    bottom_to_peak_min: 0.05           # peak ≥ 5% above bottoms
+    bottom_separation_min: 5           # bars between two lows
+
+  R2_HS_BOTTOM:
+    shoulder_above_head_min: 0.03      # shoulders ≥ 3% above head
+    shoulder_diff_max: 0.05            # within 5% of each other
+    shoulder_diff_symmetric_max: 0.03  # for "symmetric" trigger
+
+  R3_HAMMER:
+    body_pct_max: 0.35                 # body / total range
+    shadow_to_body_min: 2.0            # lower shadow ≥ 2× body
+    downtrend_max: -0.08                # 20d return ≤ this (must be falling)
+
+  F1_FLAG:
+    pole_min: 0.08
+    flag_range_max: 0.09
+    flag_drift_min: -0.08              # -8% downward drift OK
+    flag_drift_max: 0.03
+
+  F2_TRIANGLE:
+    contraction_max: 0.6               # late_range / early_range < this
+
+  F3_RECTANGLE:
+    box_range_max: 0.08
+
+  V1_VOL_PRICE_UP:
+    ret_5d_min: 0.05
+    vol_ratio_min: 1.5
+
+  V2_QUIET_COIL:
+    vol_ratio_max: 0.7
+    box_range_max: 0.04
+
+  S1_SECTOR_RESONANCE:
+    l1_pct_min: 1.0
+    l2_pct_min: 1.5
+    stock_ret_min_pct: 2.0
+
+  S2_LEADER_FOLLOWTHROUGH:
+    l2_pct_min: 2.0
+    outperform_l2_min_pp: 2.0
+
+  S3_LAGGARD_CATCHUP:
+    l2_pct_min: 2.0
+    stock_20d_max_pct: 5.0             # was a "true laggard" only if ≤ this
+    today_ret_min_pct: 3.0             # caught-up today by ≥ this
+
+  C1_CHIP_CONCENTRATED:
+    concentration_pct_max: 15
+
+  C2_CHIP_LOOSE:
+    concentration_pct_min: 25
+    winner_rate_min: 80
+    ret_20d_min: 0.15
+
+  O1_INST_PERSISTENT_BUY:
+    flow_5d_pct_min: 1.0               # 5d super-large net flow / float MV
+    pct_chg_min: -3.0
+
+  O2_LHB_INST_BUY:
+    pct_float_min: 0.5
+    inst_days_min: 1                    # ≥ N days of LHB inst buying in last 5d
+
+  O3_LIMIT_SEAL_STRENGTH:
+    seal_ratio_min: 1.0
+
+  D1_DOUBLE_TOP:
+    peak_diff_max: 0.02
+    trough_drop_min: 0.05
+    break_depth_min_pct: 1.0
+    ret_20d_min_pct: 10.0
+
+  D2_HS_TOP:
+    shoulder_diff_max: 0.05
+    head_above_shoulder_min: 0.03
+    head_above_shoulder_max: 0.20
+    break_depth_min_pct: 1.0
+    ret_30d_min_pct: 8.0
+
+  D3_SHOOTING_STAR:
+    upper_ratio_min: 0.6
+    body_ratio_max: 0.3
+    ret_20d_min_pct: 15.0
+
+  Z1_ZSCORE_EXTREME:
+    z_abs_min: 2.0
+    short_runup_min_pct: 15.0          # |z| ≥ X required when direction='short'
+
+  Z2_OVERSOLD_REBOUND:
+    rsi_max: 25
+    ret_5d_max_pct: -5.0
+    ma60_drop_max_x: 0.85              # closes[-1] >= closes[-60] × this
+
+  E1_EVENT_CATALYST:
+    days_to_disclosure_max: 5

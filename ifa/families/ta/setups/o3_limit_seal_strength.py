@@ -13,12 +13,15 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def O3_LIMIT_SEAL_STRENGTH(ctx: SetupContext) -> Candidate | None:
+    seal_ratio_min = setup_param("O3_LIMIT_SEAL_STRENGTH", "seal_ratio_min", 1.0)
+
     if ctx.kpl_status_today != "T" or ctx.kpl_seal_ratio_today is None:
         return None
-    if ctx.kpl_seal_ratio_today < 1.0:
+    if ctx.kpl_seal_ratio_today < seal_ratio_min:
         return None
     if ctx.ma_qfq_20 is None or ctx.ma_qfq_60 is None or ctx.ma_qfq_20 < ctx.ma_qfq_60:
         return None

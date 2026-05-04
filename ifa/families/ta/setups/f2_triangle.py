@@ -21,6 +21,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def F2_TRIANGLE(ctx: SetupContext) -> Candidate | None:
@@ -30,12 +31,14 @@ def F2_TRIANGLE(ctx: SetupContext) -> Candidate | None:
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
 
+    contraction_max = setup_param("F2_TRIANGLE", "contraction_max", 0.6)
+
     early_range = max(ctx.highs[-20:-10]) - min(ctx.lows[-20:-10])
     late_range = max(ctx.highs[-10:]) - min(ctx.lows[-10:])
     if early_range <= 0:
         return None
     contraction = late_range / early_range
-    if contraction >= 0.6:
+    if contraction >= contraction_max:
         return None
 
     if ctx.close_today <= max(ctx.highs[-10:-1]):

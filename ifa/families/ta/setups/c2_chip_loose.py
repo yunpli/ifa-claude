@@ -17,6 +17,7 @@ treat it as a sell/avoid candidate.
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def C2_CHIP_LOOSE(ctx: SetupContext) -> Candidate | None:
@@ -26,13 +27,17 @@ def C2_CHIP_LOOSE(ctx: SetupContext) -> Candidate | None:
             or len(ctx.closes) < 21):
         return None
 
-    if ctx.chip_concentration_pct < 25.0:
+    conc_min = setup_param("C2_CHIP_LOOSE", "concentration_pct_min", 25.0)
+    winner_min = setup_param("C2_CHIP_LOOSE", "winner_rate_min", 80.0)
+    ret_20d_min = setup_param("C2_CHIP_LOOSE", "ret_20d_min", 0.15) * 100  # frac→pct
+
+    if ctx.chip_concentration_pct < conc_min:
         return None
-    if ctx.chip_winner_rate_pct < 80.0:
+    if ctx.chip_winner_rate_pct < winner_min:
         return None
 
     ret_20d = (ctx.close_today / ctx.closes[-21] - 1.0) * 100
-    if ret_20d < 15.0:
+    if ret_20d < ret_20d_min:
         return None
 
     triggers = ["chip_loose>=25%", "winner_rate>=80%", "20d_ret>=15%"]

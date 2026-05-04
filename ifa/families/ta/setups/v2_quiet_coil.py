@@ -15,6 +15,7 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def V2_QUIET_COIL(ctx: SetupContext) -> Candidate | None:
@@ -24,7 +25,11 @@ def V2_QUIET_COIL(ctx: SetupContext) -> Candidate | None:
         return None
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
-    if ctx.volume_ratio >= 0.7:
+
+    vol_ratio_max = setup_param("V2_QUIET_COIL", "vol_ratio_max", 0.7)
+    box_range_max = setup_param("V2_QUIET_COIL", "box_range_max", 0.04)
+
+    if ctx.volume_ratio >= vol_ratio_max:
         return None
 
     box_high = max(ctx.highs[-5:])
@@ -32,7 +37,7 @@ def V2_QUIET_COIL(ctx: SetupContext) -> Candidate | None:
     if box_high <= 0:
         return None
     box_range_pct = (box_high - box_low) / box_high
-    if box_range_pct > 0.04:
+    if box_range_pct > box_range_max:
         return None
 
     if ctx.close_today < min(ctx.closes[-5:]):

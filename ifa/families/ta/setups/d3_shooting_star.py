@@ -14,14 +14,19 @@ Score (bearish):
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def D3_SHOOTING_STAR(ctx: SetupContext) -> Candidate | None:
     if ctx.close_today is None or len(ctx.closes) < 21 or not ctx.highs or not ctx.lows:
         return None
+
+    upper_min = setup_param("D3_SHOOTING_STAR", "upper_ratio_min", 0.6)
+    body_max = setup_param("D3_SHOOTING_STAR", "body_ratio_max", 0.3)
+    ret_20d_min_pct = setup_param("D3_SHOOTING_STAR", "ret_20d_min_pct", 15.0)
+
     high_t, low_t, close_t = ctx.highs[-1], ctx.lows[-1], ctx.close_today
     prev_close = ctx.closes[-2]
-    # use prev_close as proxy for open since open isn't in context fields uniformly; estimate body via |close - prev|
     body = abs(close_t - prev_close)
     total_range = high_t - low_t
     if total_range <= 0:
@@ -30,15 +35,15 @@ def D3_SHOOTING_STAR(ctx: SetupContext) -> Candidate | None:
     if upper_shadow <= 0:
         return None
     upper_ratio = upper_shadow / total_range
-    if upper_ratio < 0.6:
+    if upper_ratio < upper_min:
         return None
     body_ratio = body / total_range
-    if body_ratio > 0.3:
+    if body_ratio > body_max:
         return None
     if close_t > prev_close:
         return None
     ret_20d = (close_t / ctx.closes[-21] - 1.0) * 100
-    if ret_20d < 15.0:
+    if ret_20d < ret_20d_min_pct:
         return None
 
     triggers = ["shooting_star", "post_strong_runup", "no_continuation"]

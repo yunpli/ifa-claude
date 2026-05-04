@@ -16,11 +16,14 @@ Score:
 from __future__ import annotations
 
 from ifa.families.ta.setups.base import Candidate, SetupContext
+from ifa.families.ta.setups._params import setup_param
 
 
 def E1_EVENT_CATALYST(ctx: SetupContext) -> Candidate | None:
     if not ctx.event_type_today:
         return None
+
+    days_to_disclosure_max = setup_param("E1_EVENT_CATALYST", "days_to_disclosure_max", 5)
 
     triggers = [f"event:{ctx.event_type_today}"]
     score = 0.5
@@ -33,7 +36,7 @@ def E1_EVENT_CATALYST(ctx: SetupContext) -> Candidate | None:
         # but no positive boost.
         triggers.append("negative_polarity")
 
-    if ctx.days_to_disclosure is not None and ctx.days_to_disclosure <= 5:
+    if ctx.days_to_disclosure is not None and ctx.days_to_disclosure <= days_to_disclosure_max:
         score += 0.10
         triggers.append("imminent_disclosure")
 
