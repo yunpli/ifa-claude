@@ -139,6 +139,28 @@ def _tradeable_universe(engine: Engine, on_date: date) -> tuple[set[str], set[st
         log.info("fundamental: ST/*ST cut %d stocks (kept %d)",
                  before_n - len(long_universe), len(long_universe))
 
+    # M10 P1.6 — Blacklist filter (hard reasons cut, soft reasons just tag).
+    bl = load_params().get("blacklist", {}) or {}
+    bl_hard = bl.get("hard", {}) or {}
+    if any(bl_hard.get(k, False) for k in
+           ("suspended", "st_status", "investigation", "major_restructuring")):
+        # ST/suspend already handled above (suspended via liquidity coverage,
+        # ST via name match). Here we only need anns_d-driven hard reasons.
+        sql_bl = text("""
+            SELECT DISTINCT ts_code FROM ta.blacklist_daily
+            WHERE trade_date = :on_date
+              AND severity = 'hard'
+        """)
+        try:
+            with engine.connect() as conn:
+                bl_codes = {r[0] for r in conn.execute(sql_bl, {"on_date": on_date})}
+            before_n = len(long_universe)
+            long_universe -= bl_codes
+            log.info("blacklist hard cut %d stocks (kept %d)",
+                     before_n - len(long_universe), len(long_universe))
+        except Exception as e:
+            log.debug("blacklist_daily not yet available: %s", e)
+
     if excluded_phases or excluded_roles:
         sql_sector_state = text("""
             SELECT m.ts_code

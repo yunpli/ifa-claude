@@ -894,6 +894,20 @@ def _section_risk_scan(engine: Engine, on_date: date) -> dict:
                 "建议减仓、不做新多头开仓。"
             )
 
+    # M10 P1.6 — soft blacklist counts (业绩雷 + 大股东减持).
+    with engine.connect() as conn:
+        try:
+            soft_rows = conn.execute(text("""
+                SELECT reason, COUNT(*) FROM ta.blacklist_daily
+                WHERE trade_date = :d AND severity = 'soft'
+                GROUP BY reason
+            """), {"d": on_date}).fetchall()
+            soft_blacklist = {r[0]: int(r[1]) for r in soft_rows}
+        except Exception:
+            soft_blacklist = {}
+    severe_forecast_n = soft_blacklist.get("severe_forecast_miss", 0)
+    insider_sell_n = soft_blacklist.get("insider_selling", 0)
+
     # M10 P1.8 — composite risk dashboard (red / yellow / green light).
     # Aggregates today's signals into a single "today's market risk level" indicator,
     # styled after institutional risk-management dashboards.
@@ -918,6 +932,10 @@ def _section_risk_scan(engine: Engine, on_date: date) -> dict:
         risk_signals.append(("decay", f"衰退策略 {decay_count} 个", "red"))
     elif decay_count >= 1:
         risk_signals.append(("decay", f"衰退策略 {decay_count} 个", "yellow"))
+    if severe_forecast_n >= 5:
+        risk_signals.append(("forecast_miss", f"业绩雷 {severe_forecast_n} 例", "yellow"))
+    if insider_sell_n >= 30:
+        risk_signals.append(("insider_sell", f"大股东减持 {insider_sell_n} 例", "yellow"))
 
     if any(s[2] == "red" for s in risk_signals):
         light = "red"
@@ -945,6 +963,9 @@ def _section_risk_scan(engine: Engine, on_date: date) -> dict:
         "top_reversal_count": top_reversal_count,
         "top_reversal_breakdown": d_summary,
         "top_reversals": top_reversals,
+        "soft_blacklist": soft_blacklist,    # P1.6
+        "severe_forecast_count": severe_forecast_n,
+        "insider_sell_count": insider_sell_n,
         "decaying_setups": [
             {
                 "setup_name": r[0],
