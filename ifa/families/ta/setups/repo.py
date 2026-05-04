@@ -21,6 +21,13 @@ def upsert_candidates(
     regime_at_gen: str | None = None,
 ) -> int:
     """Replace today's candidates_daily rows with the new ranking. Returns row count."""
+    # Tracking rows reference candidate_id via FK; delete them first.
+    sql_delete_tracking = text("""
+        DELETE FROM ta.candidate_tracking
+        WHERE candidate_id IN (
+            SELECT candidate_id FROM ta.candidates_daily WHERE trade_date = :d
+        )
+    """)
     sql_delete = text("DELETE FROM ta.candidates_daily WHERE trade_date = :d")
     sql_insert = text("""
         INSERT INTO ta.candidates_daily
@@ -31,6 +38,7 @@ def upsert_candidates(
              :regime_at_gen, :evidence, :in_top_watchlist)
     """)
     with engine.begin() as conn:
+        conn.execute(sql_delete_tracking, {"d": on_date})
         conn.execute(sql_delete, {"d": on_date})
         for rc in ranked:
             c = rc.candidate
