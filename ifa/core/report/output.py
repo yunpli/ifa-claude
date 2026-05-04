@@ -57,3 +57,24 @@ def output_dir_for_run(settings, run: ReportRun) -> Path:
         out = base
     out.mkdir(parents=True, exist_ok=True)
     return out
+
+
+def output_dir_for_family(settings, family: str, report_date) -> Path:
+    """Lightweight resolver for families that don't go through report_runs.
+
+    Same nested layout as `output_dir_for_run` so Research / TA outputs
+    co-locate with Market / SmartMoney / Ningbo:
+        production/manual → <root>/<mode>/<YYYYMMDD>/<family>/
+        test              → <root>/test/
+    """
+    base = Path(settings.output_root) / settings.run_mode.value
+    if settings.run_mode.value in _NESTED_RUN_MODES:
+        out = (
+            base
+            / report_date.strftime("%Y%m%d")
+            / _family_folder(family)
+        )
+    else:
+        out = base
+    out.mkdir(parents=True, exist_ok=True)
+    return out

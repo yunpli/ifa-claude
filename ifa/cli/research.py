@@ -170,8 +170,15 @@ def cmd_report(
         console.print(render_markdown(report))
         return
 
-    out_dir = Path(output)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if output == str(_DEFAULT_OUTPUT):
+        # Default: route to the unified output structure
+        # <output_root>/<mode>/<YYYYMMDD>/research/
+        from ifa.config import get_settings
+        from ifa.core.report.output import output_dir_for_family
+        out_dir = output_dir_for_family(get_settings(), "research", bjt_now().date())
+    else:
+        out_dir = Path(output)
+        out_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"-{tier}" if tier != "standard" else ""
     stamp = bjt_now().strftime("%Y%m%d")
     base = f"Stock-Analysis-{company.ts_code}-{stamp}{suffix}"

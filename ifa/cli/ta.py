@@ -218,7 +218,7 @@ def backtest_cmd(
 @app.command("evening", help="Alias for evening-report")
 def evening_alias(
     on_date: str = typer.Option(None, "--date"),
-    output: str = typer.Option("tmp/", "--output"),
+    output: str = typer.Option(None, "--output"),
     slot: str = typer.Option("evening", "--slot"),
     llm: bool = typer.Option(False, "--llm/--no-llm"),
 ) -> None:
@@ -260,7 +260,10 @@ def compute_metrics_cmd(
 @app.command("evening-report")
 def evening_report_cmd(
     on_date: str = typer.Option(None, "--date", help="Trade date YYYY-MM-DD (default: today BJT)"),
-    output: str = typer.Option("tmp/", "--output", help="Output dir, or '-' to print MD to stdout"),
+    output: str = typer.Option(None, "--output",
+                               help="Output dir override; default = "
+                                    "<output_root>/<mode>/<YYYYMMDD>/ta/. "
+                                    "Pass '-' to print MD to stdout."),
     slot: str = typer.Option("evening", "--slot", help="Report slot label (evening/morning/intraday)"),
     llm: bool = typer.Option(False, "--llm/--no-llm", help="Add LLM narrative sections"),
 ) -> None:
@@ -282,8 +285,13 @@ def evening_report_cmd(
         console.print(render_markdown(report))
         return
 
-    out_dir = Path(output)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if output is None:
+        from ifa.config import get_settings
+        from ifa.core.report.output import output_dir_for_family
+        out_dir = output_dir_for_family(get_settings(), "ta", target)
+    else:
+        out_dir = Path(output)
+        out_dir.mkdir(parents=True, exist_ok=True)
     stamp_date = target.strftime("%Y%m%d")
     stamp_time = bjt_now().strftime("%H%M")
     base = f"ifa_TA_{slot}_{stamp_date}_{stamp_time}"
