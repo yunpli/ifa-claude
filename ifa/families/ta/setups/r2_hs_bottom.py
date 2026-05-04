@@ -60,15 +60,19 @@ def R2_HS_BOTTOM(ctx: SetupContext) -> Candidate | None:
     triggers = ["inverse_hs", "neckline_break"]
     score = 0.5
 
-    if ctx.regime in ("weak_rebound", "cooldown", "range_bound"):
-        score += 0.2
-        triggers.append("post_weakness_regime")
-    if abs(left - right) / max(left, 1e-9) <= 0.03:
-        score += 0.2
+    # Continuous: 肩部对称度 — 0% diff→full, 5%→0
+    shoulder_diff = abs(left - right) / max(left, 1e-9)
+    symmetry = max(0.0, min(1.0, (0.05 - shoulder_diff) / 0.05))
+    score += 0.20 * symmetry
+    if symmetry >= 0.4:
         triggers.append("symmetric_shoulders")
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.5:
-        score += 0.1
-        triggers.append("volume_breakout")
+
+    # Continuous: 量能突破
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 1.5))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.3:
+            triggers.append("volume_breakout")
 
     return Candidate(
         ts_code=ctx.ts_code,

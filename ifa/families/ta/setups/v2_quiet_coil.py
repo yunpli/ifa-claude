@@ -40,15 +40,19 @@ def V2_QUIET_COIL(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["uptrend_stack", "vol_ratio<0.7", "tight_5d_range"]
     score = 0.5
-    if ctx.regime in ("trend_continuation", "range_bound"):
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if ctx.volume_ratio < 0.5:
-        score += 0.2
+
+    # Continuous: 缩量程度 — 0.7×→0, 0.3×→full
+    quiet_strength = max(0.0, min(1.0, (0.7 - ctx.volume_ratio) / 0.4))
+    score += 0.20 * quiet_strength
+    if quiet_strength >= 0.5:
         triggers.append("very_quiet")
-    if ctx.rsi_qfq_6 is not None and 40 <= ctx.rsi_qfq_6 <= 60:
-        score += 0.1
-        triggers.append("rsi_neutral")
+
+    # Continuous: RSI 中性度 (50 = peak, 偏离 ±15 → 0)
+    if ctx.rsi_qfq_6 is not None:
+        rsi_neutral = max(0.0, min(1.0, 1 - abs(ctx.rsi_qfq_6 - 50) / 15))
+        score += 0.10 * rsi_neutral
+        if rsi_neutral >= 0.5:
+            triggers.append("rsi_neutral")
 
     return Candidate(
         ts_code=ctx.ts_code,

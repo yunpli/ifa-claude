@@ -43,15 +43,19 @@ def F2_TRIANGLE(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["uptrend_stack", "range_contracting", "upside_breakout"]
     score = 0.5
-    if ctx.regime in ("trend_continuation", "early_risk_on"):
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if contraction < 0.4:
-        score += 0.2
+
+    # Continuous: 收敛强度 — 0.6→0, 0.1→full
+    contraction_strength = max(0.0, min(1.0, (0.6 - contraction) / 0.5))
+    score += 0.20 * contraction_strength
+    if contraction_strength >= 0.4:
         triggers.append("strong_contraction")
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.5:
-        score += 0.1
-        triggers.append("volume_breakout")
+
+    # Continuous: 量能突破
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 1.5))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.3:
+            triggers.append("volume_breakout")
 
     return Candidate(
         ts_code=ctx.ts_code,

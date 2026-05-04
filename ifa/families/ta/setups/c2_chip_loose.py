@@ -37,14 +37,17 @@ def C2_CHIP_LOOSE(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["chip_loose>=25%", "winner_rate>=80%", "20d_ret>=15%"]
     score = 0.5
-    if ctx.regime in ("emotional_climax", "distribution_risk"):
-        score += 0.2
-        triggers.append("regime_warning")
-    if ctx.chip_winner_rate_pct >= 90.0:
-        score += 0.2
+
+    # Continuous: 盈利盘比例 — 80%→0, 100%→full
+    winner_strength = max(0.0, min(1.0, (ctx.chip_winner_rate_pct - 80.0) / 20.0))
+    score += 0.20 * winner_strength
+    if winner_strength >= 0.5:
         triggers.append("extreme_winner_rate")
-    if ret_20d >= 30.0:
-        score += 0.1
+
+    # Continuous: 累计涨幅 — 15%→0, 50%+→full
+    run_strength = max(0.0, min(1.0, (ret_20d - 15.0) / 35.0))
+    score += 0.10 * run_strength
+    if run_strength >= 0.4:
         triggers.append("extreme_run")
 
     return Candidate(

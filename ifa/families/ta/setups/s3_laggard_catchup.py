@@ -39,15 +39,19 @@ def S3_LAGGARD_CATCHUP(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["uptrend_stack", "L2>=2%", "stock_was_laggard", "catchup_today"]
     score = 0.5
-    if ctx.regime in ("sector_rotation", "early_risk_on"):
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if stock_20d_ret_pct <= 0.0:
-        score += 0.2
+
+    # Continuous: 滞涨程度 — 5%→0, -10%→full（越负越是真滞涨）
+    laggard_strength = max(0.0, min(1.0, (5.0 - stock_20d_ret_pct) / 15.0))
+    score += 0.20 * laggard_strength
+    if laggard_strength >= 0.5:
         triggers.append("true_laggard")
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.5:
-        score += 0.1
-        triggers.append("volume_confirmation")
+
+    # Continuous: 量能
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 1.5))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.3:
+            triggers.append("volume_confirmation")
 
     return Candidate(
         ts_code=ctx.ts_code,

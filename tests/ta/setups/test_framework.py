@@ -38,8 +38,8 @@ class TestT1Breakout:
         assert result is not None
         assert result.setup_name == "T1_BREAKOUT"
         assert "20d_breakout" in result.triggers
-        assert "regime_tailwind" in result.triggers
-        assert result.score >= 0.7
+        # regime bonus moved to ranker (M9) — no longer a setup-level trigger
+        assert result.score >= 0.5
 
     def test_volume_boost_score(self):
         closes = [100 + i for i in range(60)]
@@ -80,7 +80,8 @@ class TestT1Breakout:
         ctx = _ctx([100.0] * 10)
         assert T1_BREAKOUT(ctx) is None
 
-    def test_no_regime_no_tailwind(self):
+    def test_no_regime_still_fires(self):
+        # Regime bonus moved to ranker; setup itself is regime-agnostic now.
         closes = [100 + i for i in range(60)]
         ctx = _ctx(closes, regime=None)
         result = T1_BREAKOUT(ctx)

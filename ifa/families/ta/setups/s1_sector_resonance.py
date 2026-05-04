@@ -34,14 +34,17 @@ def S1_SECTOR_RESONANCE(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["uptrend_stack", "L1>=1%", "L2>=1.5%", "stock_ret>=2%"]
     score = 0.5
-    if ctx.regime in ("trend_continuation", "early_risk_on", "sector_rotation"):
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if ctx.sw_l2_pct_change >= 3.0:
-        score += 0.2
+
+    # Continuous: L2 板块涨幅强度 — 1.5%→0, 5%→full
+    l2_strength = max(0.0, min(1.0, (ctx.sw_l2_pct_change - 1.5) / 3.5))
+    score += 0.20 * l2_strength
+    if l2_strength >= 0.4:
         triggers.append("L2_leading")
-    if stock_ret >= 5.0:
-        score += 0.1
+
+    # Continuous: 个股涨幅强度 — 2%→0, 8%→full
+    stock_strength = max(0.0, min(1.0, (stock_ret - 2.0) / 6.0))
+    score += 0.10 * stock_strength
+    if stock_strength >= 0.5:
         triggers.append("stock_strong")
 
     return Candidate(

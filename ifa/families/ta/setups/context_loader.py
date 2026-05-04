@@ -26,18 +26,61 @@ log = logging.getLogger(__name__)
 LOOKBACK_DAYS = 95    # need 60 trade days; 95 calendar accommodates weekends + CN holidays
 
 
+def _tradeable_universe(engine: Engine, on_date: date) -> set[str]:
+    """Return ts_codes meeting universe filter: not suspended + min liquidity.
+    Uses params.yaml universe.* thresholds.
+    """
+    from ifa.families.ta.params import load_params
+    p = load_params().get("universe", {}) or {}
+    min_amt_qy = (p.get("min_avg_amount_yi", 0.2) * 1e8) / 1000.0
+    # raw_daily.amount unit = 千元; 0.2 亿 = 20000 千元
+    min_coverage = p.get("min_coverage_pct", 90) / 100.0
+
+    sql = text("""
+        WITH window20 AS (
+            SELECT ts_code,
+                   COUNT(*) AS n_rows,
+                   AVG(amount) AS avg_amt_qianyuan
+            FROM smartmoney.raw_daily
+            WHERE trade_date <= :on_date
+              AND trade_date > :start
+            GROUP BY ts_code
+        ),
+        max_rows AS (
+            SELECT MAX(n_rows) AS expected FROM window20
+        )
+        SELECT w.ts_code
+        FROM window20 w, max_rows m
+        WHERE w.avg_amt_qianyuan >= :min_amt
+          AND (w.n_rows::float / NULLIF(m.expected, 0)) >= :min_cov
+    """)
+    from datetime import timedelta as _td
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {
+            "on_date": on_date,
+            "start": on_date - _td(days=30),   # ~20 trade days
+            "min_amt": min_amt_qy,
+            "min_cov": min_coverage,
+        }).fetchall()
+    return {r[0] for r in rows}
+
+
 def build_contexts(
     engine: Engine,
     on_date: date,
     *,
     regime: Regime | None = None,
 ) -> dict[str, SetupContext]:
-    """Returns {ts_code: SetupContext} for every stock with OHLCV on `on_date`.
+    """Returns {ts_code: SetupContext} for every stock in the tradeable universe.
+
+    Tradeable universe = stocks with raw_daily on on_date AND meeting
+    universe.min_avg_amount_yi + universe.min_coverage_pct (per ta_v2.2.yaml).
 
     Stocks lacking on_date row are excluded. SetupContext closes/highs/lows/volumes
     are tuples ascending by date; today's row sits at index -1.
     """
     cutoff = on_date - timedelta(days=LOOKBACK_DAYS)
+    universe = _tradeable_universe(engine, on_date)
 
     # OHLCV — one wide query, partition by ts_code in Python.
     sql_ohlcv = text("""
@@ -121,6 +164,8 @@ def build_contexts(
     contexts: dict[str, SetupContext] = {}
     for ts_code, rows in by_stock.items():
         if not rows or rows[-1][1] != on_date:
+            continue
+        if ts_code not in universe:    # M9: tradeable-universe filter
             continue
         # Need at least 21 rows for the cheapest setups (T1, R3 etc); cull below
         if len(rows) < 21:

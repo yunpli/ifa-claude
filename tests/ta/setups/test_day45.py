@@ -234,7 +234,8 @@ class TestC2ChipLoose:
                    regime="distribution_risk")
         result = SETUPS["C2_CHIP_LOOSE"](ctx)
         assert result is not None
-        assert "regime_warning" in result.triggers
+        # regime gating now happens in ranker (M9), not inside the setup
+        assert "extreme_winner_rate" in result.triggers
 
     def test_concentrated_chips_no_trigger(self):
         closes = [100 + i for i in range(60)]

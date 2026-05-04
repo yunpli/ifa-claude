@@ -30,15 +30,19 @@ def C1_CHIP_CONCENTRATED(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["uptrend_stack", "chip_concentrated<=15%", "above_ma20"]
     score = 0.5
-    if ctx.regime in ("trend_continuation", "range_bound"):
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if ctx.chip_concentration_pct <= 10.0:
-        score += 0.2
+
+    # Continuous: 集中度 — 15%→0, 5%→full（越窄越好）
+    concentration_strength = max(0.0, min(1.0, (15.0 - ctx.chip_concentration_pct) / 10.0))
+    score += 0.20 * concentration_strength
+    if concentration_strength >= 0.5:
         triggers.append("very_concentrated")
-    if ctx.chip_winner_rate_pct is not None and 40 <= ctx.chip_winner_rate_pct <= 80:
-        score += 0.1
-        triggers.append("balanced_winners")
+
+    # Continuous: 盈利盘均衡度 — 60% 处峰值，偏离 ±25 衰减
+    if ctx.chip_winner_rate_pct is not None:
+        balance_strength = max(0.0, min(1.0, 1 - abs(ctx.chip_winner_rate_pct - 60) / 25))
+        score += 0.10 * balance_strength
+        if balance_strength >= 0.5:
+            triggers.append("balanced_winners")
 
     return Candidate(
         ts_code=ctx.ts_code,

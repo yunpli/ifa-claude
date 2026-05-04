@@ -44,15 +44,22 @@ def upsert_candidates(
             c = rc.candidate
             evidence_payload = {
                 **c.evidence,
+                "raw_score": c.score,                       # per-setup pure score
                 "triggers": list(c.triggers),
                 "governance_status": rc.governance_status,
+                "stock_score": rc.stock_score,
+                "resonance_count": rc.resonance_count,
+                "resonance_families": list(rc.resonance_families),
+                "tier": rc.tier,
             }
             conn.execute(sql_insert, {
                 "trade_date": on_date,
                 "ts_code": c.ts_code,
                 "setup_name": c.setup_name,
                 "rank": rc.rank,
-                "final_score": c.score,
+                # final_score now stores the per-stock aggregate (used for star);
+                # raw per-candidate score lives in evidence_json
+                "final_score": rc.stock_score,
                 "star_rating": rc.star_rating,
                 "regime_at_gen": regime_at_gen,
                 "evidence": json.dumps(evidence_payload, ensure_ascii=False, default=str),

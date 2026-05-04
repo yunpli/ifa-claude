@@ -46,15 +46,19 @@ def F1_FLAG(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["pole>=8%", "tight_flag<=9%", "near_top_of_flag"]
     score = 0.5
-    if ctx.regime in ("trend_continuation", "early_risk_on"):
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if pole >= 0.15:
-        score += 0.2
+
+    # Continuous: 旗杆强度 — 8%→0, 25%→full
+    pole_strength = max(0.0, min(1.0, (pole - 0.08) / 0.17))
+    score += 0.20 * pole_strength
+    if pole_strength >= 0.4:
         triggers.append("strong_pole")
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.3:
-        score += 0.1
-        triggers.append("volume_confirmation")
+
+    # Continuous: 量能
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 1.5))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.2:
+            triggers.append("volume_confirmation")
 
     return Candidate(
         ts_code=ctx.ts_code,

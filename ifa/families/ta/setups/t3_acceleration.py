@@ -41,15 +41,18 @@ def T3_ACCELERATION(ctx: SetupContext) -> Candidate | None:
     triggers = ["full_ma_stack", "macd_golden", "macd_positive", "5d_ret>=5%"]
     score = 0.5
 
-    if ctx.regime in ("trend_continuation", "early_risk_on"):
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if ret_5d >= 0.10:
-        score += 0.2
+    # Continuous: 加速强度 — 5d return 5%→0, 15%+→full
+    accel_strength = max(0.0, min(1.0, (ret_5d - 0.05) / 0.10))
+    score += 0.20 * accel_strength
+    if accel_strength >= 0.5:
         triggers.append("strong_acceleration")
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.3:
-        score += 0.1
-        triggers.append("volume_confirmation")
+
+    # Continuous: 量能 1.0×→0, 2.5×+→full
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 1.5))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.2:
+            triggers.append("volume_confirmation")
 
     return Candidate(
         ts_code=ctx.ts_code,

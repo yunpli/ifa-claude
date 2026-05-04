@@ -37,15 +37,19 @@ def T2_PULLBACK_RESUME(ctx: SetupContext) -> Candidate | None:
     triggers = ["uptrend_stack", "touched_ma20", "back_above_ma5"]
     score = 0.5
 
-    if ctx.regime == "trend_continuation":
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if recent_low <= ctx.ma_qfq_20:
-        score += 0.2
+    # Continuous: how deeply touched MA20. ratio recent_low/ma20:
+    # 1.02 → 0 (just near), 1.0 → 0.5, 0.98 → 1.0 (decisive break-and-recover)
+    touch_strength = max(0.0, min(1.0, (1.02 - recent_low / ctx.ma_qfq_20) / 0.04))
+    score += 0.20 * touch_strength
+    if touch_strength >= 0.5:
         triggers.append("actual_ma20_touch")
-    if ctx.rsi_qfq_6 is not None and 30 <= ctx.rsi_qfq_6 <= 60:
-        score += 0.1
-        triggers.append("rsi_balanced")
+
+    # Continuous: RSI 越接近 45 越好（健康回踩区中点）, 偏离两端递减
+    if ctx.rsi_qfq_6 is not None:
+        rsi_strength = max(0.0, min(1.0, 1 - abs(ctx.rsi_qfq_6 - 45) / 15))
+        score += 0.10 * rsi_strength
+        if rsi_strength >= 0.5:
+            triggers.append("rsi_balanced")
 
     return Candidate(
         ts_code=ctx.ts_code,

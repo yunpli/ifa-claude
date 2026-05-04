@@ -56,15 +56,18 @@ def R3_HAMMER(ctx: SetupContext) -> Candidate | None:
     triggers = ["downtrend_20d<=-8%", "small_body", "long_lower_shadow", "bullish_close"]
     score = 0.5
 
-    if ctx.regime in ("cooldown", "weak_rebound"):
-        score += 0.2
-        triggers.append("post_weakness_regime")
-    if ret_20d <= -0.15:
-        score += 0.2
+    # Continuous: 跌幅深度 — -8%→0, -25%→full
+    drop_strength = max(0.0, min(1.0, (-ret_20d - 0.08) / 0.17))
+    score += 0.20 * drop_strength
+    if drop_strength >= 0.4:
         triggers.append("deep_drop")
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.5:
-        score += 0.1
-        triggers.append("volume_confirmation")
+
+    # Continuous: 量能确认
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 1.5))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.3:
+            triggers.append("volume_confirmation")
 
     return Candidate(
         ts_code=ctx.ts_code,

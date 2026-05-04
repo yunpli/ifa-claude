@@ -40,15 +40,18 @@ def P3_TIGHT_CONSOLIDATION(ctx: SetupContext) -> Candidate | None:
     triggers = ["prior_20d_gain>=10%", "tight_5d_box<=5%", "uptrend_stack"]
     score = 0.5
 
-    if ctx.regime == "trend_continuation":
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if box_range_pct <= 0.03:
-        score += 0.2
+    # Continuous: 箱体紧密度 — 5%→0, 1%→full
+    tightness = max(0.0, min(1.0, (0.05 - box_range_pct) / 0.04))
+    score += 0.20 * tightness
+    if tightness >= 0.5:
         triggers.append("very_tight_box")
-    if ctx.volume_ratio is not None and ctx.volume_ratio < 0.8:
-        score += 0.1
-        triggers.append("volume_drying")
+
+    # Continuous: 缩量程度 — 1.0×→0, 0.4×→full
+    if ctx.volume_ratio is not None:
+        drying_strength = max(0.0, min(1.0, (1.0 - ctx.volume_ratio) / 0.6))
+        score += 0.10 * drying_strength
+        if drying_strength >= 0.3:
+            triggers.append("volume_drying")
 
     return Candidate(
         ts_code=ctx.ts_code,

@@ -58,15 +58,25 @@ def R1_DOUBLE_BOTTOM(ctx: SetupContext) -> Candidate | None:
     triggers = ["double_bottom_pattern", "neckline_reclaim"]
     score = 0.5
 
-    if ctx.regime in ("weak_rebound", "range_bound", "cooldown"):
-        score += 0.2
-        triggers.append("post_weakness_regime")
-    if ctx.macd_dif_qfq is not None and ctx.macd_dif_qfq > 0:
-        score += 0.2
-        triggers.append("macd_dif_positive")
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.5:
-        score += 0.1
-        triggers.append("volume_breakout")
+    # Continuous: 颈线突破力度 close/peak ratio. 1.0→0, 1.04+→full
+    neckline_strength = max(0.0, min(1.0, (ctx.close_today / peak - 1.0) / 0.04))
+    score += 0.10 * neckline_strength
+    if neckline_strength >= 0.3:
+        triggers.append("decisive_neckline_break")
+
+    # Continuous: 双底相似度 — abs diff/low1, 0%→1.0, 3%+→0
+    low_diff_pct = abs(low1 - low2) / max(low1, 1e-9)
+    similarity = max(0.0, min(1.0, (0.03 - low_diff_pct) / 0.03))
+    score += 0.10 * similarity
+    if similarity >= 0.5:
+        triggers.append("symmetric_bottoms")
+
+    # Continuous: 量能突破
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 1.5))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.3:
+            triggers.append("volume_breakout")
 
     return Candidate(
         ts_code=ctx.ts_code,

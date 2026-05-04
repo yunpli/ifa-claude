@@ -40,15 +40,19 @@ def P1_MA20_PULLBACK(ctx: SetupContext) -> Candidate | None:
     triggers = ["uptrend_stack", "touched_ma20", "defended_close", "net_pullback_5d"]
     score = 0.5
 
-    if ctx.regime == "trend_continuation":
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if ctx.ma_qfq_5 is not None and ctx.close_today >= ctx.ma_qfq_5:
-        score += 0.2
-        triggers.append("above_ma5")
-    if ctx.rsi_qfq_6 is not None and ctx.rsi_qfq_6 <= 50:
-        score += 0.1
-        triggers.append("rsi_oversold_room")
+    # Continuous: 收盘高于 MA5 程度. 1.0×→0, 1.03×+→full
+    if ctx.ma_qfq_5 is not None:
+        above_ma5_strength = max(0.0, min(1.0, (ctx.close_today / ctx.ma_qfq_5 - 1.0) / 0.03))
+        score += 0.20 * above_ma5_strength
+        if above_ma5_strength >= 0.3:
+            triggers.append("above_ma5")
+
+    # Continuous: RSI 越低越有反弹空间. 50→0, 25→full
+    if ctx.rsi_qfq_6 is not None:
+        rsi_room = max(0.0, min(1.0, (50 - ctx.rsi_qfq_6) / 25))
+        score += 0.10 * rsi_room
+        if rsi_room >= 0.3:
+            triggers.append("rsi_oversold_room")
 
     return Candidate(
         ts_code=ctx.ts_code,

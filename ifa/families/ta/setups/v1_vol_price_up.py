@@ -31,14 +31,17 @@ def V1_VOL_PRICE_UP(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["5d_ret>=5%", "vol_ratio>=1.5", "uptrend_stack"]
     score = 0.5
-    if ctx.regime in ("trend_continuation", "early_risk_on"):
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if ret_5d >= 0.10:
-        score += 0.2
+
+    # Continuous: 价格强度 — 5%→0, 15%→full
+    price_strength = max(0.0, min(1.0, (ret_5d - 0.05) / 0.10))
+    score += 0.20 * price_strength
+    if price_strength >= 0.5:
         triggers.append("strong_5d_return")
-    if ctx.volume_ratio >= 2.0:
-        score += 0.1
+
+    # Continuous: 量能强度 — 1.5×→0, 3.5×→full
+    vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.5) / 2.0))
+    score += 0.10 * vol_strength
+    if vol_strength >= 0.25:
         triggers.append("volume_exceptional")
 
     return Candidate(

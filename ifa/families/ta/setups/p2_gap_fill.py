@@ -49,14 +49,24 @@ def P2_GAP_FILL(ctx: SetupContext) -> Candidate | None:
     triggers = ["uptrend_stack", "gap_filled", "above_gap_bottom"]
     score = 0.5
 
-    if ctx.regime == "trend_continuation":
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if ctx.close_today >= gap_top:
-        score += 0.2
+    # Continuous: 缺口回收程度 — 0 = at gap_bottom, 1.0+ = at or above gap_top
+    if gap_top > gap_bottom:
+        reclaim_strength = max(0.0, min(1.0,
+            (ctx.close_today - gap_bottom) / (gap_top - gap_bottom)))
+    else:
+        reclaim_strength = 0.0
+    score += 0.20 * reclaim_strength
+    if reclaim_strength >= 0.7:
         triggers.append("full_reclaim")
-    if today_high > today_low and ctx.close_today > today_low + 0.5 * (today_high - today_low):
-        score += 0.1
+
+    # Continuous: 收盘在当日 K 线的位置. 下沿→0, 上沿→1.0
+    if today_high > today_low:
+        close_position = max(0.0, min(1.0,
+            (ctx.close_today - today_low) / (today_high - today_low)))
+    else:
+        close_position = 0.5
+    score += 0.10 * close_position
+    if close_position >= 0.7:
         triggers.append("upper_half_close")
 
     return Candidate(

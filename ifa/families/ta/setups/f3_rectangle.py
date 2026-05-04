@@ -38,15 +38,19 @@ def F3_RECTANGLE(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["uptrend_stack", "rectangle_box", "upside_breakout"]
     score = 0.5
-    if ctx.regime == "trend_continuation":
-        score += 0.2
-        triggers.append("regime_tailwind")
-    if box_range_pct <= 0.05:
-        score += 0.2
+
+    # Continuous: 箱体紧密度 — 8%→0, 2%→full
+    tightness = max(0.0, min(1.0, (0.08 - box_range_pct) / 0.06))
+    score += 0.20 * tightness
+    if tightness >= 0.4:
         triggers.append("very_tight_box")
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.5:
-        score += 0.1
-        triggers.append("volume_breakout")
+
+    # Continuous: 量能突破
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 1.5))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.3:
+            triggers.append("volume_breakout")
 
     return Candidate(
         ts_code=ctx.ts_code,

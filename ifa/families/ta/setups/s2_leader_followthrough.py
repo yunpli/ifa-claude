@@ -43,17 +43,24 @@ def S2_LEADER_FOLLOWTHROUGH(ctx: SetupContext) -> Candidate | None:
 
     triggers = ["uptrend_stack", "L2>=2%", "outperforms_L2", "top_30pct_in_L2"]
     score = 0.5
-    if ctx.regime in ("trend_continuation", "early_risk_on", "sector_rotation"):
-        score += 0.2
-        triggers.append("regime_tailwind")
 
-    rank_threshold_top10 = peers[max(0, int(len(peers) * 0.1) - 1)]
-    if stock_ret >= rank_threshold_top10:
-        score += 0.2
+    # Continuous: 板块内排名分位 — 计算 stock_ret 在 peers 中的百分位
+    # peers sorted desc; find index 0..len-1; pos 0 = top → strength 1.0
+    n_peers = len(peers)
+    n_below = sum(1 for p in peers if p < stock_ret)
+    rank_pct = n_below / max(n_peers, 1)   # 0 = bottom, 1 = top
+    # bonus 的 [0,0.20]: 30% percentile (top 70%) → 0, 90%+ percentile → full
+    rank_strength = max(0.0, min(1.0, (rank_pct - 0.7) / 0.2))
+    score += 0.20 * rank_strength
+    if rank_strength >= 0.5:
         triggers.append("top_10pct_in_L2")
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.5:
-        score += 0.1
-        triggers.append("volume_confirmation")
+
+    # Continuous: 量能
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 1.5))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.3:
+            triggers.append("volume_confirmation")
 
     return Candidate(
         ts_code=ctx.ts_code,

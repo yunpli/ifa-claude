@@ -42,17 +42,18 @@ def T1_BREAKOUT(ctx: SetupContext) -> Candidate | None:
     triggers = ["close>ma20", "ma20>ma60", "20d_breakout"]
     score = 0.5
 
-    if ctx.close_today >= 1.02 * ctx.ma_qfq_20:
-        score += 0.2
+    # Continuous: 突破强度 — close/ma20 ratio. 1.0× → 0, 1.05×+ → full +0.20
+    break_strength = max(0.0, min(1.0, (ctx.close_today / ctx.ma_qfq_20 - 1.0) / 0.05))
+    score += 0.20 * break_strength
+    if break_strength >= 0.4:
         triggers.append("decisive_above_ma20")
 
-    if ctx.regime in ("trend_continuation", "early_risk_on"):
-        score += 0.2
-        triggers.append("regime_tailwind")
-
-    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.5:
-        score += 0.1
-        triggers.append("volume_confirmation")
+    # Continuous: 量能确认. 1.0×→0, 3.0×+→full +0.10
+    if ctx.volume_ratio is not None:
+        vol_strength = max(0.0, min(1.0, (ctx.volume_ratio - 1.0) / 2.0))
+        score += 0.10 * vol_strength
+        if vol_strength >= 0.25:
+            triggers.append("volume_confirmation")
 
     return Candidate(
         ts_code=ctx.ts_code,
