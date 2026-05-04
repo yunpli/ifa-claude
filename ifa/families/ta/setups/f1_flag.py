@@ -1,11 +1,11 @@
-"""F1 flag pattern — strong pole, tight downward consolidation, ready to break.
+"""F1 flag pattern — strong pole, then quiet sideways consolidation near the top.
 
-Triggers (all):
-  · pole: closes[-15] / closes[-21] - 1 >= 0.10        — 5-day strong move 15-20 days back
-  · flag (last 10 days): max-min range / max <= 7%     — tight consolidation
-  · slight downward drift in flag: closes[-1] < closes[-10] AND closes[-1] >= closes[-10] * 0.95
-  · today's close >= max(closes[-10:-1])               — about to break out
-  · MA20 > MA60                                         — uptrend backdrop
+Calibrated rules (after empirical tuning — original was 0 hits):
+  · pole: closes[-11] / closes[-21] - 1 >= 0.08     — ≥8% gain in days [-21..-11]
+  · flag (last 10 days): range_pct <= 9%            — sideways box
+  · flag drift: -8% <= closes[-1] / closes[-10] - 1 <= 3%   — flat or modest pullback
+  · today's close >= 70th-percentile of closes[-10:]  — near top of the flag
+  · MA20 > MA60                                       — uptrend backdrop
 
 Score:
   base 0.5
@@ -25,26 +25,26 @@ def F1_FLAG(ctx: SetupContext) -> Candidate | None:
     if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
         return None
 
-    pole = ctx.closes[-15] / ctx.closes[-21] - 1.0
-    if pole < 0.10:
+    pole = ctx.closes[-11] / ctx.closes[-21] - 1.0
+    if pole < 0.08:
         return None
 
-    flag_window = ctx.closes[-10:]
+    flag_window = list(ctx.closes[-10:])
     flag_high = max(flag_window)
     flag_low = min(flag_window)
     flag_range_pct = (flag_high - flag_low) / flag_high if flag_high > 0 else 1.0
-    if flag_range_pct > 0.07:
+    if flag_range_pct > 0.09:
         return None
 
-    if ctx.closes[-1] >= ctx.closes[-10]:
-        return None
-    if ctx.closes[-1] < ctx.closes[-10] * 0.95:
-        return None
-
-    if ctx.close_today < max(ctx.closes[-10:-1]):
+    drift = ctx.closes[-1] / ctx.closes[-10] - 1.0
+    if drift < -0.08 or drift > 0.03:
         return None
 
-    triggers = ["pole>=10%", "tight_flag<=7%", "downward_drift", "near_breakout"]
+    p70 = sorted(flag_window)[int(len(flag_window) * 0.7)]
+    if ctx.close_today < p70:
+        return None
+
+    triggers = ["pole>=8%", "tight_flag<=9%", "near_top_of_flag"]
     score = 0.5
     if ctx.regime in ("trend_continuation", "early_risk_on"):
         score += 0.2
