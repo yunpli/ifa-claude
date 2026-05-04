@@ -113,6 +113,115 @@ th { background: #f6f8fa; font-weight: 600; }
     </table>
     {% endif %}
 
+  {% elif s.type == 'market_state' %}
+    <h2>{{ s.title }}</h2>
+    <div>
+      {% if s.sse_close is not none %}
+      <span class="kpi">SSE 收 <b>{{ '%.2f' | format(s.sse_close) }}</b>
+        ({{ '%+.2f' | format(s.sse_pct_chg) }}%)</span>
+      {% endif %}
+      {% if s.amount_yi_yuan is not none %}
+      <span class="kpi">成交 <b>{{ '%.0f' | format(s.amount_yi_yuan) }} 亿</b>
+        {% if s.amount_pct_60d is not none %}(60d {{ '%.0f' | format(s.amount_pct_60d) }}%){% endif %}</span>
+      {% endif %}
+      {% if s.up_count is not none %}
+      <span class="kpi">涨 <b>{{ s.up_count }}</b> 跌 <b>{{ s.down_count }}</b>
+        {% if s.flat_count %}平 <b>{{ s.flat_count }}</b>{% endif %}</span>
+      {% endif %}
+      {% if s.limit_up is not none %}
+      <span class="kpi">涨停 <b>{{ s.limit_up }}</b> 跌停 <b>{{ s.limit_down }}</b>
+        最高连板 <b>{{ s.consecutive_lb_high }}</b></span>
+      {% endif %}
+      {% if s.blow_up_count %}
+      <span class="kpi">炸板 <b>{{ s.blow_up_count }}</b>
+        ({{ '%.1f' | format(s.blow_up_rate) }}%)</span>
+      {% endif %}
+      {% if s.north_yi_yuan is not none %}
+      <span class="kpi">北向 <b>{{ '%+.1f' | format(s.north_yi_yuan) }} 亿</b></span>
+      {% endif %}
+      {% if s.market_state %}
+      <span class="kpi">市态 <b>{{ s.market_state }}</b></span>
+      {% endif %}
+    </div>
+
+  {% elif s.type == 'family_grid' %}
+    <h2>{{ s.title }}</h2>
+    <table>
+      <tr><th>族</th><th>命中</th><th>≥4★</th><th>主导 Setup</th></tr>
+      {% for fam_name, f in s.families.items() %}
+      {% if f.n > 0 %}
+      <tr>
+        <td><b>{{ fam_name }}</b></td>
+        <td>{{ f.n }}</td>
+        <td>{{ f.top }}</td>
+        <td>{% for setup in f.setups[:3] %}<span class="tag">{{ setup.name }} ({{ setup.n }})</span>{% endfor %}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </table>
+
+  {% elif s.type == 'attribution' %}
+    <h2>{{ s.title }}</h2>
+    <div class="meta">窗口：{{ s.window_start }} → 今日（T+1 实际收益）</div>
+    {% if s.rows %}
+    <table>
+      <tr><th>Setup</th><th>样本</th><th>胜率</th><th>均收益</th></tr>
+      {% for r in s.rows %}
+      <tr>
+        <td>{{ r.setup_name }}</td>
+        <td>{{ r.n }}</td>
+        <td>{% if r.win_rate is not none %}{{ '%.1f' | format(r.win_rate) }}%{% else %}-{% endif %}</td>
+        <td>{% if r.avg_return_pct is not none %}{{ '%+.2f' | format(r.avg_return_pct) }}%{% else %}-{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+      <p style="color: #6e7681;">窗口内无可归因样本。</p>
+    {% endif %}
+
+  {% elif s.type == 'risk_scan' %}
+    <h2>{{ s.title }}</h2>
+    {% if s.climax_warning %}
+    <p style="background: #fff8c5; border-left: 3px solid #d4a72c; padding: 0.6em 1em;">
+      ⚠ {{ s.climax_warning }}
+    </p>
+    {% endif %}
+    <p>筹码松动候选 (C2)：<b>{{ s.chip_loose_count }}</b></p>
+    {% if s.decaying_setups %}
+    <p><b>衰退 Setup（decay ≤ -5pp）</b>：</p>
+    <table>
+      <tr><th>Setup</th><th>衰减</th><th>胜率 60d</th></tr>
+      {% for d in s.decaying_setups %}
+      <tr>
+        <td>{{ d.setup_name }}</td>
+        <td>{{ '%+.1f' | format(d.decay) }}</td>
+        <td>{% if d.winrate_60d is not none %}{{ '%.1f' | format(d.winrate_60d) }}%{% else %}-{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+      <p>当前无 setup 衰减超过 -5pp 阈值。</p>
+    {% endif %}
+
+  {% elif s.type == 'hypotheses' %}
+    <h2>{{ s.title }}</h2>
+    <div class="meta">下个交易日实际收益将在 T+1 自动评估，结果写入 <code>ta.report_judgments</code>。</div>
+    {% if s.hypotheses %}
+    <table>
+      <tr><th>代码</th><th>Setup</th><th>分</th><th>假设陈述</th></tr>
+      {% for h in s.hypotheses %}
+      <tr>
+        <td>{{ h.ts_code }}</td>
+        <td>{{ h.setup_name }}</td>
+        <td>{{ '%.2f' | format(h.score) }}</td>
+        <td>{{ h.statement }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+      <p style="color: #6e7681;">本日无 5★ 候选可生成假设。</p>
+    {% endif %}
+
   {% elif s.type == 'disclaimer' %}
     <h2>{{ s.title }}</h2>
     <div class="disclaimer">{{ s.body }}</div>

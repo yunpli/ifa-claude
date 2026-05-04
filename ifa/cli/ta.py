@@ -187,8 +187,12 @@ def compute_metrics_cmd(
 def evening_report_cmd(
     on_date: str = typer.Option(None, "--date", help="Trade date YYYY-MM-DD (default: today BJT)"),
     output: str = typer.Option("tmp/", "--output", help="Output dir, or '-' to print MD to stdout"),
+    slot: str = typer.Option("evening", "--slot", help="Report slot label (evening/morning/intraday)"),
 ) -> None:
-    """Generate the TA evening report (6 sections; HTML + MD)."""
+    """Generate the TA evening report (HTML + MD).
+
+    Filename: ifa_TA_{slot}_{trade_date YYYYMMDD}_{generation HHMM BJT}.{html,md}
+    """
     from pathlib import Path
 
     target = date.fromisoformat(on_date) if on_date else bjt_now().date()
@@ -201,7 +205,9 @@ def evening_report_cmd(
 
     out_dir = Path(output)
     out_dir.mkdir(parents=True, exist_ok=True)
-    base = f"TA-Evening-{target.strftime('%Y%m%d')}"
+    stamp_date = target.strftime("%Y%m%d")
+    stamp_time = bjt_now().strftime("%H%M")
+    base = f"ifa_TA_{slot}_{stamp_date}_{stamp_time}"
     html_path = out_dir / f"{base}.html"
     md_path = out_dir / f"{base}.md"
     html_path.write_text(render_html(report), encoding="utf-8")
