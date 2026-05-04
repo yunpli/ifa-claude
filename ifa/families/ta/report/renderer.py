@@ -149,6 +149,10 @@ def render_markdown(report: dict) -> str:
             else:
                 out.append("_本日无 5★ 候选可生成假设。_")
             out.append("")
+        elif t == "narrative":
+            out.append(f"## {s['title']}")
+            out.append("> " + s["body"])
+            out.append("")
         elif t == "disclaimer":
             out.append(f"## {s['title']}")
             out.append("> " + s["body"])

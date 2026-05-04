@@ -222,6 +222,12 @@ th { background: #f6f8fa; font-weight: 600; }
       <p style="color: #6e7681;">本日无 5★ 候选可生成假设。</p>
     {% endif %}
 
+  {% elif s.type == 'narrative' %}
+    <h2>{{ s.title }}</h2>
+    <p style="background: #f0f7ff; border-left: 3px solid #0969da; padding: 0.6em 1em; line-height: 1.7;">
+      {{ s.body }}
+    </p>
+
   {% elif s.type == 'disclaimer' %}
     <h2>{{ s.title }}</h2>
     <div class="disclaimer">{{ s.body }}</div>

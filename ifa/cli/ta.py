@@ -188,6 +188,7 @@ def evening_report_cmd(
     on_date: str = typer.Option(None, "--date", help="Trade date YYYY-MM-DD (default: today BJT)"),
     output: str = typer.Option("tmp/", "--output", help="Output dir, or '-' to print MD to stdout"),
     slot: str = typer.Option("evening", "--slot", help="Report slot label (evening/morning/intraday)"),
+    llm: bool = typer.Option(False, "--llm/--no-llm", help="Add LLM narrative sections"),
 ) -> None:
     """Generate the TA evening report (HTML + MD).
 
@@ -197,7 +198,11 @@ def evening_report_cmd(
 
     target = date.fromisoformat(on_date) if on_date else bjt_now().date()
     engine = get_engine()
-    report = build_evening_report(engine, target)
+    augmenter = None
+    if llm:
+        from ifa.families.ta.report.llm_aug import TALLMAugmenter
+        augmenter = TALLMAugmenter()
+    report = build_evening_report(engine, target, augmenter=augmenter)
 
     if output == "-":
         console.print(render_markdown(report))

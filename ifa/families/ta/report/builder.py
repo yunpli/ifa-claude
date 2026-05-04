@@ -23,19 +23,52 @@ from ifa.core.report.timezones import bjt_now, fmt_bjt
 log = logging.getLogger(__name__)
 
 
-def build_evening_report(engine: Engine, on_date: date) -> dict:
+def build_evening_report(engine: Engine, on_date: date,
+                          *, augmenter=None) -> dict:
     sections: list[dict] = []
-    sections.append(_section_overview(engine, on_date))
-    sections.append(_section_market_state(engine, on_date))
-    sections.append(_section_stars(engine, on_date, star_filter=5, title="§03 五星级候选"))
-    sections.append(_section_stars(engine, on_date, star_filter=4, title="§04 四星级候选"))
-    sections.append(_section_candidates_by_family(engine, on_date))
-    sections.append(_section_verification(engine, on_date))
-    sections.append(_section_metrics(engine, on_date))
-    sections.append(_section_attribution(engine, on_date))
-    sections.append(_section_risk_scan(engine, on_date))
-    sections.append(_section_hypotheses(engine, on_date))
-    sections.append(_section_disclaimer())
+    overview = _section_overview(engine, on_date)
+    market_state = _section_market_state(engine, on_date)
+    s5 = _section_stars(engine, on_date, star_filter=5, title="§03 五星级候选")
+    s4 = _section_stars(engine, on_date, star_filter=4, title="§04 四星级候选")
+    fam = _section_candidates_by_family(engine, on_date)
+    verify = _section_verification(engine, on_date)
+    metrics = _section_metrics(engine, on_date)
+    attribution = _section_attribution(engine, on_date)
+    risk = _section_risk_scan(engine, on_date)
+    hypotheses = _section_hypotheses(engine, on_date)
+    disclaimer = _section_disclaimer()
+
+    sections.extend([overview, market_state])
+    if augmenter is not None:
+        narrative = augmenter.regime_explainer(
+            regime=overview.get("regime"),
+            confidence=overview.get("regime_confidence"),
+            transitions=_load_transitions(engine, on_date),
+        )
+        if narrative:
+            sections.append({"type": "narrative", "title": "§02-N 体制解读",
+                             "body": narrative})
+    sections.extend([s5, s4])
+    if augmenter is not None:
+        narrative = augmenter.candidate_narrator(
+            top5=[c for c in s5.get("candidates", [])][:5],
+            top4=[c for c in s4.get("candidates", [])][:5],
+        )
+        if narrative:
+            sections.append({"type": "narrative", "title": "§04-N 候选解读",
+                             "body": narrative})
+    sections.extend([fam, verify, metrics, attribution, risk])
+    if augmenter is not None:
+        narrative = augmenter.strategy_review(
+            attribution_rows=attribution.get("rows", []),
+            decaying=risk.get("decaying_setups", []),
+            chip_loose_count=risk.get("chip_loose_count", 0),
+            climax_warning=risk.get("climax_warning"),
+        )
+        if narrative:
+            sections.append({"type": "narrative", "title": "§13-N 策略评论",
+                             "body": narrative})
+    sections.extend([hypotheses, disclaimer])
 
     return {
         "title": f"TA 晚报 · {on_date}",
@@ -43,6 +76,16 @@ def build_evening_report(engine: Engine, on_date: date) -> dict:
         "trade_date": on_date.isoformat(),
         "sections": sections,
     }
+
+
+def _load_transitions(engine: Engine, on_date: date) -> dict:
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT transitions_json FROM ta.regime_daily WHERE trade_date = :d
+        """), {"d": on_date}).fetchone()
+    if not row or not row[0]:
+        return {}
+    return row[0] if isinstance(row[0], dict) else {}
 
 
 def _section_overview(engine: Engine, on_date: date) -> dict:
