@@ -18,6 +18,7 @@ from ifa.families.ta.setups.ranker import rank as rank_candidates
 from ifa.families.ta.setups.repo import upsert_candidates
 from ifa.families.ta.setups.scanner import scan as scan_setups
 from ifa.families.ta.setups.tracking import evaluate_for_date
+from ifa.families.ta.metrics import compute_setup_metrics
 
 log = logging.getLogger(__name__)
 console = Console()
@@ -133,6 +134,17 @@ def track_candidates(
         console.print(f"  h={h:>2}  tracked {n:>5} candidates")
         total += n
     console.print(f"\n[bold green]done.[/] {total} tracking rows written.")
+
+
+@app.command("compute-metrics")
+def compute_metrics_cmd(
+    on_date: str = typer.Option(None, "--date", help="Date YYYY-MM-DD (default: today BJT)"),
+) -> None:
+    """Compute ta.setup_metrics_daily — rolling 60d/250d edge per setup."""
+    target = date.fromisoformat(on_date) if on_date else bjt_now().date()
+    engine = get_engine()
+    n = compute_setup_metrics(engine, target)
+    console.print(f"[green]✓ wrote {n} rows to ta.setup_metrics_daily for {target}[/]")
 
 
 @app.command("backfill-regime")
