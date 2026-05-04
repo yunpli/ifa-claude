@@ -500,43 +500,68 @@ uv run alembic current
 2. `raw_kpl_list.bid_amount` / `lu_bid_vol` 在最近数据中**全为 NULL**，应使用 `limit_order`（封单金额，元）+ `free_float`（自由流通市值，元）；
 3. `raw_top_inst.side` 是 '0'/'1'（top-buy-list 还是 top-sell-list 的归属），**不是买/卖方向**；判断机构净买用 `exalter='机构专用' AND net_buy > 0`。
 
-### 待办优先级（用户已确认 2026-05-04）
+### M10 完成进度（2026-05-04 当日产出）
 
-**P0 报告与产品向**
-1. Q1 双轨 universe（long pool + risk pool）+ `warnings_daily`
-2. Q7 ATR 三段位推荐价 entry/stop/target（持久化 + 显示）
-3. Q3 Tier A=10/B=20 折叠重排,Tier C 不渲染 HTML
-4. Q4 §13 风险扫描 → §11 表现归因之前;28 setup 聚光灯只展示今日有候选的
-5. Q8.5 D 族在风险扫描里独立成节
+**P0 ✅ 全部完成**
+1. ✅ Q1 双轨 universe（long pool + warnings_daily）
+2. ✅ Q7 ATR 三段位推荐价（顶层列 + 显示）
+3. ✅ Q3 Tier A=10/B=20 折叠重排,Tier C 不渲染 HTML
+4. ✅ Q4 §13 风险扫描 → §11 之前;28 setup 聚光灯只显示活跃
+5. ✅ Q8.5 D 族在风险扫描里独立成节
+6. ✅ Q9 §13 顶部综合风险红绿灯 dashboard
 
-**P1 调参前的工程基础**
-6. Forward-return 自动 ETL（T+5 / T+10 / **T+15** — 主目标）
-7. Walk-forward 回测引擎（独立于报告生成）
-8. Q8.2 基本面二筛（市值 ≥30 亿 + 4 季 ROE 不全负）
-9. Q8.3 集中度约束（TierA 同 L2 ≤ 4，TierB 同 L2 ≤ 6）
-10. 黑天鹅 ETL（停牌 ✓ + 立案 + 重大重组 + ST 加帽 — 拉 Tushare `anns_d`）
-11. 覆盖率监控 + 参数版本管理（v2.2 / v2.3 并存）
-12. event_etl 接入每日 runner
+**P1 ✅ 全部完成**
+7. ✅ params bumped to **v2.3.0**（删除 v2.2;新增 recommended_price / backtest_objective / fundamental_filter / concentration / blacklist / position_tracking 6 节）
+8. ✅ 推荐价持久化（5 列上提 candidates_daily;evidence_json 留审计）
+9. ✅ 持仓状态机 `ta.position_events_daily`（fill 检测 + stop/target/T+15 出场 + max_drawdown_pct）
+10. ✅ Forward-return ETL（return_t5/t10/t15 + combined_score_60d 用于 walk-forward 目标）
+11. ✅ 基本面二筛（市值≥30亿 + ROE 4Q不全负 + ST 名字检测）
+12. ✅ 集中度约束（TierA 同 L2≤3 / TierB ≤6 / 合计≤7）
+13. ✅ 黑天鹅 ETL（anns_d 立案/重组 + forecast 业绩雷 + 减持）→ `ta.blacklist_daily`
+14. ✅ Walk-forward 回测引擎（`ifa.families.ta.backtest`）+ CLI `walk-forward`
+15. ✅ 每日 ETL runner `ifa.families.ta.etl.runner.run_ta_daily_etls` + `ta daily-etl` CLI
+16. ✅ 覆盖率监控 + `ta coverage` CLI（按 setup 列出最近 N 天命中数,标记 starved/low_coverage）
+17. ✅ Tushare `fina_indicator` 调用脚手架（`ta.fina_indicator_quarterly` + ETL,等回填后 ROE 自动启用）
 
-**P2 调参（用户已要求 P2/P3 互换）**
-13. 90d-IS / 252d-OOS walk-forward → 冻结 v2.3
-14. Q8.1 setup 相关性去重（用历史命中算 setup-pair 相关矩阵）
+**P2 调参（用户已要求 P2/P3 互换,即调参在前）**
+- ⏳ 90d-IS / 252d-OOS walk-forward 跑 → 冻结新 v2.3 参数
+- ⏳ Q8.1 setup 相关性去重（用历史命中矩阵)
 
 **P3 装饰性历史回放**
-15. 4 月 SmartMoney compute backfill + 报告生成 + TA 报告生成
-16. 持仓状态机（hit entry / hit stop / hit target → `position_events_daily`）
+- ⏳ 4 月 SmartMoney compute backfill + 报告生成 + TA 报告生成
+
+### Alembic 链路 (2026-05-04 head)
+
+```
+c1d2e3f4g5h6 (ta.event_signal_daily)
+ └─ d2e3f4g5h6i7 (ta.warnings_daily)
+     └─ e3f4g5h6i7j8 (ta.candidates_daily +5列 / position_events_daily)
+         └─ f4g5h6i7j8k9 (position_events +T+5/T+10/T+15)
+             └─ g5h6i7j8k9l0 (setup_metrics_daily +combined_score_60d)
+                 └─ h6i7j8k9l0m1 (ta.blacklist_daily)
+                     └─ i7j8k9l0m1n2 (ta.fina_indicator_quarterly) ← head
+```
 
 ### 关键文件索引
 
 ```
 ifa/families/ta/
-  setups/              ← 28 个 setup + base.py + scanner.py + ranker.py + context_loader.py
-  regime/              ← classifier + transitions
-  etl/event_etl.py     ← M10 新增（forecast / express / disclosure_date → ta.event_signal_daily）
-  params/ta_v2.2.yaml  ← 当前生产参数
-  report/              ← evening builder + templates + labels.py + llm_aug.py
-  sector_phase_metrics.py ← 数据驱动 phase 评分（替代手调 map）
+  setups/                      ← 28 setup + scanner + ranker + context_loader + repo
+                                 + position_tracker + recommended_price
+  regime/                      ← classifier + transitions
+  etl/event_etl.py             ← M10 forecast/express/disclosure_date
+  etl/blacklist_etl.py         ← M10 anns_d adverse-event scan + forecast losses
+  etl/fina_etl.py              ← M10 fina_indicator quarterly (ROE)
+  etl/runner.py                ← M10 unified daily ETL + coverage_check
+  backtest/runner.py           ← M10 walk-forward + backtest_window
+  metrics_v2.py                ← M10 v2.3 metrics from position_events (T+15 weighted)
+  params/ta_v2.3.yaml          ← v2.3 生产参数 (was 2.2.0; bumped 2026-05-04)
+  report/                      ← evening builder + templates + labels + llm_aug
+  sector_phase_metrics.py      ← 数据驱动 phase 评分
 
-alembic/versions/c1d2e3f4g5h6_ta_event_signal_daily.py  ← 当前 head
+ifa/cli/ta.py
+  ta walk-forward --start ... --end ...   (M10 backtest CLI)
+  ta daily-etl --date ...                 (M10 unified ETL CLI)
+  ta coverage --date ... --lookback 30    (M10 coverage monitor)
 ```
 

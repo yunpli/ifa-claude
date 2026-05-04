@@ -223,6 +223,58 @@ def backtest_cmd(
         console.print(f"{setup:<24} {n:>6} {wr_s:>6} {ag_s:>7} {mxr_s:>7} {mxd_s:>7} {plr_s:>5}")
 
 
+@app.command("daily-etl", help="M10 P1.7 — run all TA ETLs for a trade_date.")
+def daily_etl_cmd(
+    trade_date: str = typer.Option(..., "--date", help="YYYY-MM-DD"),
+    skip_factor_pro: bool = typer.Option(False, "--skip-factor-pro"),
+    skip_cyq: bool = typer.Option(False, "--skip-cyq"),
+    skip_suspend: bool = typer.Option(False, "--skip-suspend"),
+    skip_events: bool = typer.Option(False, "--skip-events"),
+    skip_blacklist: bool = typer.Option(False, "--skip-blacklist"),
+) -> None:
+    """Pull TA family inputs from Tushare for one trade_date."""
+    from ifa.core.tushare.client import TuShareClient
+    from ifa.families.ta.etl.runner import run_ta_daily_etls
+    engine = get_engine()
+    client = TuShareClient()
+    target = date.fromisoformat(trade_date)
+    out = run_ta_daily_etls(
+        client, engine, trade_date=target,
+        skip_factor_pro=skip_factor_pro, skip_cyq=skip_cyq,
+        skip_suspend=skip_suspend, skip_events=skip_events,
+        skip_blacklist=skip_blacklist,
+    )
+    console.print(f"[bold]TA daily ETL {target}[/]")
+    for source, n in out.items():
+        marker = "[red]error[/]" if n < 0 else f"{n} rows"
+        console.print(f"  {source:<18} {marker}")
+
+
+@app.command("coverage", help="M10 P1.7 — per-setup coverage in last N days.")
+def coverage_cmd(
+    on_date: str = typer.Option(..., "--date", help="YYYY-MM-DD"),
+    lookback: int = typer.Option(30, "--lookback", help="Trade days lookback"),
+    threshold: int = typer.Option(30, "--threshold",
+                                   help="Min monthly coverage; below = flag"),
+) -> None:
+    """Show per-setup candidate counts in last N days; flag tight setups."""
+    from ifa.families.ta.etl.runner import coverage_check
+    engine = get_engine()
+    target = date.fromisoformat(on_date)
+    cov = coverage_check(
+        engine, on_date=target,
+        lookback_days=lookback, min_monthly_coverage=threshold,
+    )
+    console.print(f"\n[bold]Setup coverage in last {lookback} days ending {target}[/]")
+    console.print(f"{'Setup':<26} {'dates':>6} {'total':>7} {'status':>14}")
+    for setup, m in sorted(cov.items(), key=lambda kv: kv[1]['total_candidates']):
+        color = "red" if m["status"] != "ok" else "green"
+        console.print(
+            f"{setup:<26} {m['trade_dates_with_hits']:>6} "
+            f"{m['total_candidates']:>7}   [{color}]{m['status']:<12}[/]"
+        )
+
+
 @app.command("walk-forward", help="M10 P1.4 — walk-forward backtest using position_events.")
 def walk_forward_cmd(
     start: str = typer.Option(..., "--start", help="Window start YYYY-MM-DD"),

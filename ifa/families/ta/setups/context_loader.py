@@ -139,6 +139,39 @@ def _tradeable_universe(engine: Engine, on_date: date) -> tuple[set[str], set[st
         log.info("fundamental: ST/*ST cut %d stocks (kept %d)",
                  before_n - len(long_universe), len(long_universe))
 
+        # M10 P1.7 — ROE 4Q-not-all-negative check.
+        n_q = fund.get("roe_lookback_quarters", 4)
+        sql_roe = text("""
+            WITH ranked AS (
+                SELECT ts_code, roe,
+                       ROW_NUMBER() OVER (PARTITION BY ts_code ORDER BY end_date DESC) AS rn
+                FROM ta.fina_indicator_quarterly
+                WHERE end_date <= :on_date AND roe IS NOT NULL
+            )
+            SELECT ts_code,
+                   COUNT(*) AS n_periods,
+                   SUM(CASE WHEN roe < 0 THEN 1 ELSE 0 END) AS n_neg
+            FROM ranked
+            WHERE rn <= :n_q
+            GROUP BY ts_code
+        """)
+        try:
+            with engine.connect() as conn:
+                rows = conn.execute(sql_roe, {"on_date": on_date, "n_q": n_q}).fetchall()
+            # Need ≥2 periods of data + ALL negative to fail
+            roe_fail = {r[0] for r in rows if r[1] >= 2 and r[2] == r[1]}
+            if roe_fail:
+                before_n = len(long_universe)
+                long_universe -= roe_fail
+                log.info("fundamental: ROE-all-neg(%dQ) cut %d stocks (kept %d)",
+                         n_q, before_n - len(long_universe), len(long_universe))
+            elif rows:
+                log.info("fundamental: ROE check ran (%d stocks); none failed", len(rows))
+            else:
+                log.info("fundamental: fina_indicator_quarterly empty — ROE skipped")
+        except Exception as e:
+            log.debug("ROE check failed: %s", e)
+
     # M10 P1.6 — Blacklist filter (hard reasons cut, soft reasons just tag).
     bl = load_params().get("blacklist", {}) or {}
     bl_hard = bl.get("hard", {}) or {}
