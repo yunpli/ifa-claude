@@ -37,10 +37,12 @@ def upsert_candidates(
     sql_insert = text("""
         INSERT INTO ta.candidates_daily
             (trade_date, ts_code, setup_name, rank, final_score, star_rating,
-             regime_at_gen, evidence_json, in_top_watchlist)
+             regime_at_gen, evidence_json, in_top_watchlist,
+             entry_price, stop_loss, target_price, rr_ratio, price_basis)
         VALUES
             (:trade_date, :ts_code, :setup_name, :rank, :final_score, :star_rating,
-             :regime_at_gen, :evidence, :in_top_watchlist)
+             :regime_at_gen, :evidence, :in_top_watchlist,
+             :entry_price, :stop_loss, :target_price, :rr_ratio, :price_basis)
     """)
     # M10 P0.2 — compute ATR-based recommended prices per (setup hit), then
     # merge to per-stock conservative-side prices (max entry, max stop, min target).
@@ -99,6 +101,12 @@ def upsert_candidates(
                     "entry": pm.entry, "stop": pm.stop, "target": pm.target,
                     "rr": pm.rr,
                 }
+            # M10 P1.1 — top-level price columns (per-stock merged price preferred,
+            # else per-setup price). price_basis tells which one was used.
+            pm = per_stock_merged.get(c.ts_code)
+            ps = per_setup_price.get((c.ts_code, c.setup_name))
+            chosen = pm or ps
+            price_basis = "rec_price_stock" if pm else ("rec_price_setup" if ps else None)
             conn.execute(sql_insert, {
                 "trade_date": on_date,
                 "ts_code": c.ts_code,
@@ -111,6 +119,11 @@ def upsert_candidates(
                 "regime_at_gen": regime_at_gen,
                 "evidence": json.dumps(evidence_payload, ensure_ascii=False, default=str),
                 "in_top_watchlist": rc.in_top_watchlist,
+                "entry_price": chosen.entry if chosen else None,
+                "stop_loss": chosen.stop if chosen else None,
+                "target_price": chosen.target if chosen else None,
+                "rr_ratio": chosen.rr if chosen else None,
+                "price_basis": price_basis,
             })
     return len(ranked)
 

@@ -1,0 +1,129 @@
+ranker:
+  decay:
+    observation_floor_pp: -10
+    suspension_floor_pp: -15
+  diversity:
+    top_cap_per_setup: 3
+  regime_boost: 0.1
+  winrate:
+    floor_ratio: 0.4
+    target_pct: 30
+  tiers:
+    a_size: 10
+    b_size: 20
+    c_size: 100
+universe:
+  min_avg_amount_yi: 0.2          # 20d avg amount 下限：0.2 亿元 = 2000 万元
+  min_coverage_pct: 90            # 20d 内有 raw_daily 行的天数比例（剔除停牌）
+
+sector_flow:
+  # ── Layer 1 — DISCRETE governance switches (A/B test, not continuous tune) ──
+  exclude_retreat_phase: true     # 退潮 cycle_phase 直接剔除股票
+  exclude_retreat_role: true      # 退潮 role 直接剔除
+  exclude_unidentified_role: false # 未识别 role 是否剔除（默认保留）
+
+  # ── Layer 2 — CONTINUOUS scoring weights (greedy-search optimizable) ──
+  quality_weight_min: 0.6         # 最差留 60% — 防止极端归零导致候选稀缺
+  quality_weight_max: 1.0         # 最好不再加成 — 防止 macro 过拟合
+  net_outflow_pct_floor: 0.10     # net_amount percentile <10% 触发硬剔除
+  rank_weight: 0.5                # 板块当日 net_amount 横截面 rank 权重
+  phase_weight: 0.3               # data-derived phase score 权重
+  confidence_weight: 0.2          # SmartMoney role/phase 置信度权重
+
+  # NOTE: phase_scores INTENTIONALLY NOT here — auto-derived from rolling 60d
+  # T+15 historical returns by metrics.compute_sector_phase_metrics. As market
+  # behavior shifts, scores adapt. See ta/sector_phase_metrics.py.
+regime:
+  thresholds:
+    cooldown:
+      n_down_min: 3000
+      n_limit_down_strong: 25
+      n_limit_down_weak: 15
+      udr_med: 0.7
+      udr_strong: 0.6
+      udr_weak: 0.8
+    distribution_risk:
+      ld_vs_lu_ratio: 1.5
+      n_down_strong: 4500
+      n_limit_down_strong: 50
+      n_limit_down_with_down: 30
+    early_risk_on:
+      absolute_lu_min: 70
+      absolute_up_min: 4000
+      udr_strong_min: 1.7
+    range_bound:
+      ma_diff_pct_max: 0.01
+      vol_pct_max: 8
+  vetos:
+    range_bound:
+      cooldown_path_n_down_min: 3000
+      cooldown_path_udr_max: 0.7
+      n_down_max: 3700
+      n_limit_down_max: 25
+      n_limit_up_max: 80
+      n_up_max: 4200
+    trend_continuation:
+      defer_to_early_lu_min: 70
+      defer_to_early_up_min: 4000
+      n_down_max: 3700
+      n_limit_down_max: 25
+      udr_min: 1.265
+version: 2.3.0
+
+# ─── M10 P1 — new sections ──────────────────────────────────────────────
+
+# Recommended-price ATR coefficients (Wall-Street standard).
+# entry = entry_close × (1 + entry_offset_atr × ATR%)
+# stop  = entry × (1 − k_stop × ATR%)         k_stop = 2.0 → -2 ATR
+# target= entry × (1 + k_target × ATR%)       k_target = 4.0 → +4 ATR → R:R 2:1
+recommended_price:
+  k_stop: 2.0
+  k_target: 4.0
+  # entry_offset_atr is per-setup-category in code (not tunable per-yaml).
+
+# T+15 holding-period optimization weights for backtest objective.
+backtest_objective:
+  weights:
+    t15: 0.7      # main: 1-2-week target
+    t5:  0.2      # short-leg sanity
+    t10: 0.1      # bridge
+  walk_forward:
+    is_trade_days: 90    # in-sample window for parameter search
+    oos_trade_days: 30   # out-of-sample validation
+    n_rolls: 12          # 12 rolling windows ≈ 1 year of WFA
+  drawdown_cap_pct: 8.0  # max DD constraint per setup; over → demote
+  min_monthly_coverage: 30  # below = parameter too tight; flag
+
+# Fundamental二筛 (pre-Tier filter). All three must pass to enter long pool.
+fundamental_filter:
+  enabled: true
+  min_total_mv_yi: 30        # 总市值 ≥ 30 亿元
+  roe_lookback_quarters: 4   # 近 N 季 ROE 不能全部为负
+  st_lookback_days: 365      # 1 年内戴过 ST/*ST 帽子 → 剔除
+
+# 集中度约束 (per L2 SW sector cap).
+concentration:
+  enabled: true
+  tier_a_per_l2_max: 3       # Tier A 同 L2 上限
+  tier_b_per_l2_max: 6       # Tier B 同 L2 上限
+  tier_ab_per_l2_max: 7      # Tier A+B 合计上限
+
+# 黑天鹅 — 6 类(硬剔 + 软警示)
+blacklist:
+  hard:
+    suspended: true                # ta.suspend_limit
+    st_status: true                # name 含 ST/*ST
+    investigation: true            # 立案调查 (anns_d)
+    major_restructuring: true      # 重大资产重组
+  soft:
+    severe_forecast_miss: true     # 业绩预告 ref_value < threshold
+    severe_forecast_threshold: -50 # %
+    insider_selling: true          # 大股东减持
+
+# 持仓状态机 (T+15 真实追踪).
+position_tracking:
+  enabled: true
+  horizons_trade_days: [5, 10, 15]   # 主追踪窗
+  exit_priority: ["stop_hit", "target_hit", "time_exit"]
+  fill_window_trade_days: 1          # T+1 不成交 → unfilled
+  unfilled_max_premium_pct: 0.5      # T+1 open > entry × 1.005 → 视作 unfilled (避免追涨成交)

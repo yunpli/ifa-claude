@@ -1,4 +1,4 @@
-"""Load TA family parameters from ta_v2.2.yaml.
+"""Load TA family parameters from ta_v2.3.yaml (was 2.2.0; bumped 2026-05-04 for M10 P1).
 
 Cached process-wide; call `reload_params()` to force a fresh read (for
 tests or after editing the file in a long-running process).
@@ -66,7 +66,7 @@ from typing import Any
 
 import yaml
 
-_PARAMS_PATH = Path(__file__).parent / "ta_v2.2.yaml"
+_PARAMS_PATH = Path(__file__).parent / "ta_v2.3.yaml"
 
 
 def _load_raw() -> dict[str, Any]:
