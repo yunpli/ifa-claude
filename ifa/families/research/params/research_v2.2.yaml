@@ -1,0 +1,153 @@
+# Research Family Factor Parameters — V2.2 baseline
+# ═══════════════════════════════════════════════════════════════════════════
+# Each factor has thresholds in absolute units (per docs/research-deep-dive.md
+# section 3.2). All percentages are 0-100 (data-accuracy-guidelines Rule 2).
+# All money values implied to be in 元 (Rule 1).
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Family A — 盈利能力 (Profitability)
+# Direction: higher_better unless noted. classify_higher_better:
+#   green if value >= warning_below (no breach)
+#   yellow if value < warning_below
+#   red    if value < critical_below
+profitability:
+  gpm:                          # 毛利率 GPM (%)
+    warning_below: 20.0         # 行业 P50 通常 25-40，<20 看作脆弱
+    critical_below: 10.0
+    yoy_drop_warning_pp: 5.0    # 同比下降 ≥5pp 触发黄灯
+  npm:                          # 净利率 (%)
+    warning_below: 5.0
+    critical_below: 0.0         # 亏损红灯
+  npm_dedt:                     # 扣非净利率 (%)
+    warning_below: 4.0
+    critical_below: -1.0
+    npm_gap_pct_warning: 30.0   # 与净利率差距 / 净利率 > 30% 触发警告
+  roe:                          # 净资产收益率 (%)
+    warning_below: 10.0
+    critical_below: 5.0
+  roic:                          # ROIC (%)
+    warning_below: 8.0
+    critical_below: 5.0
+  dupont_decay_warning: true    # 任一 DuPont 因素恶化即追问
+
+# Family B — 增长 (Growth)
+growth:
+  revenue_yoy_pct:               # 营收 YoY (%)
+    warning_below: 0.0          # <0 黄灯
+    critical_below: -10.0       # 跌幅 >10% 红灯
+    consec_negative_quarters_red: 2  # 连续 2 季 <0 → 红灯
+  n_income_yoy_pct:              # 净利 YoY (%)
+    warning_below: 0.0
+    critical_below: -20.0
+    leverage_drop_warning: 0.5  # 净利 YoY < 营收 YoY × 0.5 触发警告
+  revenue_cagr_3y_pct:
+    warning_below: 5.0
+    critical_below: 0.0
+  forecast_achievement_pct:     # 实际 / forecast 中值 × 100
+    healthy_low: 90.0
+    healthy_high: 110.0
+    warning_below: 80.0         # <80% 或 >130% 黄灯
+    warning_above: 130.0
+    critical_below: 60.0        # 严重低于预告 → 红灯
+    critical_above: 200.0       # 也包括"画饼能力"过度 (虚高)
+
+# Family C — 现金质量 (Cash Quality)
+cash_quality:
+  cfo_to_ni:                     # CFO / Net Income (无单位 ratio)
+    healthy_low: 0.8
+    healthy_high: 1.2
+    warning_below: 0.5
+    critical_below: 0.0         # CFO 为负但净利为正 → 红灯
+    consec_low_quarters_red: 4  # 连续 4 季 <0.5 → 强制红灯
+  fcf_yuan:                     # FCF 绝对值 (元)
+    warning_below_yuan: 0       # FCF < 0 黄灯
+    critical_consec_negative_quarters: 3  # 连续 3 季 < 0 红灯
+  ar_growth_to_revenue_growth:  # 应收账款增速 / 营收增速
+    warning_above: 1.2
+    critical_above: 1.5
+  inventory_growth_to_cost_growth:
+    warning_above: 1.2
+    critical_above: 1.5
+  ccc_days_yoy_change:          # CCC 天数同比变化（行业归一化前）
+    warning_above_pct: 20       # 同比恶化 >20%
+    critical_above_pct: 50
+
+# Family D — 资产负债结构 (Balance Sheet)
+balance:
+  debt_to_assets_pct:           # 资产负债率 (%)
+    warning_above: 60.0
+    critical_above: 75.0
+    yoy_rise_warning_pp: 10.0
+  current_ratio:                # 流动比率
+    warning_below: 1.5
+    critical_below: 1.0
+  quick_ratio:                  # 速动比率
+    warning_below: 1.0
+    critical_below: 0.7
+  goodwill_to_equity_pct:       # 商誉 / 净资产 (%)
+    warning_above: 30.0
+    critical_above: 50.0
+  pledge_ratio_pct:             # 大股东质押率 (%)
+    warning_above: 30.0
+    critical_above: 70.0
+  interest_bearing_debt_share_yoy_pp_warn: 15.0
+
+# Family E — 治理 / 披露 (Governance)
+governance:
+  holdertrade_decreasing_count_12m:    # 12月内减持次数
+    warning_above: 2
+    critical_above: 3
+  holdertrade_decreasing_share_pct:     # 12月内减持占总股本
+    warning_above: 3.0
+    critical_above: 5.0
+  audit_non_standard_critical: true     # 任一非标审计 → 红灯
+  audit_agency_change_within_year_warn: true  # 年内更换且无解释 → 黄灯
+  manager_turnover_12m_pct:
+    warning_above: 20.0
+    critical_above: 30.0
+  irm_no_reply_rate_pct:                 # 互动易"未回复"率
+    warning_above: 10.0
+    critical_above: 20.0
+  disclosure_delay_days:
+    warning_above: 3
+    critical_above: 7
+
+# 5-dim 综合评分权重 (Sum of weights inside each dim should be 1.0)
+scoring:
+  profitability:
+    gpm:        0.20
+    npm:        0.25
+    npm_dedt:   0.20
+    roe:        0.25
+    roic:       0.10
+  growth:
+    revenue_yoy_pct:     0.30
+    n_income_yoy_pct:    0.30
+    revenue_cagr_3y_pct: 0.20
+    forecast_achievement_pct: 0.20
+  cash_quality:
+    cfo_to_ni:                  0.35
+    fcf_yuan:                   0.25
+    ar_growth_to_revenue_growth: 0.20
+    inventory_growth_to_cost_growth: 0.15
+    ccc_days_yoy_change:        0.05
+  balance:
+    debt_to_assets_pct:    0.25
+    current_ratio:         0.20
+    quick_ratio:           0.15
+    goodwill_to_equity_pct: 0.20
+    pledge_ratio_pct:      0.20
+  governance:
+    holdertrade_decreasing_count_12m:   0.20
+    holdertrade_decreasing_share_pct:   0.20
+    audit_non_standard_critical:        0.25
+    manager_turnover_12m_pct:           0.15
+    irm_no_reply_rate_pct:              0.10
+    disclosure_delay_days:              0.10
+
+# Trend classification (3.5-level: rapid_up / steady_up / flat / steady_down / rapid_down)
+trends:
+  flat_band_pct: 5.0            # |slope| < 5% → flat
+  steady_threshold_pct: 5.0     # 5-15% → steady
+  rapid_threshold_pct: 15.0     # >15% → rapid
+  min_periods: 4                # need at least 4 periods to classify
