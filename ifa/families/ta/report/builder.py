@@ -43,9 +43,12 @@ def build_evening_report(engine: Engine, on_date: date,
     methodology = _section_methodology()
     sector_flow_gate = _section_sector_flow_gate(engine, on_date)
     strategy_spotlight = _section_strategy_spotlight(engine, on_date)
-    tier_a = _section_tier(engine, on_date, tier="A", title="§04 重点池 (Tier A)")
-    tier_b = _section_tier(engine, on_date, tier="B", title="§05 候选池 (Tier B)")
-    tier_c = _section_tier(engine, on_date, tier="C", title="§06 观察池 (Tier C)")
+    # M10 P0.3: Tier A=10, Tier B=20, Tier C dropped from HTML rendering
+    # (still in DB for analytics). expanded_count=5: first 5 expanded by default.
+    tier_a = _section_tier(engine, on_date, tier="A", title="§04 重点池 (Tier A)",
+                            cap=10, expanded=5)
+    tier_b = _section_tier(engine, on_date, tier="B", title="§05 候选池 (Tier B)",
+                            cap=20, expanded=5)
     s5 = _section_stars(engine, on_date, star_filter=5, title="§03 五星级候选")    # legacy fallback
     s4 = _section_stars(engine, on_date, star_filter=4, title="§04 四星级候选")
     fam = _section_candidates_by_family(engine, on_date)
@@ -68,7 +71,7 @@ def build_evening_report(engine: Engine, on_date: date,
                              "body": narrative})
     sections.append(methodology)
     sections.append(sector_flow_gate)             # §04 — macro filter, before Tier A/B
-    sections.extend([tier_a, tier_b, tier_c, strategy_spotlight])
+    sections.extend([tier_a, tier_b, strategy_spotlight])
     # NOTE: §14 hypotheses removed — redundant with §04 重点池 (same picks)
     if augmenter is not None:
         narrative = augmenter.candidate_narrator(
@@ -78,7 +81,8 @@ def build_evening_report(engine: Engine, on_date: date,
         if narrative:
             sections.append({"type": "narrative", "title": "§06-N 重点池解读",
                              "body": narrative})
-    sections.extend([fam, verify, metrics, attribution, risk])
+    # M10 P0.4: §13 风险扫描 → BEFORE §11 表现归因 (red flags first).
+    sections.extend([fam, verify, metrics, risk, attribution])
     if augmenter is not None:
         narrative = augmenter.strategy_review(
             attribution_rows=attribution.get("rows", []),
@@ -142,8 +146,17 @@ def _section_overview(engine: Engine, on_date: date) -> dict:
     }
 
 
-def _section_tier(engine: Engine, on_date: date, *, tier: str, title: str) -> dict:
-    """Tier-based candidate list (A/B/C). Aggregates per stock."""
+def _section_tier(engine: Engine, on_date: date, *, tier: str, title: str,
+                  cap: int = 0, expanded: int = 5) -> dict:
+    """Tier-based candidate list (A/B). Aggregates per stock.
+
+    M10 P0.3:
+      · cap=10 for Tier A, cap=20 for Tier B; cap=0 keeps full list.
+      · expanded=5: first N candidates render expanded; remainder collapsed.
+      · Tier C is no longer rendered as a section (kept in DB for analytics).
+      · Each candidate carries entry/stop/target/rr from rec_price_stock so
+        the template can show 推荐挂单价 directly.
+    """
     sql = text("""
         SELECT ts_code, setup_name, rank, final_score, star_rating, evidence_json
         FROM ta.candidates_daily
@@ -163,14 +176,21 @@ def _section_tier(engine: Engine, on_date: date, *, tier: str, title: str) -> di
             "stars": int(r[4]) if r[4] is not None else None,
             "resonance_count": ev.get("resonance_count"),
             "resonance_families": ev.get("resonance_families", []),
+            "rec_price_stock": ev.get("rec_price_stock"),
+            "entry_close": ev.get("entry_close") or ev.get("close"),
+            "sector_role": ev.get("sector_role"),
+            "sector_phase": ev.get("sector_phase"),
             "strategies": [],
         })
         rec["strategies"].append({
             "setup_name": r[1],
             "raw_score": float(ev.get("score", r[3])) if ev else (float(r[3]) if r[3] is not None else None),
+            "rec_price_setup": ev.get("rec_price_setup"),
         })
 
     sorted_stocks = sorted(by_stock.items(), key=lambda kv: kv[1]["rank"])
+    if cap and len(sorted_stocks) > cap:
+        sorted_stocks = sorted_stocks[:cap]
     names = _load_stock_names(engine, [ts for ts, _ in sorted_stocks])
 
     candidates = []
@@ -184,12 +204,18 @@ def _section_tier(engine: Engine, on_date: date, *, tier: str, title: str) -> di
             "resonance_count": rec["resonance_count"] or len(rec["strategies"]),
             "resonance_families": rec["resonance_families"],
             "strategies": rec["strategies"],
+            "rec_price_stock": rec["rec_price_stock"],
+            "entry_close": rec["entry_close"],
+            "sector_role": rec["sector_role"],
+            "sector_phase": rec["sector_phase"],
         })
     return {
         "type": "tier_list",
         "tier": tier,
         "title": title,
         "candidates": candidates,
+        "expanded_count": min(expanded, len(candidates)),
+        "collapsed_count": max(len(candidates) - expanded, 0),
     }
 
 
@@ -213,58 +239,95 @@ _STRATEGY_DESCRIPTIONS: dict[str, str] = {
     "S3_LAGGARD_CATCHUP": "L2 强势但个股 20 日滞涨、今日补涨",
     "C1_CHIP_CONCENTRATED": "成本带 ≤15% + 收于 20 日线上方",
     "C2_CHIP_LOOSE": "成本带 ≥25% + 盈利盘 ≥80%（警示信号）",
+    # M10 P0.4 — descriptions for new 9 setups
+    "O1_INST_PERSISTENT_BUY": "5 日机构净流入 ≥1% 流通市值 + 多头排列",
+    "O2_LHB_INST_BUY": "龙虎榜净买入 ≥0.5% 流通市值 + 机构席位买入",
+    "O3_LIMIT_SEAL_STRENGTH": "涨停封单 ≥1% 流通市值 + 多头排列（未炸板）",
+    "D1_DOUBLE_TOP": "双顶形态 + 跌破颈线 + 前 20 日累计 ≥10%（警示）",
+    "D2_HS_TOP": "头肩顶 + 颈线破位 + 前 30 日累计 ≥8%（警示）",
+    "D3_SHOOTING_STAR": "高位流星线 + 长上影线 + 前 20 日累计 ≥15%（警示）",
+    "Z1_ZSCORE_EXTREME": "20 日 Z-score |z|≥2.0 极端位（统计反转候选）",
+    "Z2_OVERSOLD_REBOUND": "RSI(6) ≤25 + 5 日跌幅 ≥5% + 今日企稳",
+    "E1_EVENT_CATALYST": "业绩预告 / 快报 / 披露窗口临近（事件催化）",
 }
 
 
 def _section_strategy_spotlight(engine: Engine, on_date: date) -> dict:
-    """§07 — per-strategy top-10 candidates by raw setup score, grouped by family."""
-    sql = text("""
-        SELECT setup_name, ts_code, final_score, evidence_json
-        FROM ta.candidates_daily
-        WHERE trade_date = :d
-        ORDER BY setup_name, final_score DESC
-    """)
-    with engine.connect() as conn:
-        rows = conn.execute(sql, {"d": on_date}).fetchall()
+    """§07 — per-strategy top-10 candidates by raw setup score, grouped by family.
 
-    # Use raw score from evidence (not aggregated stock_score)
+    M10 P0.4: now covers 28 setups across 11 families (T/P/R/F/V/S/C/O/D/Z/E).
+      · Long pool setups read from ta.candidates_daily.
+      · Warning setups (D1/D2/D3) read from ta.warnings_daily.
+      · Only families/setups with at least one hit today are rendered —
+        empty setups are silently dropped, no clutter.
+    """
+    with engine.connect() as conn:
+        rows_long = conn.execute(text("""
+            SELECT setup_name, ts_code, final_score, evidence_json
+            FROM ta.candidates_daily
+            WHERE trade_date = :d
+            ORDER BY setup_name, final_score DESC
+        """), {"d": on_date}).fetchall()
+        rows_warn = conn.execute(text("""
+            SELECT setup_name, ts_code, score, evidence
+            FROM ta.warnings_daily
+            WHERE trade_date = :d
+            ORDER BY setup_name, score DESC
+        """), {"d": on_date}).fetchall()
+
     by_setup: dict[str, list] = {}
     all_codes: set[str] = set()
-    for setup_name, ts_code, final_score, ev in rows:
+
+    def _ingest(setup_name, ts_code, score_field, ev):
         ev_dict = ev if isinstance(ev, dict) else {}
         raw_score = ev_dict.get("score")
         if raw_score is None:
-            raw_score = float(final_score) if final_score is not None else 0.0
+            raw_score = float(score_field) if score_field is not None else 0.0
         else:
             raw_score = float(raw_score)
         by_setup.setdefault(setup_name, []).append({
             "ts_code": ts_code,
             "score": raw_score,
             "triggers": ev_dict.get("triggers", []),
+            "in_long_universe": ev_dict.get("in_long_universe", True),
         })
         all_codes.add(ts_code)
 
+    for r in rows_long:
+        _ingest(r[0], r[1], r[2], r[3])
+    for r in rows_warn:
+        _ingest(r[0], r[1], r[2], r[3])
+
     names = _load_stock_names(engine, list(all_codes))
 
-    # Sort each setup's list by raw score desc, take top 10
-    family_zh = {"T": "T 趋势族", "P": "P 回踩族", "R": "R 反转族",
-                 "F": "F 形态族", "V": "V 量价族", "S": "S 板块族", "C": "C 筹码族"}
+    family_zh = {
+        "T": "T 趋势族", "P": "P 回踩族", "R": "R 反转族",
+        "F": "F 形态族", "V": "V 量价族", "S": "S 板块族", "C": "C 筹码族",
+        "O": "O 主力资金族", "D": "D 顶部反转族（警示）",
+        "Z": "Z 统计族", "E": "E 事件族",
+    }
     families: dict[str, list] = {v: [] for v in family_zh.values()}
     for setup_name in sorted(by_setup.keys()):
         items = sorted(by_setup[setup_name], key=lambda x: -x["score"])[:10]
         for item in items:
             item["name"] = names.get(item["ts_code"], "")
         fam_letter = setup_name[0]
+        if fam_letter not in family_zh:
+            continue
         families[family_zh[fam_letter]].append({
             "setup_name": setup_name,
             "description": _STRATEGY_DESCRIPTIONS.get(setup_name, ""),
             "n_total": len(by_setup[setup_name]),
             "top10": items,
         })
+    # Drop families with zero active setups
+    families = {fam: setups for fam, setups in families.items() if setups}
     return {
         "type": "strategy_spotlight",
-        "title": "§07 单策略聚光灯（按族折叠）",
+        "title": "§07 单策略聚光灯（按族折叠，仅显示今日有候选的策略）",
         "families": families,
+        "n_active_setups": sum(len(s) for s in families.values()),
+        "n_total_setups": 28,
     }
 
 
