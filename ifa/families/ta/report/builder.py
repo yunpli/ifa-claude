@@ -894,13 +894,57 @@ def _section_risk_scan(engine: Engine, on_date: date) -> dict:
                 "建议减仓、不做新多头开仓。"
             )
 
+    # M10 P1.8 — composite risk dashboard (red / yellow / green light).
+    # Aggregates today's signals into a single "today's market risk level" indicator,
+    # styled after institutional risk-management dashboards.
+    #   GREEN  (low risk)    — none of the warning conditions trigger
+    #   YELLOW (caution)     — moderate signals (chip loose 10+, decay 1+, warn 5+)
+    #   RED    (high risk)   — climax/distribution regime, or many top-reversals,
+    #                          or chip_loose ≥ 30, or decay ≥ 3 setups
+    top_reversal_count = int(sum(d_summary.values()))
+    decay_count = len(bad_decay)
+    risk_signals = []
+    if climax_warning:
+        risk_signals.append(("regime", "高潮/派发体制", "red"))
+    if top_reversal_count >= 15:
+        risk_signals.append(("top_reversal", f"顶部反转 {top_reversal_count} 例", "red"))
+    elif top_reversal_count >= 5:
+        risk_signals.append(("top_reversal", f"顶部反转 {top_reversal_count} 例", "yellow"))
+    if c2_count >= 30:
+        risk_signals.append(("chip_loose", f"筹码松动 {c2_count} 例", "red"))
+    elif c2_count >= 10:
+        risk_signals.append(("chip_loose", f"筹码松动 {c2_count} 例", "yellow"))
+    if decay_count >= 3:
+        risk_signals.append(("decay", f"衰退策略 {decay_count} 个", "red"))
+    elif decay_count >= 1:
+        risk_signals.append(("decay", f"衰退策略 {decay_count} 个", "yellow"))
+
+    if any(s[2] == "red" for s in risk_signals):
+        light = "red"
+        light_zh = "红灯·高风险"
+        light_msg = "市场存在多重负面信号,建议降仓 / 不开新多头 / 加紧止损执行。"
+    elif any(s[2] == "yellow" for s in risk_signals):
+        light = "yellow"
+        light_zh = "黄灯·中等风险"
+        light_msg = "存在中等负面信号,建议精选标的 / 控制单笔仓位 / 保留现金缓冲。"
+    else:
+        light = "green"
+        light_zh = "绿灯·低风险"
+        light_msg = "未发现显著负面信号,保持正常操作纪律。"
+
     return {
         "type": "risk_scan",
         "title": "§13 风险扫描",
+        "risk_light": light,                           # 'red' / 'yellow' / 'green'
+        "risk_light_zh": light_zh,
+        "risk_light_msg": light_msg,
+        "risk_signals": [
+            {"key": s[0], "label": s[1], "level": s[2]} for s in risk_signals
+        ],
         "chip_loose_count": int(c2_count),
-        "top_reversal_count": int(sum(d_summary.values())),
-        "top_reversal_breakdown": d_summary,           # {D1_DOUBLE_TOP: N, ...}
-        "top_reversals": top_reversals,                # top-20 by score
+        "top_reversal_count": top_reversal_count,
+        "top_reversal_breakdown": d_summary,
+        "top_reversals": top_reversals,
         "decaying_setups": [
             {
                 "setup_name": r[0],
