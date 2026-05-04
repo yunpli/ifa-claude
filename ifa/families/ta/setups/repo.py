@@ -10,6 +10,10 @@ from sqlalchemy.engine import Engine
 
 from ifa.families.ta.setups.base import Candidate
 from ifa.families.ta.setups.ranker import RankedCandidate
+from ifa.families.ta.setups.recommended_price import (
+    compute_recommended_price,
+    merge_recommendations,
+)
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +42,26 @@ def upsert_candidates(
             (:trade_date, :ts_code, :setup_name, :rank, :final_score, :star_rating,
              :regime_at_gen, :evidence, :in_top_watchlist)
     """)
+    # M10 P0.2 — compute ATR-based recommended prices per (setup hit), then
+    # merge to per-stock conservative-side prices (max entry, max stop, min target).
+    per_stock_setup_prices: dict[str, list] = {}
+    per_setup_price: dict[tuple[str, str], object] = {}
+    for rc in ranked:
+        c = rc.candidate
+        ev = c.evidence if isinstance(c.evidence, dict) else {}
+        atr = ev.get("atr_pct_20d")
+        entry_close = ev.get("close")
+        rec_price = compute_recommended_price(
+            c.setup_name, entry_close, atr, evidence=ev,
+        )
+        if rec_price is not None:
+            per_setup_price[(c.ts_code, c.setup_name)] = rec_price
+            per_stock_setup_prices.setdefault(c.ts_code, []).append(rec_price)
+    per_stock_merged = {
+        ts: merge_recommendations(plist)
+        for ts, plist in per_stock_setup_prices.items()
+    }
+
     with engine.begin() as conn:
         conn.execute(sql_delete_tracking, {"d": on_date})
         conn.execute(sql_delete, {"d": on_date})
@@ -61,6 +85,20 @@ def upsert_candidates(
                 "sector_role": rc.sector_role,
                 "sector_phase": rc.sector_cycle_phase,
             }
+            # M10 P0.2 — embed recommended prices (per-setup + per-stock merged)
+            ps = per_setup_price.get((c.ts_code, c.setup_name))
+            if ps is not None:
+                evidence_payload["rec_price_setup"] = {
+                    "entry": ps.entry, "stop": ps.stop, "target": ps.target,
+                    "rr": ps.rr, "entry_offset_atr": ps.entry_offset_atr,
+                    "k_stop": ps.k_stop, "k_target": ps.k_target,
+                }
+            pm = per_stock_merged.get(c.ts_code)
+            if pm is not None:
+                evidence_payload["rec_price_stock"] = {
+                    "entry": pm.entry, "stop": pm.stop, "target": pm.target,
+                    "rr": pm.rr,
+                }
             conn.execute(sql_insert, {
                 "trade_date": on_date,
                 "ts_code": c.ts_code,
