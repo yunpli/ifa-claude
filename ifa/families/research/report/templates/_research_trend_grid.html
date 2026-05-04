@@ -1,0 +1,19 @@
+<section class="section">
+  <h2 class="section__title">关键序列趋势</h2>
+  <div class="trend-grid">
+    {% for it in s.entries %}
+    <div class="trend-card trend-card--{{ it.level }}">
+      <div class="trend-card__label">{{ it.label }}</div>
+      <div class="trend-card__sparkline">{{ it.sparkline_svg | safe }}</div>
+      <div class="trend-card__arrow">{{ it.arrow }} <span style="font-size:13px">{{ it.label_zh }}</span></div>
+      <div class="trend-card__slope">
+        {% if it.slope_pct_per_period is not none %}
+          {{ '%+.1f%%' | format(it.slope_pct_per_period) }}/期 · n={{ it.n_periods }}
+        {% else %}
+          数据不足
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>

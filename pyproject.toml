@@ -58,3 +58,8 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra -q"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]

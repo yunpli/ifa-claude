@@ -56,14 +56,14 @@ def _call_tushare(method: str, **kwargs: Any) -> list[dict]:
     return _df_to_records(df)
 
 
-def _fetch(engine: Any, ts_code: str, api_name: str, tushare_method: str, **kwargs: Any) -> list[dict]:
-    cached = cache_get(engine, ts_code, api_name, kwargs)
+def _fetch(engine: Any, cache_key_ts_code: str, api_name: str, tushare_method: str, **kwargs: Any) -> list[dict]:
+    cached = cache_get(engine, cache_key_ts_code, api_name, kwargs)
     if cached is not None:
-        log.debug("cache hit: %s / %s", ts_code, api_name)
+        log.debug("cache hit: %s / %s", cache_key_ts_code, api_name)
         return cached
-    log.debug("cache miss: %s / %s — calling Tushare", ts_code, api_name)
+    log.debug("cache miss: %s / %s — calling Tushare", cache_key_ts_code, api_name)
     result = _call_tushare(tushare_method, **kwargs)
-    cache_set(engine, ts_code, api_name, kwargs, result)
+    cache_set(engine, cache_key_ts_code, api_name, kwargs, result)
     return result
 
 
@@ -132,11 +132,10 @@ def fetch_irm_qa(engine: Any, ts_code: str, exchange: str, *, limit: int = 50) -
         # 北交所互动易不支持
         log.debug("BSE stock %s: skipping IRM QA (not supported)", ts_code)
         return []
-    if exch == "SSE":
-        return _fetch(engine, ts_code, "irm_qa_sh", "irm_qa_sh",
-                      ts_code=ts_code, limit=limit)
-    # SZSE or unknown → use sz endpoint
-    return _fetch(engine, ts_code, "irm_qa_sz", "irm_qa_sz",
+    # Cache under unified "irm_qa" key (data.py / snapshot reads this name);
+    # the underlying Tushare endpoint differs by exchange.
+    method = "irm_qa_sh" if exch == "SSE" else "irm_qa_sz"
+    return _fetch(engine, ts_code, "irm_qa", method,
                   ts_code=ts_code, limit=limit)
 
 

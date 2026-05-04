@@ -1,0 +1,32 @@
+<section class="section">
+  <h2 class="section__title">近期披露</h2>
+  {% if s.events %}
+  <ul class="timeline">
+    {% for e in s.events %}
+    <li class="timeline__row{% if e.is_extracted %} timeline__row--extracted{% endif %}">
+      <div class="timeline__date">{{ e.publish_time }}</div>
+      <div class="timeline__type">
+        {{ e.event_type }}
+        {% if e.polarity %}
+        <span class="timeline__polarity timeline__polarity--{{ e.polarity }}">
+          {% if e.polarity == 'positive' %}+{% elif e.polarity == 'negative' %}−{% else %}○{% endif %}
+        </span>
+        {% endif %}
+        {% if e.importance %}
+        <span class="timeline__importance timeline__importance--{{ e.importance }}">
+          {% if e.importance == 'high' %}●●●{% elif e.importance == 'medium' %}●●{% else %}●{% endif %}
+        </span>
+        {% endif %}
+      </div>
+      <div class="timeline__title">
+        {% if e.source_url %}<a href="{{ e.source_url }}" target="_blank">{{ e.title }}</a>
+        {% else %}{{ e.title }}{% endif %}
+        {% if e.summary %}<span class="timeline__summary">{{ e.summary }}</span>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p style="color:#666">无可显示的披露事件。</p>
+  {% endif %}
+</section>

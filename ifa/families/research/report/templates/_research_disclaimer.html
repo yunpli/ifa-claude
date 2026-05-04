@@ -1,0 +1,21 @@
+<section class="section disclaimer-section">
+  <h2 class="section__title">完整免责声明 / Full Disclaimer</h2>
+
+  <details class="disclaimer-details" open>
+    <summary>展开 / 收起 (中文 + English, 共 10 段)</summary>
+
+    <div class="disclaimer-block">
+      <h3 class="disclaimer-heading">中文版本</h3>
+      {% for p in s.paragraphs_zh %}
+      <p class="disclaimer-paragraph">{{ p }}</p>
+      {% endfor %}
+    </div>
+
+    <div class="disclaimer-block">
+      <h3 class="disclaimer-heading">English Version</h3>
+      {% for p in s.paragraphs_en %}
+      <p class="disclaimer-paragraph">{{ p }}</p>
+      {% endfor %}
+    </div>
+  </details>
+</section>

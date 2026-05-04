@@ -1,0 +1,27 @@
+<section class="section">
+  <h2 class="section__title">公司概况</h2>
+  <table class="radar-table">
+    <tr><th style="width:120px">代码 / 名称</th><td>{{ s.ts_code }} · {{ s.name or '—' }}</td></tr>
+    {% if s.sw_l1 or s.sw_l2 %}
+    <tr><th>申万行业</th><td>{{ s.sw_l1 or '—' }} / {{ s.sw_l2 or '—' }}</td></tr>
+    {% endif %}
+    {% if s.industry %}
+    <tr><th>TS 行业</th><td>{{ s.industry }}</td></tr>
+    {% endif %}
+    {% if s.list_date %}
+    <tr><th>上市日期</th><td>{{ s.list_date }}</td></tr>
+    {% endif %}
+    {% if s.employees %}
+    <tr><th>员工数</th><td>{{ s.employees }}</td></tr>
+    {% endif %}
+    {% if s.latest_period %}
+    <tr><th>最新报告期</th><td>{{ s.latest_period }}</td></tr>
+    {% endif %}
+    {% if s.main_business %}
+    <tr><th>主营业务</th><td>{{ s.main_business }}</td></tr>
+    {% endif %}
+    {% if s.missing_apis %}
+    <tr><th>缺失数据源</th><td><span class="badge badge--unknown">{{ s.missing_apis | join(', ') }}</span></td></tr>
+    {% endif %}
+  </table>
+</section>

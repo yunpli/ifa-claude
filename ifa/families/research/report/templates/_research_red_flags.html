@@ -1,0 +1,23 @@
+<section class="section">
+  <h2 class="section__title">
+    风险提示
+    <span class="badge badge--{% if s.count == 0 %}green{% elif s.count >= 5 %}red{% else %}yellow{% endif %}">
+      共 {{ s.count }} 条
+    </span>
+  </h2>
+  {% if s.flags %}
+  <ul class="flag-list">
+    {% for f in s.flags %}
+    <li>
+      <span class="badge badge--{{ f.status }}">{{ f.status | status_icon }} {{ f.status | status_label_zh }}</span>
+      <strong>{{ f.family_label_zh }}</strong> · {{ f.factor_zh }}
+      <span class="factor-name">({{ f.factor }})</span>
+      = <code>{{ f.value }}</code>
+      {% if f.notes %}<div class="factor-name">{{ f.notes | join(' · ') }}</div>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p style="color:#666">无 RED/YELLOW 信号。</p>
+  {% endif %}
+</section>

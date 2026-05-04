@@ -16,8 +16,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Final
+
+
+def _sanitize(obj: Any) -> Any:
+    """Recursively replace NaN/Inf floats with None (Postgres JSONB rejects NaN)."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    return obj
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -89,7 +103,7 @@ def cache_set(engine: Engine, ts_code: str, api_name: str, kwargs: dict[str, Any
             text("""
                 INSERT INTO research.api_cache
                     (ts_code, api_name, params_hash, response_json, fetched_at, expires_at)
-                VALUES (:tc, :an, :ph, :resp::jsonb, :now, :exp)
+                VALUES (:tc, :an, :ph, CAST(:resp AS JSONB), :now, :exp)
                 ON CONFLICT (ts_code, api_name, params_hash) DO UPDATE SET
                     response_json = EXCLUDED.response_json,
                     fetched_at    = EXCLUDED.fetched_at,
@@ -97,7 +111,7 @@ def cache_set(engine: Engine, ts_code: str, api_name: str, kwargs: dict[str, Any
             """),
             {
                 "tc": ts_code, "an": api_name, "ph": ph,
-                "resp": json.dumps(response, default=str),
+                "resp": json.dumps(_sanitize(response), default=str),
                 "now": now, "exp": expires,
             },
         )
@@ -124,7 +138,7 @@ def computed_set(
             text("""
                 INSERT INTO research.computed_cache
                     (ts_code, compute_key, inputs_hash, result_json, computed_at)
-                VALUES (:tc, :ck, :ih, :res::jsonb, NOW())
+                VALUES (:tc, :ck, :ih, CAST(:res AS JSONB), NOW())
                 ON CONFLICT (ts_code, compute_key) DO UPDATE SET
                     inputs_hash = EXCLUDED.inputs_hash,
                     result_json = EXCLUDED.result_json,
@@ -132,7 +146,7 @@ def computed_set(
             """),
             {
                 "tc": ts_code, "ck": compute_key, "ih": inputs_hash,
-                "res": json.dumps(result, default=str),
+                "res": json.dumps(_sanitize(result), default=str),
             },
         )
 

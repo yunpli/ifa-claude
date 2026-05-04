@@ -102,12 +102,19 @@ class CompanyFinancialSnapshot:
 
     # ── Multi-period series (for trends, sparklines) ───────────────────────
     revenue_series: TimeSeries | None = None
+    oper_cost_series: TimeSeries | None = None
     n_income_series: TimeSeries | None = None
     profit_dedt_series: TimeSeries | None = None
     cfo_series: TimeSeries | None = None
     roe_series: TimeSeries | None = None
     gpm_series: TimeSeries | None = None
     npm_series: TimeSeries | None = None
+
+    # Balance sheet multi-period series (元), needed for AR/INV/CCC YoY checks.
+    accounts_receiv_series: TimeSeries | None = None
+    inventories_series: TimeSeries | None = None
+    total_liab_series: TimeSeries | None = None
+    total_assets_series: TimeSeries | None = None
 
     # ── Forecasts (业绩预告，元/股 pct mixed; 元 normalized) ────────────────
     forecasts: list[dict] = field(default_factory=list)
@@ -298,17 +305,18 @@ def load_company_snapshot(
             snap.revenue_yuan = _norm("income", "total_revenue", latest.get("total_revenue"))
             snap.oper_cost_yuan = _norm("income", "oper_cost", latest.get("oper_cost"))
             snap.n_income_yuan = _norm("income", "n_income", latest.get("n_income"))
-            snap.profit_dedt_yuan = _norm("income", "profit_dedt", latest.get("profit_dedt"))
+            # profit_dedt is exposed by fina_indicator (not income); filled below.
 
         snap.revenue_series = _build_series(
             income_rows, "total_revenue", "营收", "元", api_name="income",
         )
+        snap.oper_cost_series = _build_series(
+            income_rows, "oper_cost", "营业成本", "元", api_name="income",
+        )
         snap.n_income_series = _build_series(
             income_rows, "n_income", "净利润", "元", api_name="income",
         )
-        snap.profit_dedt_series = _build_series(
-            income_rows, "profit_dedt", "扣非净利", "元", api_name="income",
-        )
+        # profit_dedt series is built later from fina_indicator (income doesn't expose it)
 
     # ── Balance sheet ─────────────────────────────────────────────────────
     if bs_rows := cache.get("balancesheet"):
@@ -326,6 +334,19 @@ def load_company_snapshot(
             snap.accounts_receiv_yuan = _safe_dec(latest.get("accounts_receiv"))
             snap.total_share = _safe_dec(latest.get("total_share"))
             snap.total_hldr_eqy_inc_min_int_yuan = _safe_dec(latest.get("total_hldr_eqy_inc_min_int"))
+
+        snap.accounts_receiv_series = _build_series(
+            bs_rows, "accounts_receiv", "应收账款", "元",
+        )
+        snap.inventories_series = _build_series(
+            bs_rows, "inventories", "存货", "元",
+        )
+        snap.total_liab_series = _build_series(
+            bs_rows, "total_liab", "总负债", "元", api_name="balancesheet",
+        )
+        snap.total_assets_series = _build_series(
+            bs_rows, "total_assets", "总资产", "元", api_name="balancesheet",
+        )
 
     # ── Cashflow ──────────────────────────────────────────────────────────
     if cf_rows := cache.get("cashflow"):
@@ -349,10 +370,13 @@ def load_company_snapshot(
             snap.debt_to_assets_pct = _safe_dec(latest.get("debt_to_assets"))
             snap.current_ratio = _safe_dec(latest.get("current_ratio"))
             snap.quick_ratio = _safe_dec(latest.get("quick_ratio"))
+            # 扣非净利来自 fina_indicator（income 不返回）
+            snap.profit_dedt_yuan = _safe_dec(latest.get("profit_dedt"))
 
         snap.roe_series = _build_series(fi_rows, "roe", "ROE", "%")
         snap.gpm_series = _build_series(fi_rows, "grossprofit_margin", "毛利率", "%")
         snap.npm_series = _build_series(fi_rows, "netprofit_margin", "净利率", "%")
+        snap.profit_dedt_series = _build_series(fi_rows, "profit_dedt", "扣非净利", "元")
 
     # ── Forecasts / express ────────────────────────────────────────────────
     snap.forecasts = cache.get("forecast", [])

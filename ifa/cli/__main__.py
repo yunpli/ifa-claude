@@ -27,6 +27,10 @@ app.add_typer(sm_app, name="smartmoney")
 from ifa.cli.ningbo import app as ningbo_app  # noqa: E402
 app.add_typer(ningbo_app, name="ningbo")
 
+# Research family — equity research reports
+from ifa.cli.research import app as research_app  # noqa: E402
+app.add_typer(research_app, name="research")
+
 
 if __name__ == "__main__":
     app()

@@ -35,3 +35,4 @@ htmlcov/
 
 # CatBoost training logs
 catboost_info/
+tmp/

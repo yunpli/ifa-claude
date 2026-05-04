@@ -1,0 +1,26 @@
+<section class="section">
+  <h2 class="section__title">
+    关注点（LLM 综合）
+    <span class="badge badge--{% if s.count >= 4 %}red{% elif s.count >= 2 %}yellow{% else %}green{% endif %}">
+      共 {{ s.count }} 条
+    </span>
+  </h2>
+
+  <div class="watchpoints">
+    {% for w in s.entries %}
+    <div class="watchpoint watchpoint--{{ w.severity }}">
+      <div class="watchpoint__header">
+        <span class="watchpoint__severity watchpoint__severity--{{ w.severity }}">
+          {% if w.severity == 'high' %}● 高{% elif w.severity == 'medium' %}● 中{% else %}● 低{% endif %}
+        </span>
+        <span class="watchpoint__category">{{ w.category }}</span>
+        <span class="watchpoint__title">{{ w.title }}</span>
+      </div>
+      <div class="watchpoint__desc">{{ w.description }}</div>
+      <div class="watchpoint__watch">
+        <strong>下一观察点 →</strong> {{ w.what_to_watch }}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>

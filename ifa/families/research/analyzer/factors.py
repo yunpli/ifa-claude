@@ -16,10 +16,31 @@ Each factor family module exports `compute_<family>(snapshot, params) -> list[Fa
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 from typing import Any
+
+
+def _coerce_to_finite_float(value: Decimal | float | None) -> float | None:
+    """Common preprocessing for classifiers — None / NaN / Inf all → None.
+
+    Without this, NaN slips through (NaN < x is False, x < NaN is False, so
+    NaN incorrectly classifies as GREEN). cache._sanitize is supposed to
+    block NaN at ingest, but defense-in-depth here avoids surprise misclassifies
+    if a future code path constructs a FactorResult from arithmetic that
+    yields NaN/Inf.
+    """
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(v) or math.isinf(v):
+        return None
+    return v
 
 
 class FactorStatus(str, Enum):
@@ -75,9 +96,9 @@ def classify_higher_better(
     critical_below: float,
 ) -> FactorStatus:
     """Higher-is-better metric (e.g. ROE, GPM): red if value < critical, yellow if < warning."""
-    if value is None:
+    v = _coerce_to_finite_float(value)
+    if v is None:
         return FactorStatus.UNKNOWN
-    v = float(value)
     if v < critical_below:
         return FactorStatus.RED
     if v < warning_below:
@@ -92,9 +113,9 @@ def classify_lower_better(
     critical_above: float,
 ) -> FactorStatus:
     """Lower-is-better metric (e.g. debt ratio, AR/Revenue ratio)."""
-    if value is None:
+    v = _coerce_to_finite_float(value)
+    if v is None:
         return FactorStatus.UNKNOWN
-    v = float(value)
     if v > critical_above:
         return FactorStatus.RED
     if v > warning_above:
@@ -110,9 +131,9 @@ def classify_in_band(
     warning_band: float = 0.2,
 ) -> FactorStatus:
     """In-band metric (e.g. CFO/NI ideally 0.8-1.2). Red if outside warning_band%."""
-    if value is None:
+    v = _coerce_to_finite_float(value)
+    if v is None:
         return FactorStatus.UNKNOWN
-    v = float(value)
     if healthy_low <= v <= healthy_high:
         return FactorStatus.GREEN
     span = healthy_high - healthy_low

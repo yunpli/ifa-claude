@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{ report.title }}</title>
+<style>{{ inline_css }}</style>
+</head>
+<body>
+<article class="research-page">
+
+  {# ── Banner ─────────────────────────────────────────── #}
+  <header class="banner">
+    <div class="banner__brand">Lindenwood Management LLC · iFA Research v2.2</div>
+    <h1 class="banner__title">{{ report.title }}</h1>
+    <div class="banner__subtitle">{{ report.subtitle_en }}</div>
+    <div class="banner__meta">
+      <span><strong>报告生成</strong> {{ report.report_date_bjt }}</span>
+      <span><strong>数据截止</strong> {{ report.data_cutoff_bjt }}</span>
+      <span><strong>模板</strong> {{ report.template_version }}</span>
+      {% if report.tier %}
+      <span class="tier-badge tier-badge--{{ report.tier }}">
+        {% if report.tier == 'quick' %}⚡ Quick{% elif report.tier == 'deep' %}🔬 Deep{% else %}📊 Standard{% endif %}
+      </span>
+      {% endif %}
+      <span class="run-mode run-mode--{{ report.run_mode }}">
+        {% if report.run_mode == 'test' %}⚠ TEST{% elif report.run_mode == 'manual' %}✎ MANUAL{% else %}✓ PRODUCTION{% endif %}
+      </span>
+    </div>
+  </header>
+
+  {# ── Verdict ────────────────────────────────────────── #}
+  <div class="verdict verdict--{{ report.overall_status }}">
+    <div class="verdict__score">{{ report.overall_score | fmt_score }}</div>
+    <div>
+      <div class="verdict__label">{{ report.overall_status | status_icon }} {{ report.overall_label_zh }}</div>
+      <div class="verdict__sub">综合评分（5 维等权平均，0-100）</div>
+    </div>
+  </div>
+
+  {# ── Sections ───────────────────────────────────────── #}
+  {% for s in report.sections %}
+    {% if s.type == 'research_overview' %}{% include "_research_overview.html" %}
+    {% elif s.type == 'research_radar' %}{% include "_research_radar.html" %}
+    {% elif s.type == 'research_factor_table' %}{% include "_research_factor_table.html" %}
+    {% elif s.type == 'research_trend_grid' %}{% include "_research_trend_grid.html" %}
+    {% elif s.type == 'research_red_flags' %}{% include "_research_red_flags.html" %}
+    {% elif s.type == 'research_watchpoints' %}{% include "_research_watchpoints.html" %}
+    {% elif s.type == 'research_timeline' %}{% include "_research_timeline.html" %}
+    {% elif s.type == 'research_disclaimer' %}{% include "_research_disclaimer.html" %}
+    {% endif %}
+  {% endfor %}
+
+  <footer class="footer">
+    <div>本报告基于 Tushare 公开数据与公开披露资料编制；
+      所有因子阈值与评分逻辑可在 <code>research/params/research_v2.2.yaml</code> 查阅。</div>
+    <div class="footer-short">{{ report.footer_short_zh }}</div>
+    <div class="footer-short">{{ report.footer_short_en }}</div>
+  </footer>
+
+</article>
+</body>
+</html>
