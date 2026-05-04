@@ -47,6 +47,7 @@ def scan(contexts: Iterable[SetupContext]) -> tuple[list[Candidate], list[Candid
                 result.evidence["sector_quality"] = ctx.sector_quality
                 result.evidence["in_long_universe"] = ctx.in_long_universe
                 result.evidence["atr_pct_20d"] = ctx.atr_pct_20d
+                result.evidence["sw_l2_code"] = ctx.sw_l2_code
             if is_warning:
                 warn_cands.append(result)
             else:

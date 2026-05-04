@@ -101,6 +101,44 @@ def _tradeable_universe(engine: Engine, on_date: date) -> tuple[set[str], set[st
     if sf.get("exclude_unidentified_role", False):
         excluded_roles.add("未识别")
 
+    # M10 P1.5 — Fundamental二筛 (market cap + ST status; ROE TODO)
+    fund = load_params().get("fundamental_filter", {}) or {}
+    if fund.get("enabled", False):
+        min_mv_wan = fund.get("min_total_mv_yi", 30) * 10000   # 亿元 → 万元
+        sql_mv = text("""
+            SELECT ts_code FROM smartmoney.raw_daily_basic
+            WHERE trade_date = :on_date AND total_mv >= :min_mv
+        """)
+        with engine.connect() as conn:
+            mv_pass = {r[0] for r in conn.execute(sql_mv, {
+                "on_date": on_date, "min_mv": min_mv_wan,
+            })}
+        before_n = len(long_universe)
+        long_universe &= mv_pass
+        log.info("fundamental: market-cap ≥ %s亿 cut %d stocks (kept %d)",
+                 fund.get("min_total_mv_yi"),
+                 before_n - len(long_universe), len(long_universe))
+
+        # ST/*ST detection — name from sw_member_monthly latest snapshot.
+        # NOTE: this only catches *currently* ST-flagged stocks. Historical
+        # ST detection (st_lookback_days=365) requires a name-history table
+        # which we don't have; deferred to Tushare stock_company / namechange ETL.
+        sql_st = text("""
+            SELECT DISTINCT ON (ts_code) ts_code, name
+            FROM smartmoney.sw_member_monthly
+            WHERE name IS NOT NULL
+            ORDER BY ts_code, snapshot_month DESC
+        """)
+        with engine.connect() as conn:
+            st_codes = {
+                r[0] for r in conn.execute(sql_st)
+                if r[1] and ("ST" in r[1].upper() or "*ST" in r[1])
+            }
+        before_n = len(long_universe)
+        long_universe -= st_codes
+        log.info("fundamental: ST/*ST cut %d stocks (kept %d)",
+                 before_n - len(long_universe), len(long_universe))
+
     if excluded_phases or excluded_roles:
         sql_sector_state = text("""
             SELECT m.ts_code

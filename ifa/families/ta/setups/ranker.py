@@ -237,22 +237,51 @@ def rank(
     )
 
     # Tier assignment: A top 10, B next 20, C next 100, drop rest
+    # M10 P1.5 — Concentration cap (per L2 sector): keep portfolio diversified.
     tiers = rp.get("tiers", {})
     a_size = tiers.get("a_size", 10)
     b_size = tiers.get("b_size", 20)
     c_size = tiers.get("c_size", 100)
+    conc = (rp_root := load_params()).get("concentration", {}) or {}
+    cap_a_per_l2 = conc.get("tier_a_per_l2_max", 99) if conc.get("enabled", False) else 99
+    cap_b_per_l2 = conc.get("tier_b_per_l2_max", 99) if conc.get("enabled", False) else 99
+    cap_ab_per_l2 = conc.get("tier_ab_per_l2_max", 99) if conc.get("enabled", False) else 99
+
+    # Build per-stock SW L2 lookup from candidate evidence (most reliable in-flight).
+    l2_of_stock: dict[str, str | None] = {}
+    for ts_code, rec in by_stock.items():
+        for adj_score, c, status in rec["rows"]:
+            ev = c.evidence if isinstance(c.evidence, dict) else {}
+            l2 = ev.get("sw_l2_code") or ev.get("l2_code")
+            if l2:
+                l2_of_stock[ts_code] = l2
+                break
+        else:
+            l2_of_stock[ts_code] = None
+
     tier_of: dict[str, str] = {}
-    rank_pos = 0
+    a_count_l2: dict[str, int] = {}
+    b_count_l2: dict[str, int] = {}
+    a_filled = b_filled = c_filled = 0
     for ts_code, rec in sorted_stocks:
         if not rec["any_active"]:
             continue
-        rank_pos += 1
-        if rank_pos <= a_size:
+        l2 = l2_of_stock.get(ts_code) or "_unknown"
+        a_n = a_count_l2.get(l2, 0)
+        b_n = b_count_l2.get(l2, 0)
+        ab_n = a_n + b_n
+        # Try Tier A first, with caps
+        if a_filled < a_size and a_n < cap_a_per_l2 and ab_n < cap_ab_per_l2:
             tier_of[ts_code] = "A"
-        elif rank_pos <= a_size + b_size:
+            a_count_l2[l2] = a_n + 1
+            a_filled += 1
+        elif b_filled < b_size and b_n < cap_b_per_l2 and ab_n < cap_ab_per_l2:
             tier_of[ts_code] = "B"
-        elif rank_pos <= a_size + b_size + c_size:
+            b_count_l2[l2] = b_n + 1
+            b_filled += 1
+        elif c_filled < c_size:
             tier_of[ts_code] = "C"
+            c_filled += 1
         else:
             tier_of[ts_code] = ""    # dropped — won't be persisted
     top_stocks = {ts for ts, t in tier_of.items() if t == "A"}
