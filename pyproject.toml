@@ -33,6 +33,8 @@ dependencies = [
     "huggingface-hub>=1.13.0",
     "einops>=0.8.2",
     "pyarrow>=24.0.0",
+    "duckdb>=1.1",
+    "pdfplumber>=0.11",
 ]
 
 [project.scripts]
