@@ -264,7 +264,11 @@
         <h2 class="ifa-section__title">{{ s.title.split(' ', 1)[1] if ' ' in s.title else s.title }}</h2>
       </header>
       <div class="ifa-tone" style="border-left-color: var(--accent-2);">
-        <p class="ifa-tone__summary">{{ s.body }}</p>
+        {% for para in s.body.split('\n') %}
+          {% if para.strip() %}
+          <p class="ifa-tone__summary" style="margin-bottom: 10px;">{{ para }}</p>
+          {% endif %}
+        {% endfor %}
       </div>
     </section>
 
