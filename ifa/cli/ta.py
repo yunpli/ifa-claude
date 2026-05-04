@@ -160,6 +160,80 @@ def track_candidates(
     console.print(f"\n[bold green]done.[/] {total} tracking rows written.")
 
 
+@app.command("backtest")
+def backtest_cmd(
+    start: str = typer.Option(..., "--start", help="YYYY-MM-DD inclusive"),
+    end: str = typer.Option(..., "--end", help="YYYY-MM-DD inclusive"),
+    horizon: int = typer.Option(10, "--horizon", help="Outcome horizon (trade days)"),
+    top_only: bool = typer.Option(False, "--top-only",
+                                  help="Restrict to in_top_watchlist candidates"),
+) -> None:
+    """Aggregate setup performance over a date range. Read-only — no writes."""
+    from sqlalchemy import text
+    engine = get_engine()
+    start_d = date.fromisoformat(start)
+    end_d = date.fromisoformat(end)
+
+    where_top = "AND c.in_top_watchlist" if top_only else ""
+    sql = text(f"""
+        SELECT c.setup_name,
+               COUNT(*) AS n,
+               100.0 * COUNT(*) FILTER (WHERE t.return_pct >= 5.0) / NULLIF(COUNT(*), 0) AS win_rate,
+               AVG(t.return_pct) AS avg_ret,
+               AVG(t.max_return_pct) AS avg_max_ret,
+               AVG(t.max_drawdown_pct) AS avg_max_dd,
+               AVG(t.return_pct) FILTER (WHERE t.return_pct >= 5.0) AS avg_gain,
+               AVG(t.return_pct) FILTER (WHERE t.return_pct <= -3.0) AS avg_loss
+        FROM ta.candidates_daily c
+        JOIN ta.candidate_tracking t
+          ON t.candidate_id = c.candidate_id AND t.horizon_days = :h
+        WHERE c.trade_date >= :s AND c.trade_date <= :e
+        {where_top}
+        GROUP BY c.setup_name
+        HAVING COUNT(*) >= 5
+        ORDER BY win_rate DESC NULLS LAST
+    """)
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"s": start_d, "e": end_d, "h": horizon}).fetchall()
+
+    if not rows:
+        console.print("[yellow]no data in range[/]")
+        return
+
+    console.print(f"\n[bold]Backtest {start_d} → {end_d} · h={horizon}[/]"
+                  f"{'  (top_watchlist only)' if top_only else ''}")
+    console.print(f"{'Setup':<24} {'n':>6} {'win%':>6} {'avg':>7} "
+                  f"{'maxRet':>7} {'maxDD':>7} {'PL':>5}")
+    for r in rows:
+        setup, n, wr, avg, mxr, mxd, ag, al = r
+        wr_s = f"{wr:.1f}" if wr is not None else "-"
+        ag_s = f"{avg:+.2f}" if avg is not None else "-"
+        mxr_s = f"{mxr:+.2f}" if mxr is not None else "-"
+        mxd_s = f"{mxd:+.2f}" if mxd is not None else "-"
+        plr = (float(ag) / abs(float(al))) if (ag is not None and al not in (None, 0)) else None
+        plr_s = f"{plr:.2f}" if plr is not None else "-"
+        console.print(f"{setup:<24} {n:>6} {wr_s:>6} {ag_s:>7} {mxr_s:>7} {mxd_s:>7} {plr_s:>5}")
+
+
+@app.command("evening", help="Alias for evening-report")
+def evening_alias(
+    on_date: str = typer.Option(None, "--date"),
+    output: str = typer.Option("tmp/", "--output"),
+    slot: str = typer.Option("evening", "--slot"),
+    llm: bool = typer.Option(False, "--llm/--no-llm"),
+) -> None:
+    evening_report_cmd(on_date=on_date, output=output, slot=slot, llm=llm)
+
+
+@app.command("scan", help="Alias for scan-candidates")
+def scan_alias(
+    on_date: str = typer.Option(None, "--date"),
+    top_n: int = typer.Option(20, "--top-n"),
+    persist: bool = typer.Option(True, "--persist/--no-persist"),
+) -> None:
+    scan_candidates(on_date=on_date, top_n=top_n, persist=persist)
+
+
 @app.command("evaluate-judgments")
 def evaluate_judgments_cmd(
     judgment_date: str = typer.Option(..., "--judgment-date",
