@@ -13,6 +13,10 @@ from ifa.families.ta.regime.classifier import classify_regime
 from ifa.families.ta.regime.loader import load_regime_context
 from ifa.families.ta.regime.repo import upsert_regime_daily
 from ifa.families.ta.regime.transitions import build_transition_matrix
+from ifa.families.ta.setups.context_loader import build_contexts
+from ifa.families.ta.setups.ranker import rank as rank_candidates
+from ifa.families.ta.setups.repo import upsert_candidates
+from ifa.families.ta.setups.scanner import scan as scan_setups
 
 log = logging.getLogger(__name__)
 console = Console()
@@ -58,6 +62,59 @@ def classify_regime_cmd(
     if persist:
         upsert_regime_daily(engine, target, result, transitions_json)
         console.print(f"[green]✓ persisted to ta.regime_daily[/]")
+
+
+@app.command("scan-candidates")
+def scan_candidates(
+    on_date: str = typer.Option(None, "--date", help="Trade date YYYY-MM-DD (default: today BJT)"),
+    top_n: int = typer.Option(20, "--top-n", help="Top-N marked in_top_watchlist"),
+    persist: bool = typer.Option(True, "--persist/--no-persist"),
+) -> None:
+    """Scan all 19 setups across the full market for a date; rank + persist candidates."""
+    target = date.fromisoformat(on_date) if on_date else bjt_now().date()
+    engine = get_engine()
+
+    # Pull today's regime so setups can use it as a tailwind/headwind
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT regime FROM ta.regime_daily WHERE trade_date = :d"),
+            {"d": target},
+        ).fetchone()
+    regime = row[0] if row else None
+    if regime is None:
+        console.print(f"[yellow]⚠[/yellow]  no regime in ta.regime_daily for {target}; "
+                      f"setups using regime_tailwind will not score that bonus.")
+
+    contexts = build_contexts(engine, target, regime=regime)
+    console.print(f"[bold]{target}[/]  contexts: {len(contexts):>5}  regime: {regime or '(none)'}")
+
+    candidates = scan_setups(contexts.values())
+    console.print(f"  raw candidates: {len(candidates)}")
+
+    ranked = rank_candidates(candidates, top_n=top_n)
+    if not ranked:
+        console.print("[yellow]no candidates triggered today[/]")
+        return
+
+    # Quick by-setup summary
+    from collections import Counter
+    setup_counts = Counter(rc.candidate.setup_name for rc in ranked)
+    console.print("\n[bold]hits by setup:[/]")
+    for name, n in sorted(setup_counts.items(), key=lambda kv: -kv[1]):
+        console.print(f"  {name:25} {n:>5}")
+
+    # Show top-N watchlist
+    console.print(f"\n[bold]top {top_n}:[/]")
+    for rc in ranked[:top_n]:
+        c = rc.candidate
+        stars = "★" * rc.star_rating + "☆" * (5 - rc.star_rating)
+        console.print(f"  #{rc.rank:>3} {c.ts_code:12} {c.setup_name:25} "
+                      f"{c.score:.2f} {stars}")
+
+    if persist:
+        n = upsert_candidates(engine, target, ranked, regime_at_gen=regime)
+        console.print(f"\n[green]✓ persisted {n} rows to ta.candidates_daily[/]")
 
 
 @app.command("backfill-regime")
