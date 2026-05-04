@@ -6,6 +6,48 @@ All notable changes to iFA China Market Report System.
 
 ---
 
+## [2.2.0] — 2026-05-04 (in development)
+
+### Added — Three new families: Research / TA / Stock Intel (planned)
+
+**Research family — single-stock equity research reports**
+- 28 financial factors across 5 families (profitability / growth / cash quality / balance / governance)
+- SW L2 peer percentile via `sw_member_monthly` PIT JOIN
+- Three tiers: quick / standard / deep
+- LLM watchpoints + cross-cutting tensions (§09) + analyst coverage (§10) + investor concerns (§11)
+- 30-stock golden set + regression script (4 metrics, all gating thresholds passing)
+- Output: `Stock-Analysis-{ts_code}-{YYYYMMDD}[-{tier}].html`
+
+**TA family — 晚盘技术面 evening report**
+- 9-regime classifier (trend_continuation / early_risk_on / weak_rebound / range_bound / sector_rotation / emotional_climax / distribution_risk / cooldown / high_difficulty) with Laplace-smoothed transition matrix
+- 19 candidate setups across 7 families (T/P/R/F/V/S/C)
+- T+1/T+3/T+5/T+10/T+30 outcome tracking → `candidate_tracking`
+- Rolling 60d/250d `setup_metrics_daily` with decay score + suitable_regimes
+- M5.3 regime gating + decay-based suspension (OBSERVATION_ONLY / SUSPENDED)
+- Falsifiable next-day hypotheses → `report_judgments` with auto-evaluation
+- 11 deterministic + 3 LLM-augmented sections (regime explainer / candidate narrator / strategy review)
+- 25-day golden set scaffold + regression script
+- Output: `ifa_TA_{slot}_{YYYYMMDD}_{HHMM BJT}.{html,md}`
+
+**Stock Intel family — deferred to V2.3.**
+
+### Added — Cross-cutting
+
+- Auto trade-calendar enforcement (`ifa.core.calendar` + `smartmoney.trade_cal`); all trade-day arithmetic goes through this layer (handles 调休 + multi-day holidays correctly)
+- Persistent BJT timezone discipline at every report boundary
+- Three new schemas: `research.*`, `ta.*` (+ shared `catalyst_event_memory`)
+- `ifa ta` CLI: classify-regime / scan-candidates / track-candidates / compute-metrics / evening-report / backtest / evaluate-judgments / backfill-regime
+- `ifa research` CLI: report / peer-scan / batch / scan-* family
+
+### Fixed (research)
+
+- Stock-analysis report tables: dropped factor-code column; only Chinese name shown
+- IRM 减持次数 fetcher: now recognizes Tushare `stk_holdertrade in_de='DE'` correctly
+- Pledge_stat: distinguishes fetched-empty from not-fetched cases
+- IRM Q&A field name (`a` not `reply`); 5194 stocks recomputed: 5154 GREEN / 17 YELLOW / 23 RED
+
+---
+
 ## [2.1.3] — 2026-05-03
 
 ### Added — Ningbo Phase 1 → 3.D 完整闭环

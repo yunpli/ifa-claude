@@ -261,3 +261,76 @@ ifa ningbo
 ```
 
 详见 [`ningbo-deep-dive.md`](./ningbo-deep-dive.md)。
+
+---
+
+## Research — 个股深度研究 (separate)
+
+**Purpose.** Single-stock research reports built from financials + announcements + IRM Q&A + analyst research reports. Three tiers: `quick` (5 sections, no LLM), `standard` (10 sections, light LLM), `deep` (12 sections incl. LLM watchpoints + cross-cutting tensions + analyst themes + investor concerns).
+
+**Sections (deep).** §01 overview · §02-§07 5-family factor tables (profitability / growth / cash quality / balance / governance) · §08 timeline · §09 cross-cutting tensions · §10 analyst coverage + themes · §11 investor concerns · §12 trend grid · §13 red flags · §14 5-dim radar · §15 watchpoints · §16 next-disclosure · §17 data completeness · §18 disclaimer.
+
+**Key data sources.** Tushare `stock_basic`, `fina_indicator`, `forecast`, `express`, `top10_holders`, `pledge_stat`, `stk_holdertrade`, `irm_qa_sh/sz`, `report_rc`, `anns_*`. SW L2 peer ranking via `sw_member_monthly`.
+
+**CLI.**
+
+```
+ifa research
+├── report <name-or-code> [--tier quick/standard/deep] [--llm] [--output tmp/]
+├── peer-scan <name-or-code> [--max-peers N] [--full]
+├── peer-rank-refresh
+├── batch <code1> <code2> ...
+└── scan-* (industry-view / cleanup / status)
+```
+
+**Filename schema:** `Stock-Analysis-{ts_code}-{YYYYMMDD}[-{tier}].html`
+
+**Quality gate.** 30-stock golden set (`tests/golden_set/research_v22.json`), 4 metrics ≥ thresholds: verdict alignment ≥80%, dimension agreement ≥70%, watchpoint precision ≥70%, watchpoint recall ≥60%. Run `uv run python scripts/research_regression.py` before release.
+
+详见 [`research-deep-dive.md`](./research-deep-dive.md)。
+
+---
+
+## TA — 晚盘技术面体制+候选 (separate)
+
+**Purpose.** Daily evening report covering market regime classification, 19 candidate setups across 7 families (T/P/R/F/V/S/C), candidate ranking with regime gating + decay-based suspension, T+1/T+3/T+5/T+10/T+30 outcome tracking, falsifiable next-day hypotheses.
+
+**Sections (evening, 11 + 3 LLM).** §01 overview · §02 market state · §02-N regime narrative (LLM) · §03 5★ candidates · §04 4★ candidates · §04-N candidate narrative (LLM) · §07 candidates by family · §08 verification (T+1) · §10 setup metrics · §11 attribution · §13 risk scan · §13-N strategy review (LLM) · §14 falsifiable hypotheses · §16 disclaimer.
+
+**Setup families.**
+
+| Family | Setups |
+|---|---|
+| T 趋势 | T1 突破 · T2 回踩 · T3 加速 |
+| P 回踩 | P1 MA20 / P2 缺口 / P3 紧缩 |
+| R 反转 | R1 双底 · R2 头肩底 · R3 锤子线 |
+| F 形态 | F1 旗形 · F2 三角形 · F3 矩形 |
+| V 量价 | V1 量价齐升 · V2 缩量整理 |
+| S 板块 | S1 共振 · S2 跟风 · S3 补涨 |
+| C 筹码 | C1 集中 · C2 松动 |
+
+**Key data sources.** `smartmoney.raw_daily` (60d OHLCV) · `smartmoney.market_state_daily` (breadth + 涨跌停 + 连板) · `smartmoney.raw_moneyflow_hsgt` (北向) · `smartmoney.raw_sw_daily` (SW L1/L2 pct_change) · `ta.factor_pro_daily` (Tushare 80 fields incl. MACD/RSI) · `ta.cyq_perf_daily` (chip distribution).
+
+**Governance (M5.3).**
+- Regime gating: setup gets +0.1 score boost when current regime ∈ historical `suitable_regimes` (from setup_metrics_daily).
+- Decay-based suspension: `decay_score < -15pp` → SUSPENDED (dropped); `-15 ≤ decay < -10` → OBSERVATION_ONLY (kept but excluded from top_watchlist).
+
+**CLI.**
+
+```
+ifa ta
+├── classify-regime --date YYYY-MM-DD [--transitions]
+├── scan-candidates / scan --date YYYY-MM-DD [--top-n N]
+├── track-candidates --start YYYY-MM-DD --horizon 1 3 5 10 30
+├── compute-metrics --date YYYY-MM-DD
+├── evening-report / evening --date YYYY-MM-DD [--llm] [--slot evening]
+├── backtest --start ... --end ... [--horizon N] [--top-only]
+├── evaluate-judgments --judgment-date YYYY-MM-DD
+└── backfill-regime --start ... --end ...
+```
+
+**Filename schema:** `ifa_TA_{slot}_{YYYYMMDD}_{HHMM BJT}.{html,md}`
+
+**Quality gate.** 25-day golden set (`tests/golden_set/ta_v22.json`), 3 metrics: regime accuracy ≥80%, top-pick intersection ≥60%, rejected-setups recall ≥80%. Run `uv run python scripts/ta_regression.py`.
+
+详见 [`ta-strategy-deep-dive.md`](./ta-strategy-deep-dive.md)。
