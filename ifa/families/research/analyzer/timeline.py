@@ -234,11 +234,18 @@ def _from_research_reports(rows: list[dict]) -> list[TimelineEvent]:
 def _from_irm_qa(rows: list[dict]) -> list[TimelineEvent]:
     out = []
     for r in rows:
-        dt = str(r.get("pub_date") or r.get("ask_date") or r.get("ann_date") or "")
+        # Tushare uses 'pub_time' / 'trade_date' for IRM dates; fall back to
+        # other variants for compatibility.
+        dt = str(r.get("pub_time") or r.get("trade_date")
+                 or r.get("pub_date") or r.get("ask_date")
+                 or r.get("ann_date") or "")
         if not dt:
             continue
-        question = str(r.get("question") or r.get("ask_content") or "互动问答")
-        reply = str(r.get("reply") or r.get("answer") or r.get("reply_content") or "")
+        # Strip time component if present ('2026-04-29 10:30:00' → '20260429')
+        dt = dt[:10].replace("-", "") if "-" in dt else dt[:8]
+        question = str(r.get("q") or r.get("question") or r.get("ask_content") or "互动问答")
+        reply = str(r.get("a") or r.get("reply") or r.get("answer")
+                    or r.get("reply_content") or "")
         title = question[:80] + ("…" if len(question) > 80 else "")
         summary = reply[:200] if reply else "（未回复）"
         out.append(TimelineEvent(

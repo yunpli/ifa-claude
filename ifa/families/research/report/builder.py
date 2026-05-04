@@ -30,6 +30,8 @@ from ifa.families.research.analyzer.scoring import (
     FAMILY_ORDER,
     ScoringResult,
 )
+from ifa.families.research.analyzer.analyst_coverage import compute_coverage
+from ifa.families.research.analyzer.tensions import detect_tensions
 from ifa.families.research.analyzer.timeline import TimelineEvent, build_timeline
 from ifa.families.research.analyzer.trends import (
     TrendResult,
@@ -97,6 +99,8 @@ def build_research_report(
         try:
             narratives = effective_augmenter.narratives_for_report(
                 snap.company.ts_code, scoring, results_by_family,
+                irm_qa=snap.irm_qa if include_watchpoints else None,
+                research_reports=snap.research_reports if include_watchpoints else None,
             )
         except Exception:
             narratives = {}
@@ -116,11 +120,24 @@ def build_research_report(
 
     if include_trends:
         sections.append(_section_trend_grid(snap, params))
+    # Cross-cutting tensions: rule-based, deterministic, always run.
+    # Sits between red_flags (single-factor) and watchpoints (LLM-synthesized).
+    tensions_section = _section_tensions(results_by_family)
+    if tensions_section:
+        sections.append(tensions_section)
     sections.append(_section_red_flags(results_by_family))
     if include_watchpoints:
         watchpoints = narratives.get("watchpoints", [])
         if watchpoints:
             sections.append(_section_watchpoints(watchpoints))
+        ic_themes = narratives.get("investor_concerns", [])
+        if ic_themes:
+            sections.append(_section_investor_concerns(ic_themes))
+    # Analyst coverage (rule-based, always; LLM themes added when available)
+    if include_timeline:
+        sec = _section_analyst_coverage(snap, narratives.get("analyst_themes", []))
+        if sec:
+            sections.append(sec)
     if include_timeline:
         sections.append(_section_timeline(snap, timeline_limit, engine=engine))
     sections.append(_section_disclaimer())
@@ -277,6 +294,56 @@ def _section_red_flags(
     # RED first, then YELLOW
     flags.sort(key=lambda f: (0 if f["status"] == "red" else 1, f["family"]))
     return {"type": "research_red_flags", "flags": flags, "count": len(flags)}
+
+
+def _section_tensions(results_by_family: dict[str, list[FactorResult]]) -> dict | None:
+    """Cross-cutting tensions detector (§09 narrative consistency).
+
+    Returns None when no tensions found — the section is omitted from the
+    report (no point showing an empty list).
+    """
+    tensions = detect_tensions(results_by_family)
+    if not tensions:
+        return None
+    return {
+        "type": "research_tensions",
+        "entries": [t.to_dict() for t in tensions],
+        "count": len(tensions),
+    }
+
+
+def _section_analyst_coverage(
+    snap: CompanyFinancialSnapshot,
+    llm_themes: list[dict],
+) -> dict | None:
+    """§10 analyst coverage: deterministic stats + optional LLM theme clustering.
+
+    Returns None if no research reports — section is omitted to avoid noise.
+    """
+    if not snap.research_reports:
+        return None
+    cov = compute_coverage(snap.research_reports)
+    if cov.total_reports == 0:
+        return None
+    return {
+        "type": "research_analyst_coverage",
+        "total_reports": cov.total_reports,
+        "reports_by_month": cov.reports_by_month,
+        "top_institutions": cov.top_institutions,
+        "latest_report_date": cov.latest_report_date,
+        "days_since_latest": cov.days_since_latest,
+        "coverage_gap_warning": cov.coverage_gap_warning,
+        "themes": llm_themes,
+    }
+
+
+def _section_investor_concerns(themes: list[dict]) -> dict:
+    """LLM-clustered IRM themes — 'what investors keep asking'."""
+    return {
+        "type": "research_investor_concerns",
+        "entries": themes,
+        "count": len(themes),
+    }
 
 
 def _section_watchpoints(items: list[dict]) -> dict:

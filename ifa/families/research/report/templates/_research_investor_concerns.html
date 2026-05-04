@@ -1,0 +1,28 @@
+<section class="section">
+  <h2 class="section__title">
+    投资者关切（IRM 主题聚类）
+    <span class="badge badge--unknown">{{ s.count }} 个主题</span>
+  </h2>
+
+  <div class="ic-themes">
+    {% for th in s.entries %}
+    <div class="ic-theme ic-theme--{{ th.polarity }}">
+      <div class="ic-theme__header">
+        <span class="ic-theme__label">{{ th.label }}</span>
+        <span class="ic-theme__count">{{ th.count }} 问</span>
+        <span class="ic-theme__answered">回复率 {{ th.is_answered_pct }}%</span>
+        <span class="ic-theme__polarity ic-theme__polarity--{{ th.polarity }}">
+          {% if th.polarity == 'concern' %}担忧{% elif th.polarity == 'curious' %}探索{% else %}积极{% endif %}
+        </span>
+      </div>
+      {% if th.representative %}
+      <ul class="ic-theme__representatives">
+        {% for q in th.representative %}
+        <li>{{ q }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>

@@ -42,6 +42,35 @@ from ifa.families.research.fetcher.cache import computed_get, computed_set
 
 log = logging.getLogger(__name__)
 
+_ANALYST_THEMES_PROMPT = (
+    "你是研究助手。给定一家公司近期卖方研报标题（不含正文），"
+    "把它们聚成 2-4 个研究主题。严格规则：\n"
+    "1. 输出严格 JSON：{\"themes\": [{\"label\": str, \"count\": int, "
+    "\"representative_titles\": [str, str, str], \"sentiment\": str}, ...]}.\n"
+    "2. label：≤14 字主题标签，例如'AI算力扩产'/'估值修复'/'季报点评'/'新产能投放'.\n"
+    "3. count：归入此主题的研报数。\n"
+    "4. representative_titles：选 1-3 条代表标题，**不得改写**，截断到 ≤50 字。\n"
+    "5. sentiment：'bullish'（看多/上调/推荐）| 'cautious'（中性/观望/季报点评）| 'bearish'（看空/下调）。"
+    "标题措辞模糊时归 cautious。\n"
+    "6. themes 数量 2-4；按 count 从大到小排。\n"
+    "7. 严禁输出 JSON 之外内容。"
+)
+
+_INVESTOR_CONCERNS_PROMPT = (
+    "你是研究分析师助手。给定一家公司近期互动易问答的问题列表，"
+    "把它们聚成 3-5 个主题，反映投资者最关心的事。严格规则：\n"
+    "1. 输出严格 JSON：{\"themes\": [{\"label\": str, \"count\": int, "
+    "\"representative\": [str, str, str], \"polarity\": str, \"is_answered_pct\": int}, ...]}.\n"
+    "2. label：≤12 字主题标签，如'毛利下滑解释'/'海外业务进展'/'减持原因'/'管理层稳定性'.\n"
+    "3. count：归入此主题的问题数。\n"
+    "4. representative：从原问题中选 1-3 条代表性提问，**不要改写**，截断到≤40 字。\n"
+    "5. polarity：投资者关切倾向，'concern'（担心/质疑）| 'curious'（探索/中性）| 'positive'（鼓励/期待）。\n"
+    "6. is_answered_pct：该主题问题中得到实质性回复的比例（0-100，整数）。"
+    "若答案为'未回复'或答非所问视为未答；若 reply 字段为空也是未答。\n"
+    "7. themes 数量 3-5；按 count 从大到小排。问题不足 5 条时返回 1-2 个主题。\n"
+    "8. 严禁输出 JSON 之外内容（无代码块、无说明文字）。"
+)
+
 _FAMILY_FOCUS = {
     "profitability": "盈利能力（毛利、净利、ROE/ROIC、扣非vs净利差距）",
     "growth": "增长（营收/净利同比、3年CAGR、业绩预告达成率）",
@@ -136,6 +165,9 @@ class LLMAugmenter:
         ts_code: str,
         scoring: ScoringResult,
         results_by_family: dict[str, list[FactorResult]],
+        *,
+        irm_qa: list[dict] | None = None,
+        research_reports: list[dict] | None = None,
     ) -> dict[str, Any]:
         """Compute all narratives + watchpoints concurrently.
 
@@ -148,7 +180,7 @@ class LLMAugmenter:
         Thread pool sized to total distinct calls — each worker holds its own
         LLMClient HTTP session via OpenAI SDK.
         """
-        n = 2 + len(results_by_family)   # overall + watchpoints + N families
+        n = 4 + len(results_by_family)   # overall + watchpoints + investor_concerns + analyst_themes + N families
         out: dict[str, Any] = {}
         with ThreadPoolExecutor(max_workers=n) as ex:
             futures: dict[str, Any] = {
@@ -157,6 +189,14 @@ class LLMAugmenter:
                     self.watchpoints, ts_code, scoring, results_by_family,
                 ),
             }
+            if irm_qa:
+                futures["investor_concerns"] = ex.submit(
+                    self.investor_concerns, ts_code, irm_qa,
+                )
+            if research_reports:
+                futures["analyst_themes"] = ex.submit(
+                    self.analyst_themes, ts_code, research_reports,
+                )
             for fam, results in results_by_family.items():
                 fs = scoring.families.get(fam)
                 if fs is None:
@@ -170,8 +210,177 @@ class LLMAugmenter:
                     out[key] = fut.result()
                 except Exception as e:
                     log.warning("narrative %s failed: %s", key, e)
-                    out[key] = [] if key == "watchpoints" else ""
+                    if key in ("watchpoints", "investor_concerns", "analyst_themes"):
+                        out[key] = []
+                    else:
+                        out[key] = ""
         return out
+
+    def analyst_themes(
+        self,
+        ts_code: str,
+        research_reports: list[dict],
+        *,
+        max_titles: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Cluster sell-side report titles into 2-4 research themes.
+
+        Tushare research_report only exposes title + institution + date
+        (no rating / target price). So this is a 'what are sell-side
+        analysts focused on' summary, not a true consensus extraction.
+
+        Returns themes (label / count / representative_titles / sentiment),
+        empty list on insufficient data or any failure.
+        """
+        items: list[dict] = []
+        for r in research_reports:
+            title = (r.get("title") or "").strip()
+            if not title:
+                continue
+            items.append({
+                "title": title[:120],
+                "inst": (r.get("inst_csname") or "").strip()[:30],
+                "date": str(r.get("trade_date") or "")[:8],
+            })
+            if len(items) >= max_titles:
+                break
+
+        if len(items) < 3:
+            return []
+
+        payload = {"reports": items}
+        cache_key = "analyst_themes"
+        inputs_hash = _hash(payload)
+
+        if self.cache_engine is not None:
+            cached = computed_get(self.cache_engine, ts_code,
+                                  cache_key, inputs_hash)
+            if cached and isinstance(cached, dict) and "themes" in cached:
+                return list(cached["themes"])
+
+        try:
+            resp = self.client.chat(
+                messages=[
+                    {"role": "system", "content": _ANALYST_THEMES_PROMPT},
+                    {"role": "user",
+                     "content": ("将以下研报标题聚成 2-4 个主题。"
+                                 "严格 JSON：\n\n```json\n"
+                                 + json.dumps(payload, ensure_ascii=False)
+                                 + "\n```")},
+                ],
+                max_tokens=700,
+                temperature=0.2,
+                response_format={"type": "json_object"},
+            )
+            parsed = resp.parse_json()
+            themes = parsed.get("themes", [])
+            if not isinstance(themes, list):
+                return []
+            valid = [
+                th for th in themes
+                if isinstance(th, dict)
+                and {"label", "count",
+                     "representative_titles", "sentiment"} <= th.keys()
+                and th.get("sentiment") in ("bullish", "cautious", "bearish")
+            ]
+        except Exception as e:
+            log.warning("analyst_themes LLM/parse failed for %s: %s", ts_code, e)
+            return []
+
+        valid.sort(key=lambda t: -int(t.get("count", 0)))
+
+        if self.cache_engine is not None and valid:
+            try:
+                computed_set(self.cache_engine, ts_code, cache_key,
+                             inputs_hash, {"themes": valid})
+            except Exception as e:
+                log.debug("cache_set analyst_themes failed: %s", e)
+        return valid
+
+    def investor_concerns(
+        self,
+        ts_code: str,
+        irm_qa: list[dict],
+        *,
+        max_questions: int = 30,
+    ) -> list[dict[str, Any]]:
+        """Cluster IRM questions into 3-5 themes representing investor focus.
+
+        Returns list of theme dicts with keys: label / count / representative /
+        polarity / is_answered_pct. Empty list when insufficient questions or on
+        any failure (LLM error / parse error / schema violation). Cached per
+        unique (ts_code, question-set) hash.
+        """
+        # Filter to questions with non-empty text. Tushare irm_qa uses
+        # short keys 'q' / 'a'; we also accept the longer aliases used by
+        # other sources for forward compatibility.
+        items: list[dict] = []
+        for r in irm_qa:
+            q = (r.get("q") or r.get("question") or r.get("ask_content") or "").strip()
+            if not q:
+                continue
+            reply = (r.get("a") or r.get("reply") or r.get("answer")
+                     or r.get("reply_content") or "").strip()
+            items.append({
+                "question": q[:200],
+                "reply_excerpt": reply[:120] if reply else "",
+                "answered": bool(reply),
+            })
+            if len(items) >= max_questions:
+                break
+
+        if len(items) < 3:
+            return []  # not enough signal to cluster
+
+        payload = {"questions": items}
+        cache_key = "investor_concerns"
+        inputs_hash = _hash(payload)
+
+        if self.cache_engine is not None:
+            cached = computed_get(self.cache_engine, ts_code,
+                                  cache_key, inputs_hash)
+            if cached and isinstance(cached, dict) and "themes" in cached:
+                return list(cached["themes"])
+
+        try:
+            resp = self.client.chat(
+                messages=[
+                    {"role": "system", "content": _INVESTOR_CONCERNS_PROMPT},
+                    {"role": "user",
+                     "content": ("将以下互动易问答聚成 3-5 个主题。"
+                                 "严格 JSON：\n\n```json\n"
+                                 + json.dumps(payload, ensure_ascii=False)
+                                 + "\n```")},
+                ],
+                max_tokens=900,
+                temperature=0.2,
+                response_format={"type": "json_object"},
+            )
+            parsed = resp.parse_json()
+            themes = parsed.get("themes", [])
+            if not isinstance(themes, list):
+                return []
+            valid = [
+                th for th in themes
+                if isinstance(th, dict)
+                and {"label", "count", "representative",
+                     "polarity", "is_answered_pct"} <= th.keys()
+                and th.get("polarity") in ("concern", "curious", "positive")
+            ]
+        except Exception as e:
+            log.warning("investor_concerns LLM/parse failed for %s: %s", ts_code, e)
+            return []
+
+        # Sort by count desc
+        valid.sort(key=lambda t: -int(t.get("count", 0)))
+
+        if self.cache_engine is not None and valid:
+            try:
+                computed_set(self.cache_engine, ts_code, cache_key,
+                             inputs_hash, {"themes": valid})
+            except Exception as e:
+                log.debug("cache_set investor_concerns failed: %s", e)
+        return valid
 
     def watchpoints(
         self,

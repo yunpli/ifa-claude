@@ -1,0 +1,65 @@
+<section class="section">
+  <h2 class="section__title">
+    研报覆盖（§10）
+    {% if s.coverage_gap_warning %}
+    <span class="badge badge--yellow">⚠ 覆盖减弱：最近 {{ s.days_since_latest }} 天无新研报</span>
+    {% else %}
+    <span class="badge badge--unknown">{{ s.total_reports }} 份 / 最新 {{ s.latest_report_date }}</span>
+    {% endif %}
+  </h2>
+
+  <div class="ac-grid">
+    <div class="ac-volume">
+      <div class="ac-volume__label">月度研报量（近 6 月）</div>
+      <ul class="ac-volume__bars">
+        {% for m in s.reports_by_month %}
+        <li class="ac-volume__bar"
+            style="--h: {{ m.count * 8 + 4 }}px;"
+            title="{{ m.month }}: {{ m.count }} 份">
+          <span class="ac-volume__count">{{ m.count }}</span>
+          <span class="ac-volume__month">{{ m.month[-2:] }}月</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    {% if s.top_institutions %}
+    <div class="ac-insts">
+      <div class="ac-insts__label">活跃机构 Top {{ s.top_institutions | length }}</div>
+      <table class="ac-insts__table">
+        <tbody>
+          {% for inst in s.top_institutions %}
+          <tr>
+            <td class="ac-insts__name">{{ inst.name }}</td>
+            <td class="ac-insts__count">{{ inst.count }} 份</td>
+            <td class="ac-insts__date">最新 {{ inst.latest_date }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if s.themes %}
+  <div class="ac-themes">
+    <div class="ac-themes__label">卖方研究主题（LLM 聚类）</div>
+    {% for th in s.themes %}
+    <div class="ac-theme ac-theme--{{ th.sentiment }}">
+      <div class="ac-theme__header">
+        <span class="ac-theme__title">{{ th.label }}</span>
+        <span class="ac-theme__count">{{ th.count }} 份</span>
+        <span class="ac-theme__sentiment ac-theme__sentiment--{{ th.sentiment }}">
+          {% if th.sentiment == 'bullish' %}↑ 看多{% elif th.sentiment == 'bearish' %}↓ 看空{% else %}→ 中性{% endif %}
+        </span>
+      </div>
+      {% if th.representative_titles %}
+      <ul class="ac-theme__titles">
+        {% for t in th.representative_titles %}<li>{{ t }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>

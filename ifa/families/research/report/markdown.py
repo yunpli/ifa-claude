@@ -148,6 +148,68 @@ def _r_timeline(s: dict) -> str:
     return "\n".join(lines)
 
 
+def _r_tensions(s: dict) -> str:
+    if not s.get("entries"):
+        return ""
+    sev_icon = {"high": "🔴", "medium": "🟡", "low": "⚪"}
+    lines = [f"### 横切张力（共 {s['count']} 条）"]
+    for t in s["entries"]:
+        ic = sev_icon.get(t.get("severity"), "?")
+        title = t.get("title", "")
+        ev = t.get("evidence", [])
+        ev_str = f" `{' '.join(ev)}`" if ev else ""
+        lines.append(f"- {ic} **{title}**{ev_str}")
+        if t.get("description"):
+            lines.append(f"  {t['description']}")
+    return "\n".join(lines)
+
+
+def _r_analyst_coverage(s: dict) -> str:
+    lines = [f"### 研报覆盖（§10 · 共 {s['total_reports']} 份）"]
+    if s.get("coverage_gap_warning"):
+        lines.append(f"> ⚠ 覆盖减弱：最近 {s['days_since_latest']} 天无新研报")
+    elif s.get("latest_report_date"):
+        lines.append(f"> 最新研报：{s['latest_report_date']}（{s['days_since_latest']} 天前）")
+
+    if s.get("reports_by_month"):
+        bars = " ".join(f"{m['month'][-2:]}月={m['count']}" for m in s["reports_by_month"])
+        lines.append("")
+        lines.append(f"**月度量**: {bars}")
+
+    if s.get("top_institutions"):
+        lines.append("")
+        lines.append("**Top 机构**:")
+        for inst in s["top_institutions"]:
+            lines.append(f"- {inst['name']} · {inst['count']} 份 · 最新 {inst['latest_date']}")
+
+    if s.get("themes"):
+        lines.append("")
+        lines.append("**研究主题（LLM 聚类）**:")
+        sent_icon = {"bullish": "↑ 看多", "cautious": "→ 中性", "bearish": "↓ 看空"}
+        for th in s["themes"]:
+            ic = sent_icon.get(th.get("sentiment"), "?")
+            lines.append(f"- **{th.get('label', '?')}** · {th.get('count', 0)} 份 · {ic}")
+            for t in th.get("representative_titles", [])[:2]:
+                lines.append(f"  > {t}")
+    return "\n".join(lines)
+
+
+def _r_investor_concerns(s: dict) -> str:
+    if not s.get("entries"):
+        return ""
+    pol_label = {"concern": "🔴 担忧", "curious": "🔵 探索", "positive": "🟢 积极"}
+    lines = [f"### 投资者关切（IRM 聚类，{s['count']} 主题）"]
+    for th in s["entries"]:
+        pol = pol_label.get(th.get("polarity"), "?")
+        lines.append(
+            f"- **{th.get('label', '?')}** · {th.get('count', 0)} 问 · "
+            f"回复率 {th.get('is_answered_pct', 0)}% · {pol}"
+        )
+        for q in th.get("representative", [])[:3]:
+            lines.append(f"  > {q}")
+    return "\n".join(lines)
+
+
 def _r_watchpoints(s: dict) -> str:
     if not s.get("entries"):
         return "### 关注点\n暂无 LLM 综合关注点。"
@@ -180,7 +242,10 @@ _RENDERERS = {
     "research_factor_table": _r_factor_table,
     "research_trend_grid": _r_trend_grid,
     "research_red_flags": _r_red_flags,
+    "research_tensions": _r_tensions,
     "research_watchpoints": _r_watchpoints,
+    "research_investor_concerns": _r_investor_concerns,
+    "research_analyst_coverage": _r_analyst_coverage,
     "research_timeline": _r_timeline,
     "research_disclaimer": _r_disclaimer,
 }

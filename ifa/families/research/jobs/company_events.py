@@ -217,11 +217,16 @@ def _irm_to_candidates(
 ) -> list[_Candidate]:
     out = []
     for r in rows:
-        pt = _parse_anndate(r.get("pub_date") or r.get("ask_date") or r.get("ann_date"))
+        # Tushare IRM uses 'pub_time' / 'trade_date'; alias variants kept for compat.
+        pt = _parse_anndate(
+            r.get("pub_time") or r.get("trade_date")
+            or r.get("pub_date") or r.get("ask_date") or r.get("ann_date")
+        )
         if pt is None or pt < cutoff:
             continue
-        question = str(r.get("question") or r.get("ask_content") or "").strip()
-        reply = str(r.get("reply") or r.get("answer") or r.get("reply_content") or "").strip()
+        question = str(r.get("q") or r.get("question") or r.get("ask_content") or "").strip()
+        reply = str(r.get("a") or r.get("reply") or r.get("answer")
+                    or r.get("reply_content") or "").strip()
         if not question:
             continue
         text_blob = f"问: {question}\n答: {reply or '（未回复）'}"

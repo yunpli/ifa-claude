@@ -149,6 +149,38 @@ table.factor-table th, table.radar-table th {
 .trend-card--flat .trend-card__arrow { color: var(--gray); }
 .trend-card--unknown .trend-card__arrow { color: var(--gray); }
 
+/* ── Tensions (rule-based cross-cutting) ── */
+.tensions { display: grid; gap: 8px; }
+.tension {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--gray);
+  border-radius: 4px;
+  padding: 8px 12px;
+  background: #fff;
+}
+.tension--high   { border-left-color: var(--red); background: #fffafa; }
+.tension--medium { border-left-color: var(--yellow); background: #fffdf3; }
+.tension--low    { border-left-color: var(--gray); }
+
+.tension__header {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.tension__severity {
+  font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px;
+}
+.tension__severity--high   { color: var(--red); background: var(--red-bg); }
+.tension__severity--medium { color: var(--yellow); background: var(--yellow-bg); }
+.tension__severity--low    { color: var(--gray); background: var(--gray-bg); }
+.tension__title { font-size: 13px; font-weight: 600; }
+.tension__evidence { font-size: 11px; color: var(--muted); margin-left: auto; }
+.tension__evidence code {
+  background: var(--gray-bg); padding: 1px 4px; border-radius: 2px; font-size: 10px;
+}
+.tension__desc {
+  font-size: 12.5px; color: #333; line-height: 1.55;
+}
+
 /* ── Watchpoints (LLM-synthesized) ── */
 .watchpoints { display: grid; gap: 10px; }
 .watchpoint {
@@ -186,6 +218,83 @@ table.factor-table th, table.radar-table th {
   border-top: 1px dashed var(--border);
 }
 .watchpoint__watch strong { color: var(--accent); }
+
+/* ── Analyst coverage (§10) ─────── */
+.ac-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 12px; }
+@media (max-width: 600px) { .ac-grid { grid-template-columns: 1fr; } }
+
+.ac-volume__label, .ac-insts__label, .ac-themes__label {
+  font-size: 12px; color: var(--muted); margin-bottom: 6px; font-weight: 600;
+}
+.ac-volume__bars {
+  display: flex; gap: 6px; align-items: flex-end; padding: 0; margin: 0;
+  list-style: none; height: 80px;
+}
+.ac-volume__bar {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-end; gap: 2px;
+}
+.ac-volume__bar::before {
+  content: ''; width: 100%; height: var(--h); background: var(--accent);
+  border-radius: 2px 2px 0 0;
+}
+.ac-volume__count { font-size: 11px; color: var(--fg); font-weight: 600; }
+.ac-volume__month { font-size: 10px; color: var(--muted); }
+
+.ac-insts__table { width: 100%; font-size: 12px; }
+.ac-insts__table td { padding: 4px 6px; border-bottom: 1px solid var(--border); }
+.ac-insts__name { font-weight: 600; }
+.ac-insts__count { color: var(--accent); text-align: right; white-space: nowrap; }
+.ac-insts__date { color: var(--muted); text-align: right; white-space: nowrap; }
+
+.ac-themes { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.ac-theme {
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 8px 12px; margin-bottom: 6px; background: #fff;
+}
+.ac-theme--bullish  { border-left: 4px solid var(--green); }
+.ac-theme--cautious { border-left: 4px solid var(--gray); }
+.ac-theme--bearish  { border-left: 4px solid var(--red); }
+
+.ac-theme__header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.ac-theme__title { font-size: 13px; font-weight: 600; }
+.ac-theme__count { font-size: 11px; color: var(--muted); }
+.ac-theme__sentiment { margin-left: auto; font-size: 11px; padding: 1px 6px; border-radius: 3px; }
+.ac-theme__sentiment--bullish  { color: var(--green); background: var(--green-bg); }
+.ac-theme__sentiment--cautious { color: var(--gray); background: var(--gray-bg); }
+.ac-theme__sentiment--bearish  { color: var(--red); background: var(--red-bg); }
+.ac-theme__titles { margin: 0; padding-left: 16px; font-size: 11.5px; color: #555; }
+.ac-theme__titles li { margin: 2px 0; }
+
+/* ── Investor concerns (IRM themes) ── */
+.ic-themes { display: grid; gap: 10px; }
+.ic-theme {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 14px;
+  background: #fff;
+}
+.ic-theme--concern  { border-left: 4px solid var(--red); background: #fffafa; }
+.ic-theme--curious  { border-left: 4px solid var(--accent); background: #f4f8ff; }
+.ic-theme--positive { border-left: 4px solid var(--green); background: #f1f8e9; }
+
+.ic-theme__header {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.ic-theme__label { font-size: 14px; font-weight: 600; }
+.ic-theme__count { font-size: 12px; color: var(--muted); }
+.ic-theme__answered { font-size: 11px; color: var(--accent); }
+.ic-theme__polarity {
+  font-size: 11px; padding: 1px 6px; border-radius: 3px; margin-left: auto;
+}
+.ic-theme__polarity--concern  { color: var(--red); background: var(--red-bg); }
+.ic-theme__polarity--curious  { color: var(--accent); background: var(--accent-bg); }
+.ic-theme__polarity--positive { color: var(--green); background: var(--green-bg); }
+.ic-theme__representatives {
+  margin: 0; padding-left: 18px; font-size: 12px; color: #555;
+}
+.ic-theme__representatives li { margin: 2px 0; }
 
 /* ── Red flags ─────────────────────── */
 .flag-list { padding-left: 20px; margin: 0; }

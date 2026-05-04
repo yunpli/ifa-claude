@@ -1,0 +1,27 @@
+<section class="section">
+  <h2 class="section__title">
+    横切张力（跨段一致性观察）
+    <span class="badge badge--{% if s.count >= 4 %}red{% elif s.count >= 2 %}yellow{% else %}green{% endif %}">
+      共 {{ s.count }} 条
+    </span>
+  </h2>
+
+  <div class="tensions">
+    {% for t in s.entries %}
+    <div class="tension tension--{{ t.severity }}">
+      <div class="tension__header">
+        <span class="tension__severity tension__severity--{{ t.severity }}">
+          {% if t.severity == 'high' %}● 高{% elif t.severity == 'medium' %}● 中{% else %}● 低{% endif %}
+        </span>
+        <span class="tension__title">{{ t.title }}</span>
+        {% if t.evidence %}
+        <span class="tension__evidence">
+          {% for e in t.evidence %}<code>{{ e }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+        </span>
+        {% endif %}
+      </div>
+      <div class="tension__desc">{{ t.description }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</section>

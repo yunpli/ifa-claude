@@ -36,3 +36,4 @@ htmlcov/
 # CatBoost training logs
 catboost_info/
 tmp/
+tests/golden_set/reports/

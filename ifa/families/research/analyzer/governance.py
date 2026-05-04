@@ -315,9 +315,12 @@ def _compute_irm_reply_rate(snap: CompanyFinancialSnapshot, p: dict) -> FactorRe
         )
 
     total = len(snap.irm_qa)
+    # Tushare irm_qa uses short field 'a' for the answer; alias variants
+    # are kept for forward compatibility with other sources.
     unreplied = sum(
         1 for r in snap.irm_qa
-        if not (r.get("reply") or r.get("answer") or r.get("reply_content") or "").strip()
+        if not (r.get("a") or r.get("reply") or r.get("answer")
+                or r.get("reply_content") or "").strip()
     )
 
     if total == 0:
