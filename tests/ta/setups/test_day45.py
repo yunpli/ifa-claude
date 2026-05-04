@@ -40,7 +40,7 @@ class TestF1Flag:
         closes = (pre + run_up + flag + today)[-60:]
         ctx = _ctx(closes, volume_ratio=1.5)
         result = SETUPS["F1_FLAG"](ctx)
-        assert result is None or "near_breakout" in result.triggers
+        assert result is None or "near_top_of_flag" in result.triggers
 
     def test_no_pole_no_trigger(self):
         closes = [100.0] * 60
