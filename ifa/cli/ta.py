@@ -19,6 +19,7 @@ from ifa.families.ta.setups.repo import upsert_candidates
 from ifa.families.ta.setups.scanner import scan as scan_setups
 from ifa.families.ta.setups.tracking import evaluate_for_date
 from ifa.families.ta.metrics import compute_setup_metrics
+from ifa.families.ta.report import build_evening_report, render_html, render_markdown
 
 log = logging.getLogger(__name__)
 console = Console()
@@ -145,6 +146,33 @@ def compute_metrics_cmd(
     engine = get_engine()
     n = compute_setup_metrics(engine, target)
     console.print(f"[green]✓ wrote {n} rows to ta.setup_metrics_daily for {target}[/]")
+
+
+@app.command("evening-report")
+def evening_report_cmd(
+    on_date: str = typer.Option(None, "--date", help="Trade date YYYY-MM-DD (default: today BJT)"),
+    output: str = typer.Option("tmp/", "--output", help="Output dir, or '-' to print MD to stdout"),
+) -> None:
+    """Generate the TA evening report (6 sections; HTML + MD)."""
+    from pathlib import Path
+
+    target = date.fromisoformat(on_date) if on_date else bjt_now().date()
+    engine = get_engine()
+    report = build_evening_report(engine, target)
+
+    if output == "-":
+        console.print(render_markdown(report))
+        return
+
+    out_dir = Path(output)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    base = f"TA-Evening-{target.strftime('%Y%m%d')}"
+    html_path = out_dir / f"{base}.html"
+    md_path = out_dir / f"{base}.md"
+    html_path.write_text(render_html(report), encoding="utf-8")
+    md_path.write_text(render_markdown(report), encoding="utf-8")
+    console.print(f"[green]✓ HTML[/]  {html_path}")
+    console.print(f"[green]✓ MD[/]    {md_path}")
 
 
 @app.command("backfill-regime")
