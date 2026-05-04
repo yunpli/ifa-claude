@@ -12,15 +12,19 @@ Exit codes:
 
 Annotation schema (see research_golden_set_init.py):
     verdict_alignment: 'agree' | 'partial' | 'disagree'
-    dimension_disagreements: {family: 'ok' | 'should_be_<status>'}
+    dimension_disagreements: {family: "<token>[；说明]"}
+        token ∈ {ok, partial, disagree}; 中文 freeform 说明可选，用 '；'/'：' 分隔
+        例: "ok"  / "ok；FCF 为正"  / "partial：ROE 低但同业前列"  / "disagree：…"
     your_watchpoints: 3 free-text concerns
     system_watchpoints_wrong_indices: list of 1-indexed bad watchpoint positions
 
 Metrics:
     · verdict_alignment_rate: % of stocks where system verdict directionally agrees
-    · dimension_agreement_rate: across (stock × family) cells, % marked 'ok'
+        (agree=1.0, partial=0.5, disagree=0)
+    · dimension_agreement_rate: weighted across (stock × family) cells
+        (ok=1.0, partial=0.5, disagree=0)
     · watchpoints_precision: 1 - (wrong / total) across system-generated watchpoints
-    · watchpoints_recall: % of user concerns covered by system (LLM-judged keyword overlap)
+    · watchpoints_recall: % of user concerns covered by system (keyword overlap)
 
 Thresholds (from V2.2 todo §M6):
     verdict_alignment_rate ≥ 80%
@@ -87,19 +91,42 @@ def _verdict_aligns(annotation: str, system_score: float | None) -> tuple[bool, 
     return (False, False)
 
 
-def _normalize_dim_disagreement(annotated: dict, system_results: dict) -> tuple[int, int]:
-    """Return (agreed_count, total_count) across the 5 dimensions."""
+def _dim_token(value: str | None) -> str:
+    """Extract leading verdict token from a free-form annotation.
+
+    User writes things like "ok；FCF 为正", "partial：…", "disagree：…".
+    We split on '：' / ':' / '；' / ';' and take the first chunk.
+    """
+    if not value:
+        return "ok"
+    head = value.strip()
+    for sep in ("：", ":", "；", ";"):
+        if sep in head:
+            head = head.split(sep, 1)[0]
+            break
+    return head.strip().lower()
+
+
+def _normalize_dim_disagreement(annotated: dict, system_results: dict) -> tuple[float, int]:
+    """Return (weighted_agreement, total_count) across the 5 dimensions.
+
+    Weights: ok=1.0, partial=0.5, disagree=0.0. Unknown tokens default to ok
+    (treats stale schema like 'should_be_yellow' as disagreement signal=0).
+    """
     families = ("profitability", "growth", "cash_quality", "balance", "governance")
     total = 0
-    agreed = 0
+    agreed = 0.0
     for fam in families:
-        ann = annotated.get(fam, "ok")
-        if ann is None:
+        raw = annotated.get(fam, "ok")
+        if raw is None:
             continue
         total += 1
-        if ann == "ok":
-            agreed += 1
-        # else: user marked should_be_X — counts as disagreement
+        token = _dim_token(raw)
+        if token == "ok":
+            agreed += 1.0
+        elif token == "partial":
+            agreed += 0.5
+        # disagree or anything else → 0
     return agreed, total
 
 
@@ -200,7 +227,7 @@ def main() -> int:
 
     verdict_full = 0
     verdict_partial = 0   # half-weight
-    dim_agreed_total = 0
+    dim_agreed_total = 0.0
     dim_total = 0
     wp_total = 0
     wp_wrong = 0
