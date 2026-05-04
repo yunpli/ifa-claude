@@ -15,7 +15,7 @@ from ifa.families.ta.regime.repo import upsert_regime_daily
 from ifa.families.ta.regime.transitions import build_transition_matrix
 from ifa.families.ta.setups.context_loader import build_contexts
 from ifa.families.ta.setups.ranker import rank as rank_candidates
-from ifa.families.ta.setups.repo import upsert_candidates
+from ifa.families.ta.setups.repo import upsert_candidates, upsert_warnings
 from ifa.families.ta.setups.scanner import scan as scan_setups
 from ifa.families.ta.setups.tracking import evaluate_for_date
 from ifa.families.ta.setups.judgments import evaluate_judgments
@@ -74,7 +74,7 @@ def scan_candidates(
     top_n: int = typer.Option(20, "--top-n", help="Top-N marked in_top_watchlist"),
     persist: bool = typer.Option(True, "--persist/--no-persist"),
 ) -> None:
-    """Scan all 19 setups across the full market for a date; rank + persist candidates."""
+    """Scan 28 setups (long + warning) across the full market; rank long pool + persist."""
     target = date.fromisoformat(on_date) if on_date else bjt_now().date()
     engine = get_engine()
 
@@ -93,8 +93,10 @@ def scan_candidates(
     contexts = build_contexts(engine, target, regime=regime)
     console.print(f"[bold]{target}[/]  contexts: {len(contexts):>5}  regime: {regime or '(none)'}")
 
-    candidates = scan_setups(contexts.values())
-    console.print(f"  raw candidates: {len(candidates)}")
+    candidates, warnings = scan_setups(contexts.values())
+    n_long_only = sum(1 for c in contexts.values() if c.in_long_universe)
+    console.print(f"  long-pool stocks: {n_long_only} / liquid {len(contexts)}; "
+                  f"long candidates: {len(candidates)}, warnings: {len(warnings)}")
 
     # Load setup_metrics for the most recent date <= target — governs M5.3 gating
     from sqlalchemy import text as _text
@@ -144,6 +146,9 @@ def scan_candidates(
     if persist:
         n = upsert_candidates(engine, target, ranked, regime_at_gen=regime)
         console.print(f"\n[green]✓ persisted {n} rows to ta.candidates_daily[/]")
+        if warnings:
+            nw = upsert_warnings(engine, target, warnings, regime_at_gen=regime)
+            console.print(f"[green]✓ persisted {nw} rows to ta.warnings_daily[/]")
 
 
 @app.command("track-candidates")

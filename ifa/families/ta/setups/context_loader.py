@@ -45,11 +45,18 @@ def _rank_dict(values: dict) -> dict[str, float]:
     return out
 
 
-def _tradeable_universe(engine: Engine, on_date: date) -> set[str]:
-    """Return ts_codes meeting universe filter: not suspended + min liquidity.
+def _tradeable_universe(engine: Engine, on_date: date) -> tuple[set[str], set[str]]:
+    """Return (liquid_universe, long_universe).
 
-    M9.7: also applies sector_flow Layer 1 — excludes stocks whose SW L2
-    sector is in 退潮 cycle_phase or 退潮/未识别 role (governance toggles).
+    · liquid_universe — passes liquidity filter (min avg amount + coverage).
+      Used as the full pool for warning setups (D1/D2/D3).
+    · long_universe   — liquid minus Layer-1 sector exclusions (退潮 phase /
+      退潮 role / 未识别 role per governance toggles). Used for the long pool
+      (Tier A/B). Long_universe ⊆ liquid_universe.
+
+    M10 P0.1: caller builds contexts for liquid_universe and tags each
+    context with `in_long_universe = (ts_code in long_universe)`. Scanner
+    routes setups by this flag.
     """
     from ifa.families.ta.params import load_params
     p = load_params().get("universe", {}) or {}
@@ -83,7 +90,8 @@ def _tradeable_universe(engine: Engine, on_date: date) -> set[str]:
             "min_amt": min_amt_qy,
             "min_cov": min_coverage,
         }).fetchall()
-    universe = {r[0] for r in rows}
+    liquid_universe = {r[0] for r in rows}
+    long_universe = set(liquid_universe)
 
     # Layer 1 — SmartMoney sector flow exclusions
     excluded_phases = {"退潮"} if sf.get("exclude_retreat_phase", True) else set()
@@ -110,11 +118,13 @@ def _tradeable_universe(engine: Engine, on_date: date) -> set[str]:
                 "bad_phases": list(excluded_phases) or [""],
                 "bad_roles": list(excluded_roles) or [""],
             })}
-        universe -= excluded
-        log.info("sector_flow Layer 1 excluded %d stocks (phases=%s, roles=%s)",
-                 len(excluded), excluded_phases, excluded_roles)
+        long_universe -= excluded
+        log.info("sector_flow Layer 1 excluded %d stocks (phases=%s, roles=%s); "
+                 "liquid=%d, long=%d",
+                 len(excluded), excluded_phases, excluded_roles,
+                 len(liquid_universe), len(long_universe))
 
-    return universe
+    return liquid_universe, long_universe
 
 
 def build_contexts(
@@ -132,7 +142,7 @@ def build_contexts(
     are tuples ascending by date; today's row sits at index -1.
     """
     cutoff = on_date - timedelta(days=LOOKBACK_DAYS)
-    universe = _tradeable_universe(engine, on_date)
+    liquid_universe, long_universe = _tradeable_universe(engine, on_date)
 
     # OHLCV — one wide query, partition by ts_code in Python.
     sql_ohlcv = text("""
@@ -374,7 +384,7 @@ def build_contexts(
     for ts_code, rows in by_stock.items():
         if not rows or rows[-1][1] != on_date:
             continue
-        if ts_code not in universe:    # M9: tradeable-universe filter
+        if ts_code not in liquid_universe:    # M9: liquidity gate (full pool)
             continue
         # Need at least 21 rows for the cheapest setups (T1, R3 etc); cull below
         if len(rows) < 21:
@@ -464,6 +474,7 @@ def build_contexts(
             event_type_today=events_today.get(ts_code, {}).get("event_type"),
             event_polarity=events_today.get(ts_code, {}).get("polarity"),
             days_to_disclosure=events_today.get(ts_code, {}).get("days_to_disclosure"),
+            in_long_universe=(ts_code in long_universe),
         )
 
     log.info("built %d setup contexts for %s", len(contexts), on_date)

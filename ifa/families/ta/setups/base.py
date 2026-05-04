@@ -78,6 +78,13 @@ class SetupContext:
     sector_role: str | None = None         # 主线/中军/轮动/防守/催化/退潮/未识别
     sector_cycle_phase: str | None = None  # 冷/点火/确认/扩散/高潮/分歧/退潮
 
+    # M10 P0.1 — dual-track universe flag.
+    # True  → stock passes Layer-1 sector filter; eligible for long pool (Tier A/B).
+    # False → stock is in a retreat-phase sector or excluded sector role; only
+    #          WARNING setups (D1/D2/D3) run on it; goes to ta.warnings_daily,
+    #          NOT ta.candidates_daily.
+    in_long_universe: bool = True
+
     # Chip distribution (from ta.cyq_perf_daily); set when available, else None.
     chip_concentration_pct: float | None = None     # smaller = more concentrated
     chip_winner_rate_pct: float | None = None       # 0-100, % of float in profit

@@ -26,7 +26,7 @@ from ifa.families.ta.regime.loader import load_regime_context
 from ifa.families.ta.regime.repo import upsert_regime_daily
 from ifa.families.ta.setups.context_loader import build_contexts
 from ifa.families.ta.setups.ranker import rank as rank_candidates
-from ifa.families.ta.setups.repo import upsert_candidates
+from ifa.families.ta.setups.repo import upsert_candidates, upsert_warnings
 from ifa.families.ta.setups.scanner import scan as scan_setups
 from ifa.families.ta.setups.tracking import evaluate_for_date
 
@@ -64,7 +64,7 @@ def run_backfill(start: date, end: date, *, top_n: int = 20,
         contexts = build_contexts(engine, d, regime=regime)
         if not contexts:
             continue
-        candidates = scan_setups(contexts.values())
+        candidates, warnings = scan_setups(contexts.values())
 
         # Load most recent setup_metrics for M5.3 gating (uses prior-day metrics)
         with engine.connect() as conn:
@@ -91,6 +91,8 @@ def run_backfill(start: date, end: date, *, top_n: int = 20,
                                  current_regime=regime, setup_metrics=setup_metrics)
         n = upsert_candidates(engine, d, ranked, regime_at_gen=regime)
         n_candidates_total += n
+        if warnings:
+            upsert_warnings(engine, d, warnings, regime_at_gen=regime)
         if i % 5 == 0 or i == len(days):
             elapsed = time.time() - t0
             log.info("  cand %d/%d  %s  +%d (cumulative %d, %.1fs)",

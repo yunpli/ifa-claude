@@ -71,4 +71,14 @@ SETUPS: dict[str, SetupFn] = {
     "E1_EVENT_CATALYST": E1_EVENT_CATALYST,
 }
 
-__all__ = ["Candidate", "SetupContext", "SetupFn", "SETUPS"]
+# M10 P0.1 — warning-only setups: run on FULL liquid universe (including
+# retreat-phase sectors), persist to ta.warnings_daily, NOT to candidates_daily.
+# Never enter Tier A/B ranking. These are bearish-pattern detectors meant for
+# §13 risk scan in the evening report.
+WARNING_SETUPS: set[str] = {
+    "D1_DOUBLE_TOP",
+    "D2_HS_TOP",
+    "D3_SHOOTING_STAR",
+}
+
+__all__ = ["Candidate", "SetupContext", "SetupFn", "SETUPS", "WARNING_SETUPS"]

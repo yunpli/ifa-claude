@@ -772,12 +772,46 @@ def _section_attribution(engine: Engine, on_date: date) -> dict:
 
 
 def _section_risk_scan(engine: Engine, on_date: date) -> dict:
-    """§13 风险扫描 — C2 chip-loose + setup with bad decay + climax regime."""
+    """§13 风险扫描 — D-family 顶部反转 (新, 双轨 universe) + C2 筹码松动
+    + setup 衰减 + 体制警示。
+
+    M10 P0.1+P0.5: D-family 警示从 ta.warnings_daily 读取 (覆盖全 liquid
+    universe,包括退潮板块成员),独立成 top_reversal 子节呈现给基金经理。
+    """
     with engine.connect() as conn:
         c2_count = conn.execute(text("""
             SELECT COUNT(*) FROM ta.candidates_daily
             WHERE trade_date = :d AND setup_name = 'C2_CHIP_LOOSE'
         """), {"d": on_date}).scalar() or 0
+
+        # D-family warnings — read from new ta.warnings_daily.
+        d_rows = conn.execute(text("""
+            SELECT w.ts_code, w.setup_name, w.score, w.evidence,
+                   w.in_long_universe, w.sector_role, w.sector_cycle_phase
+            FROM ta.warnings_daily w
+            WHERE w.trade_date = :d
+            ORDER BY w.score DESC, w.setup_name
+            LIMIT 20
+        """), {"d": on_date}).fetchall()
+        d_summary = {}
+        for r in d_rows:
+            d_summary.setdefault(r[1], 0)
+            d_summary[r[1]] += 1
+        names = _load_stock_names(engine, [r[0] for r in d_rows])
+        top_reversals = []
+        for r in d_rows:
+            ev = r[3] if isinstance(r[3], dict) else {}
+            top_reversals.append({
+                "ts_code": r[0],
+                "name": names.get(r[0], ""),
+                "setup_name": r[1],
+                "score": float(r[2]) if r[2] is not None else 0.0,
+                "in_long_universe": bool(r[4]),
+                "sector_role": r[5],
+                "sector_cycle_phase": r[6],
+                "close": ev.get("close"),
+                "break_depth_pct": ev.get("break_depth_pct"),
+            })
 
         bad_decay = conn.execute(text("""
             SELECT setup_name, decay_score, winrate_60d
@@ -801,6 +835,9 @@ def _section_risk_scan(engine: Engine, on_date: date) -> dict:
         "type": "risk_scan",
         "title": "§13 风险扫描",
         "chip_loose_count": int(c2_count),
+        "top_reversal_count": int(sum(d_summary.values())),
+        "top_reversal_breakdown": d_summary,           # {D1_DOUBLE_TOP: N, ...}
+        "top_reversals": top_reversals,                # top-20 by score
         "decaying_setups": [
             {
                 "setup_name": r[0],

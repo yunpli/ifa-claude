@@ -1,4 +1,4 @@
-"""Persistence for ta.candidates_daily."""
+"""Persistence for ta.candidates_daily and ta.warnings_daily."""
 from __future__ import annotations
 
 import json
@@ -8,6 +8,7 @@ from datetime import date
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from ifa.families.ta.setups.base import Candidate
 from ifa.families.ta.setups.ranker import RankedCandidate
 
 log = logging.getLogger(__name__)
@@ -78,5 +79,60 @@ def upsert_candidates(
 
 def count_candidates(engine: Engine, on_date: date) -> int:
     sql = text("SELECT COUNT(*) FROM ta.candidates_daily WHERE trade_date = :d")
+    with engine.connect() as conn:
+        return conn.execute(sql, {"d": on_date}).scalar() or 0
+
+
+def upsert_warnings(
+    engine: Engine,
+    on_date: date,
+    warnings: list[Candidate],
+    *,
+    regime_at_gen: str | None = None,
+) -> int:
+    """Replace today's ta.warnings_daily rows with the latest D-family scan.
+
+    Warnings live in their own table — not ranked, not filtered by Tier,
+    not gated by Layer-1 sector rules. They surface in §13 风险扫描 of the
+    evening report. PK = (trade_date, ts_code, setup_name).
+    """
+    sql_delete = text("DELETE FROM ta.warnings_daily WHERE trade_date = :d")
+    sql_insert = text("""
+        INSERT INTO ta.warnings_daily
+            (trade_date, ts_code, setup_name, score, triggers, evidence,
+             regime_at_gen, sector_role, sector_cycle_phase, in_long_universe)
+        VALUES
+            (:trade_date, :ts_code, :setup_name, :score, :triggers, :evidence,
+             :regime_at_gen, :sector_role, :sector_cycle_phase, :in_long_universe)
+        ON CONFLICT (trade_date, ts_code, setup_name) DO UPDATE SET
+            score = EXCLUDED.score,
+            triggers = EXCLUDED.triggers,
+            evidence = EXCLUDED.evidence,
+            regime_at_gen = EXCLUDED.regime_at_gen,
+            sector_role = EXCLUDED.sector_role,
+            sector_cycle_phase = EXCLUDED.sector_cycle_phase,
+            in_long_universe = EXCLUDED.in_long_universe
+    """)
+    with engine.begin() as conn:
+        conn.execute(sql_delete, {"d": on_date})
+        for c in warnings:
+            ev = c.evidence if isinstance(c.evidence, dict) else {}
+            conn.execute(sql_insert, {
+                "trade_date": on_date,
+                "ts_code": c.ts_code,
+                "setup_name": c.setup_name,
+                "score": c.score,
+                "triggers": list(c.triggers),
+                "evidence": json.dumps(ev, ensure_ascii=False, default=str),
+                "regime_at_gen": regime_at_gen,
+                "sector_role": ev.get("sector_role"),
+                "sector_cycle_phase": ev.get("sector_cycle_phase"),
+                "in_long_universe": bool(ev.get("in_long_universe", True)),
+            })
+    return len(warnings)
+
+
+def count_warnings(engine: Engine, on_date: date) -> int:
+    sql = text("SELECT COUNT(*) FROM ta.warnings_daily WHERE trade_date = :d")
     with engine.connect() as conn:
         return conn.execute(sql, {"d": on_date}).scalar() or 0
