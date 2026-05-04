@@ -1,0 +1,617 @@
+[
+  {
+    "trade_date": "2026-01-05",
+    "system_regime": "trend_continuation",
+    "system_confidence": 1.0,
+    "system_total_candidates": 5438,
+    "system_top_5_picks": [
+      {
+        "ts_code": "000007.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000411.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000488.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000510.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000547.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260105/ta/ifa_TA_evening_20260105_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [
+      "C1_CHIP_CONCENTRATED"
+    ],
+    "your_notes": "[REGENERATED] previous: §11 中 C1_CHIP_CONCENTRATED 近5日胜率12.9%(<15%)，虽均收益+1.59%且大盘偏risk-on，但不应机械占满五星Top5；更适合作为观察池而非最高优先级。"
+  },
+  {
+    "trade_date": "2026-01-13",
+    "system_regime": "cooldown",
+    "system_confidence": 1.0,
+    "system_total_candidates": 5643,
+    "system_top_5_picks": [
+      {
+        "ts_code": "000155.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000400.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000503.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000526.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000607.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260113/ta/ifa_TA_evening_20260113_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [
+      "R1_DOUBLE_BOTTOM"
+    ],
+    "your_notes": "[REGENERATED] previous: R1_DOUBLE_BOTTOM 与 cooldown 后反弹逻辑方向匹配，但§11 R1近5日胜率仅10.4%，需要降权，不能全部Top5押注同一反转setup。"
+  },
+  {
+    "trade_date": "2026-01-15",
+    "system_regime": "cooldown",
+    "system_confidence": 0.95,
+    "system_total_candidates": 6181,
+    "system_top_5_picks": [
+      {
+        "ts_code": "000021.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000409.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000593.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000610.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000716.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260115/ta/ifa_TA_evening_20260115_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [
+      "C1_CHIP_CONCENTRATED"
+    ],
+    "your_notes": "[REGENERATED] previous: 系统把防守/退潮盘误判为趋势延续；C1近5日胜率10.5%，且市场跌停数量高于涨停，不适合进入Top5。"
+  },
+  {
+    "trade_date": "2026-01-26",
+    "system_regime": "cooldown",
+    "system_confidence": 1.0,
+    "system_total_candidates": 7082,
+    "system_top_5_picks": [
+      {
+        "ts_code": "000037.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000099.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000153.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000561.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000565.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260126/ta/ifa_TA_evening_20260126_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [
+      "C1_CHIP_CONCENTRATED"
+    ],
+    "your_notes": "[REGENERATED] previous: C1近5日胜率6.5%，T+1胜率极弱；北向+40.4亿不足以抵消个股广度恶化，不应让C1占满Top5。"
+  },
+  {
+    "trade_date": "2026-01-27",
+    "system_regime": "range_bound",
+    "system_confidence": 1.0,
+    "system_total_candidates": 7383,
+    "system_top_5_picks": [
+      {
+        "ts_code": "000008.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000017.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000058.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000065.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000069.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260127/ta/ifa_TA_evening_20260127_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [
+      "C1_CHIP_CONCENTRATED"
+    ],
+    "your_notes": "[REGENERATED] previous: 体制判断可以接受，但Top5仍被C1垄断；§11 C1胜率6.7%，只能观察，不能作为高置信Top watchlist。"
+  },
+  {
+    "trade_date": "2026-02-10",
+    "system_regime": "range_bound",
+    "system_confidence": 1.0,
+    "system_total_candidates": 5907,
+    "system_top_5_picks": [
+      {
+        "ts_code": "000012.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000028.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000037.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000045.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000088.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260210/ta/ifa_TA_evening_20260210_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [
+      "C1_CHIP_CONCENTRATED"
+    ],
+    "your_notes": "[REGENERATED] previous: §11 C1胜率5.6%、整体setup边际很弱，Top5继续全选C1不合理，应该提高过滤阈值或改为低优先级观察。"
+  },
+  {
+    "trade_date": "2026-03-09",
+    "system_regime": "cooldown",
+    "system_confidence": 0.8,
+    "system_total_candidates": 4626,
+    "system_top_5_picks": [
+      {
+        "ts_code": "000552.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000555.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000570.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000682.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000695.SZ",
+        "setup_name": "R1_DOUBLE_BOTTOM",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260309/ta/ifa_TA_evening_20260309_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [
+      "C1_CHIP_CONCENTRATED"
+    ],
+    "your_notes": "[REGENERATED] previous: §11 C1胜率7.0%、均收益-0.34%，Top5全为C1与当日弱广度不匹配；该类setup应降权。"
+  },
+  {
+    "trade_date": "2026-03-23",
+    "system_regime": "distribution_risk",
+    "system_confidence": 1.0,
+    "system_total_candidates": 896,
+    "system_top_5_picks": [
+      {
+        "ts_code": "002310.SZ",
+        "setup_name": "C2_CHIP_LOOSE",
+        "score": 1.0
+      },
+      {
+        "ts_code": "600396.SH",
+        "setup_name": "C2_CHIP_LOOSE",
+        "score": 1.0
+      },
+      {
+        "ts_code": "600777.SH",
+        "setup_name": "C2_CHIP_LOOSE",
+        "score": 1.0
+      },
+      {
+        "ts_code": "603693.SH",
+        "setup_name": "C2_CHIP_LOOSE",
+        "score": 1.0
+      },
+      {
+        "ts_code": "603843.SH",
+        "setup_name": "C2_CHIP_LOOSE",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260323/ta/ifa_TA_evening_20260323_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [
+      "T1_BREAKOUT",
+      "T2_PULLBACK_RESUME",
+      "T3_ACCELERATION",
+      "S1_SECTOR_RESONANCE",
+      "S2_LEADER_FOLLOWTHROUGH",
+      "S3_LAGGARD_CATCHUP",
+      "V1_VOL_PRICE_UP",
+      "C1_CHIP_CONCENTRATED"
+    ],
+    "your_notes": "[REGENERATED] previous: 无Top5候选是对的；但体制不应写sector_rotation。§11 多数趋势、板块、量价setup均为负均收益，暴跌日应主动冻结趋势/板块追随类watchlist。"
+  },
+  {
+    "trade_date": "2026-03-25",
+    "system_regime": "early_risk_on",
+    "system_confidence": 0.65,
+    "system_total_candidates": 4409,
+    "system_top_5_picks": [
+      {
+        "ts_code": "301302.SZ",
+        "setup_name": "F1_FLAG",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000070.SZ",
+        "setup_name": "S1_SECTOR_RESONANCE",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000428.SZ",
+        "setup_name": "S1_SECTOR_RESONANCE",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000962.SZ",
+        "setup_name": "S1_SECTOR_RESONANCE",
+        "score": 1.0
+      },
+      {
+        "ts_code": "002135.SZ",
+        "setup_name": "S1_SECTOR_RESONANCE",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260325/ta/ifa_TA_evening_20260325_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [
+      "C1_CHIP_CONCENTRATED"
+    ],
+    "your_notes": "[REGENERATED] previous: 市场体制应切到反弹风险偏好，但Top5仍全是C1；§11 C1胜率7.6%、均收益-1.20%，与反弹日应优先找强弹性/领涨setup不匹配。"
+  },
+  {
+    "trade_date": "2026-04-22",
+    "system_regime": "trend_continuation",
+    "system_confidence": 0.85,
+    "system_total_candidates": 4255,
+    "system_top_5_picks": [
+      {
+        "ts_code": "000070.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000155.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000430.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000533.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      },
+      {
+        "ts_code": "000546.SZ",
+        "setup_name": "C1_CHIP_CONCENTRATED",
+        "score": 1.0
+      }
+    ],
+    "report_html": "/Users/neoclaw/claude/ifaenv/out/production/20260422/ta/ifa_TA_evening_20260422_0202.html",
+    "your_regime": "ok",
+    "your_top_pick_review": [
+      {
+        "slot": 1,
+        "verdict": "ok"
+      },
+      {
+        "slot": 2,
+        "verdict": "ok"
+      },
+      {
+        "slot": 3,
+        "verdict": "ok"
+      },
+      {
+        "slot": 4,
+        "verdict": "ok"
+      },
+      {
+        "slot": 5,
+        "verdict": "ok"
+      }
+    ],
+    "rejected_setups": [],
+    "your_notes": "[REGENERATED] previous: 该日期只在 ta_v22.json 中存在，上传的 Archive(1).zip 实际只包含 20260105、20260113、20260115、20260126、20260127、20260210、20260309、20260323、20260325 九份TA报告；为避免编造，保留系统字段并标为无法验证。"
+  }
+]

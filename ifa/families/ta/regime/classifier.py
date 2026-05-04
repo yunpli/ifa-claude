@@ -218,38 +218,70 @@ def _limit_up_yoy(ctx: RegimeContext) -> float | None:
 
 
 def _score_trend_continuation(ctx: RegimeContext) -> float:
-    """趋势延续: 上证 20MA 上行 + 5MA>20MA + 涨家数/跌家数>1.5 + 量稳."""
-    score = 0.0
+    """趋势延续: 上证 20MA 上行 + 5MA>20MA + 涨家数/跌家数>1.5 + 量稳.
+
+    HARD VETO: even if 20MA is still rising, breadth disaster (down > 1.3*up,
+    limit-down > 25, or > 3000 down stocks) means market is no longer in
+    healthy continuation — defer to cooldown / distribution_risk.
+    """
     rising = _sse_ma20_rising(ctx)
+    if rising is False:
+        return 0.0
+
+    # Breadth veto: trend_continuation requires healthy positive breadth.
+    udr = _up_down_ratio(ctx)
+    if udr is not None and udr < 1.15:    # not clearly more up than down
+        return 0.0
+    if ctx.n_limit_down is not None and ctx.n_limit_down > 25:
+        return 0.0
+    if ctx.n_down is not None and ctx.n_down > 3700:
+        return 0.0
+    # Defer to early_risk_on on a strongly-positive day (lu≥70 + up≥4000)
+    if (ctx.n_limit_up is not None and ctx.n_limit_up >= 70
+            and ctx.n_up is not None and ctx.n_up >= 4000):
+        return 0.0
+
+    score = 0.0
     if rising is True:
         score += 0.3
-    elif rising is False:
-        return 0.0  # 20MA not rising → not continuation
     if _sse_ma5_above_ma20(ctx) is True:
         score += 0.25
-    udr = _up_down_ratio(ctx)
     if udr is not None and udr > 1.5:
         score += 0.25
     elif udr is not None and udr > 1.2:
         score += 0.1
     amt_ratio = _amount_vs_ma20(ctx)
-    if amt_ratio is not None and 0.85 < amt_ratio < 1.25:  # stable volume
+    if amt_ratio is not None and 0.85 < amt_ratio < 1.25:
         score += 0.2
     return min(score, 1.0)
 
 
 def _score_early_risk_on(ctx: RegimeContext) -> float:
-    """风险偏好回升初期: 20MA 拐点向上 + 涨停 +50% + 龙头出现."""
+    """风险偏好回升初期: 20MA 拐点向上 + 涨停 +50% + 龙头出现.
+
+    Absolute path: 涨停 >= 70 AND up_count >= 4000 AND up >= 1.7*down → strong
+    risk-on signal even if YoY ratio modest.
+    """
     score = 0.0
+
+    # Absolute breadth path (e.g. 2026-03-25: 涨停 84 + up 4820 + index +1.3%)
+    if (ctx.n_limit_up is not None and ctx.n_limit_up >= 70
+            and ctx.n_up is not None and ctx.n_up >= 4000):
+        score += 0.45
+        udr = _up_down_ratio(ctx)
+        if udr is not None and udr >= 1.7:
+            score += 0.2
+
+    # Classic path
     if _sse_ma20_rising(ctx) is True:
-        score += 0.25
+        score += 0.2
     lu_ratio = _limit_up_yoy(ctx)
     if lu_ratio is not None and lu_ratio >= 1.5:
-        score += 0.35
+        score += 0.3
     elif lu_ratio is not None and lu_ratio >= 1.2:
         score += 0.15
     if ctx.consecutive_lb_high is not None and ctx.consecutive_lb_high >= 3:
-        score += 0.25
+        score += 0.2
     if (ctx.hsgt_net_pct_60d is not None and ctx.hsgt_net_pct_60d >= 60):
         score += 0.15
     return min(score, 1.0)
@@ -276,7 +308,27 @@ def _score_weak_rebound(ctx: RegimeContext) -> float:
 
 
 def _score_range_bound(ctx: RegimeContext) -> float:
-    """震荡区间: 20 日波动率 <8% + 5MA 与 20MA 缠绕 + 量能平淡."""
+    """震荡区间: 20 日波动率 <8% + 5MA 与 20MA 缠绕 + 量能平淡.
+
+    HARD VETO: range_bound implies broad neutrality. Breadth extremes
+    in either direction (up_count > 4200, limit-up > 65, down_count > 3000,
+    limit-down > 20) means today is NOT range-bound — defer to early_risk_on
+    / cooldown / distribution_risk.
+    """
+    if ctx.n_up is not None and ctx.n_up > 4200:
+        return 0.0
+    if ctx.n_limit_up is not None and ctx.n_limit_up > 80:
+        return 0.0
+    if ctx.n_down is not None and ctx.n_down > 3700:
+        return 0.0
+    if ctx.n_limit_down is not None and ctx.n_limit_down > 25:
+        return 0.0
+    # cooldown-leaning days are not range_bound
+    udr = _up_down_ratio(ctx)
+    if (udr is not None and udr < 0.7
+            and ctx.n_down is not None and ctx.n_down > 3000):
+        return 0.0
+
     score = 0.0
     if ctx.sse_volatility_20d_pct is not None and ctx.sse_volatility_20d_pct < 8:
         score += 0.4
@@ -330,8 +382,18 @@ def _score_distribution_risk(ctx: RegimeContext) -> float:
 
     Without intraday flow data we approximate via:
     high index level + high volume + few new limit-ups + breadth deterioration.
+    Also fires on big intraday breadth disaster (跌停 > 50 OR down > 5000).
     """
     score = 0.0
+    # Crash-day path: 涨停 << 跌停 OR 大量个股跌停
+    if ctx.n_limit_down is not None and ctx.n_limit_down >= 50:
+        score += 0.4
+    if ctx.n_down is not None and ctx.n_down > 4500:
+        score += 0.25
+    if (ctx.n_limit_up is not None and ctx.n_limit_down is not None
+            and ctx.n_limit_down > ctx.n_limit_up * 1.5):
+        score += 0.2
+
     rising = _sse_ma20_rising(ctx)
     above = _sse_ma5_above_ma20(ctx)
     # Index is at high but ma5 below ma20 = topping pattern
@@ -349,18 +411,37 @@ def _score_distribution_risk(ctx: RegimeContext) -> float:
 
 
 def _score_cooldown(ctx: RegimeContext) -> float:
-    """退潮冷却: 涨停数环比-50% + 跌家数>涨家数 + 5MA 跌破 20MA."""
+    """退潮冷却: 涨停环比下降 + 跌家数 >> 涨家数 OR 跌停 >20.
+
+    Absolute breadth path: 跌停 ≥ 25 OR (down > 1.3*up AND down > 2500) is
+    a strong cooldown signal regardless of MA structure or yoy ratios.
+    """
     score = 0.0
+
+    # Absolute breadth path
+    if ctx.n_limit_down is not None and ctx.n_limit_down >= 25:
+        score += 0.4
+    elif ctx.n_limit_down is not None and ctx.n_limit_down > 15:
+        score += 0.2
+
+    udr = _up_down_ratio(ctx)
+    if udr is not None and udr < 0.6:
+        score += 0.35
+    elif udr is not None and udr < 0.7:
+        score += 0.3
+    elif udr is not None and udr < 0.8:
+        score += 0.2
+
+    if ctx.n_down is not None and ctx.n_down > 3000:
+        score += 0.2
+
+    # Classic 涨停 yoy path
     lu_ratio = _limit_up_yoy(ctx)
     if lu_ratio is not None and lu_ratio <= 0.5:
-        score += 0.4
+        score += 0.25
     elif lu_ratio is not None and lu_ratio <= 0.7:
-        score += 0.2
-    udr = _up_down_ratio(ctx)
-    if udr is not None and udr < 0.8:
-        score += 0.3
+        score += 0.15
+
     if _sse_ma5_above_ma20(ctx) is False:
-        score += 0.2
-    if ctx.n_limit_down is not None and ctx.n_limit_down > 20:
-        score += 0.1
+        score += 0.15
     return min(score, 1.0)

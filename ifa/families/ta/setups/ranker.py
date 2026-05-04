@@ -1,12 +1,17 @@
 """Rank candidates by score; assign rank, star_rating, in_top_watchlist.
 
-Applies M5.3 governance:
-  · Regime gating: setup gets +0.1 score boost when current regime is in its
-    historical `suitable_regimes` list (from setup_metrics_daily.suitable_regimes).
+Applies M5.3 governance + M8 winrate-based scoring:
+  · Regime gating: +0.1 score boost when current regime is in setup's
+    historical `suitable_regimes`.
+  · Winrate scaling: setups with weak historical edge get score discount —
+    score *= clip(winrate_60d / WINRATE_TARGET, 0.4, 1.0). At 30% winrate
+    score is unchanged; at 15% score is halved; floor at 40% of raw.
   · Decay-based suspension:
-      decay_score >= -10pp        → ACTIVE         (full participation)
-      -15pp <= decay_score < -10  → OBSERVATION_ONLY (kept in list, never top)
-      decay_score < -15pp         → SUSPENDED       (dropped entirely)
+      decay_score >= -10pp        → ACTIVE
+      -15pp <= decay_score < -10  → OBSERVATION_ONLY (kept, never top)
+      decay_score < -15pp         → SUSPENDED       (dropped)
+  · Top-N diversification: at most TOP_DIVERSITY_CAP candidates from the
+    same setup_name in top_watchlist (prevents one setup family flooding).
 """
 from __future__ import annotations
 
@@ -17,6 +22,9 @@ from ifa.families.ta.setups.base import Candidate
 
 OBSERVATION_DECAY_FLOOR = -10.0
 SUSPENSION_DECAY_FLOOR = -15.0
+WINRATE_TARGET_PCT = 30.0       # setup that wins T+10 ≥ 5% at this rate gets full score
+WINRATE_FLOOR_RATIO = 0.4       # never discount below 40% of raw score
+TOP_DIVERSITY_CAP = 3            # max picks of same setup_name in top_watchlist
 
 
 @dataclass(frozen=True)
@@ -80,18 +88,34 @@ def rank(
         suitable = m.get("suitable_regimes") or []
         if current_regime and current_regime in suitable:
             boost = 0.1
+
         adj_score = min(c.score + boost, 1.0)
+
+        # Winrate scaling — discount weak-edge setups proportionally.
+        winrate = m.get("winrate_60d")
+        if winrate is not None:
+            ratio = max(WINRATE_FLOOR_RATIO,
+                        min(1.0, winrate / WINRATE_TARGET_PCT))
+            adj_score *= ratio
+
         enriched.append((adj_score, c.setup_name, c, status))
 
     enriched.sort(key=lambda t: (-t[0], t[1], t[2].ts_code))
 
+    # Top-watchlist with per-setup diversity cap
     out: list[RankedCandidate] = []
     n_top_assigned = 0
+    per_setup_top = {}
     for i, (adj_score, _, c, status) in enumerate(enriched):
         eligible_for_top = (status == "active")
-        in_top = eligible_for_top and n_top_assigned < top_n
+        if eligible_for_top and n_top_assigned < top_n:
+            cnt = per_setup_top.get(c.setup_name, 0)
+            in_top = cnt < TOP_DIVERSITY_CAP
+        else:
+            in_top = False
         if in_top:
             n_top_assigned += 1
+            per_setup_top[c.setup_name] = per_setup_top.get(c.setup_name, 0) + 1
         out.append(RankedCandidate(
             candidate=c,
             rank=i + 1,
