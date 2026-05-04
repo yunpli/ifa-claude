@@ -57,6 +57,12 @@ class SetupContext:
     sw_l2_code: str | None = None
     sw_l1_pct_change: float | None = None
     sw_l2_pct_change: float | None = None
+    # Same-day pct_change for L2 peers, indexed by ts_code (excludes self).
+    sector_peers_pct_change: dict | None = None
+
+    # Chip distribution (from ta.cyq_perf_daily); set when available, else None.
+    chip_concentration_pct: float | None = None     # smaller = more concentrated
+    chip_winner_rate_pct: float | None = None       # 0-100, % of float in profit
 
 
 @dataclass(frozen=True)

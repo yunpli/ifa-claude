@@ -1,0 +1,71 @@
+"""S2 leader follow-through — stock outperforms L2 peers in a strong sector.
+
+Triggers (all):
+  · sw_l2_pct_change >= 2%                                           — sector strong
+  · today's stock return >= sw_l2_pct_change + 2pp                   — outperforms L2 by ≥2pp
+  · sector_peers_pct_change is not empty
+  · stock return is in top 30% of L2 peers (excluding self)
+  · MA20 > MA60
+
+Score:
+  base 0.5
+  + 0.2 if regime in {trend_continuation, early_risk_on, sector_rotation}
+  + 0.2 if stock is in top 10% of peers
+  + 0.1 if volume_ratio >= 1.5
+"""
+from __future__ import annotations
+
+from ifa.families.ta.setups.base import Candidate, SetupContext
+
+
+def S2_LEADER_FOLLOWTHROUGH(ctx: SetupContext) -> Candidate | None:
+    if (ctx.close_today is None or ctx.ma_qfq_20 is None or ctx.ma_qfq_60 is None
+            or ctx.sw_l2_pct_change is None
+            or not ctx.sector_peers_pct_change
+            or len(ctx.closes) < 2):
+        return None
+    if ctx.ma_qfq_20 <= ctx.ma_qfq_60:
+        return None
+
+    if ctx.sw_l2_pct_change < 2.0:
+        return None
+
+    stock_ret = (ctx.close_today / ctx.closes[-2] - 1.0) * 100
+    if stock_ret < ctx.sw_l2_pct_change + 2.0:
+        return None
+
+    peers = sorted(ctx.sector_peers_pct_change.values(), reverse=True)
+    if not peers:
+        return None
+    rank_threshold_top30 = peers[max(0, int(len(peers) * 0.3) - 1)]
+    if stock_ret < rank_threshold_top30:
+        return None
+
+    triggers = ["uptrend_stack", "L2>=2%", "outperforms_L2", "top_30pct_in_L2"]
+    score = 0.5
+    if ctx.regime in ("trend_continuation", "early_risk_on", "sector_rotation"):
+        score += 0.2
+        triggers.append("regime_tailwind")
+
+    rank_threshold_top10 = peers[max(0, int(len(peers) * 0.1) - 1)]
+    if stock_ret >= rank_threshold_top10:
+        score += 0.2
+        triggers.append("top_10pct_in_L2")
+    if ctx.volume_ratio is not None and ctx.volume_ratio >= 1.5:
+        score += 0.1
+        triggers.append("volume_confirmation")
+
+    return Candidate(
+        ts_code=ctx.ts_code,
+        trade_date=ctx.trade_date,
+        setup_name="S2_LEADER_FOLLOWTHROUGH",
+        score=min(score, 1.0),
+        triggers=tuple(triggers),
+        evidence={
+            "close": ctx.close_today,
+            "stock_ret_pct": stock_ret,
+            "sw_l2_pct": ctx.sw_l2_pct_change,
+            "peers_n": len(peers),
+            "top_30pct_threshold": rank_threshold_top30,
+        },
+    )
