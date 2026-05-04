@@ -112,7 +112,11 @@ def rank(
     wr_floor = rp["winrate"]["floor_ratio"]
 
     # Pass 1: per-row score adjustment + governance filter
-    enriched: list[tuple[float, Candidate, str]] = []   # (adj_score, c, status)
+    # Continuous regime boost (M9.6): if regime_winrates JSONB exposes this
+    # regime's winrate vs the setup's overall winrate, boost ∝ (regime_wr/overall - 1)
+    # in [-0.05, +0.20]. Falls back to legacy boolean +regime_boost when JSONB
+    # is empty (cold start / not enough samples).
+    enriched: list[tuple[float, Candidate, str, float | None]] = []
     for c in candidates:
         m = setup_metrics.get(c.setup_name, {})
         decay = m.get("decay_score")
@@ -121,56 +125,73 @@ def rank(
             continue
 
         boost = 0.0
+        regime_winrates = m.get("regime_winrates") or {}
+        overall_wr = m.get("winrate_60d")
         suitable = m.get("suitable_regimes") or []
-        if current_regime and current_regime in suitable:
-            boost = boost_pp
+        if current_regime:
+            regime_wr = regime_winrates.get(current_regime)
+            if regime_wr is not None and overall_wr and overall_wr > 0:
+                # Continuous boost — scaled by relative regime advantage
+                ratio_r = regime_wr / overall_wr
+                boost = max(-0.05, min(0.20, (ratio_r - 1.0) * 0.20))
+            elif current_regime in suitable:
+                # Cold-start fallback (no per-regime data yet)
+                boost = boost_pp
 
-        # No hard cap — let signals accumulate. Natural max ≈ 1.05
-        # (raw 0.8 + regime 0.1 + winrate ≤1.0 + resonance 0.15).
         adj_score = c.score + boost
 
-        winrate = m.get("winrate_60d")
-        if winrate is not None:
-            ratio = max(wr_floor, min(1.0, winrate / wr_target))
-            adj_score *= ratio
+        if overall_wr is not None:
+            ratio_w = max(wr_floor, min(1.0, overall_wr / wr_target))
+            adj_score *= ratio_w
 
-        enriched.append((adj_score, c, status))
+        enriched.append((adj_score, c, status, overall_wr))
 
-    # Pass 2: per-stock aggregation
-    # stock_score = MAX(per-family-best score)
-    #             + Σ_extra_families (their best score × decreasing weight)
-    # Decreasing weights: 2nd family × 0.08, 3rd × 0.05, 4th × 0.03, 5th+ × 0
-    # → bonus depends on ACTUAL strength of confirming signals, not just count
+    # Pass 2: per-stock aggregation with **Bayesian resonance** (M9.6):
+    # Each family's confirming signal is weighted by:
+    #   (a) its own adj_score (continuous strength)
+    #   (b) its setup's historical winrate (60d) — high-edge setups carry more weight
+    # Combined: extra_bonus_i = score_i × base_weight_i × (winrate_i / WR_TARGET)
+    # → strong family with high historical winrate ⟹ much bigger bonus contribution.
     by_stock: dict[str, dict] = {}
-    for adj_score, c, status in enriched:
+    for adj_score, c, status, overall_wr in enriched:
         rec = by_stock.setdefault(c.ts_code, {
             "rows": [],
-            "family_best": {},     # family_letter → best adj_score in that family
+            "family_best": {},     # fam → (best_adj_score, winrate_of_that_setup)
             "any_active": False,
         })
         rec["rows"].append((adj_score, c, status))
         fam = _family_of(c.setup_name)
-        if adj_score > rec["family_best"].get(fam, 0.0):
-            rec["family_best"][fam] = adj_score
+        prev = rec["family_best"].get(fam)
+        if prev is None or adj_score > prev[0]:
+            rec["family_best"][fam] = (adj_score, overall_wr)
         if status == "active":
             rec["any_active"] = True
 
-    # Compute stock_score with continuous resonance
-    EXTRA_FAMILY_WEIGHTS = [0.08, 0.05, 0.03]    # 2nd, 3rd, 4th extras
+    EXTRA_FAMILY_WEIGHTS = [0.08, 0.05, 0.03]    # base weights for 2nd/3rd/4th
     for ts_code, rec in by_stock.items():
-        family_scores = sorted(rec["family_best"].values(), reverse=True)
-        if not family_scores:
+        family_records = sorted(rec["family_best"].values(),
+                                key=lambda t: -t[0])
+        if not family_records:
             rec["stock_score"] = 0.0
             rec["resonance_count"] = 0
             rec["resonance_families"] = ()
+            rec["max_score"] = 0.0
+            rec["families"] = set()
             continue
-        primary = family_scores[0]
-        bonus = sum(score * w for score, w in zip(family_scores[1:], EXTRA_FAMILY_WEIGHTS))
-        rec["stock_score"] = primary + bonus
+        primary_score, _ = family_records[0]
+        bonus = 0.0
+        for (score_i, wr_i), base_w in zip(family_records[1:], EXTRA_FAMILY_WEIGHTS):
+            # Bayesian weighting: scale base weight by winrate evidence
+            # wr=30% (target) → factor 1.0; wr=45% → 1.5; wr=15% → 0.5; floor at 0.4
+            if wr_i is not None and wr_i > 0:
+                wr_factor = max(0.4, min(1.5, wr_i / wr_target))
+            else:
+                wr_factor = 1.0
+            bonus += score_i * base_w * wr_factor
+        rec["stock_score"] = primary_score + bonus
         rec["resonance_count"] = len(rec["family_best"])
         rec["resonance_families"] = tuple(sorted(rec["family_best"].keys()))
-        # legacy fields for downstream code
-        rec["max_score"] = primary
+        rec["max_score"] = primary_score
         rec["families"] = set(rec["family_best"].keys())
 
     # Pass 3: rank stocks by (stock_score, resonance_count) — multi-family wins ties

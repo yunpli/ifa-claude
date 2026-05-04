@@ -77,6 +77,19 @@ def compute_setup_metrics(engine: Engine, on_date: date) -> int:
         FROM agg_60 a LEFT JOIN agg_250 b USING (setup_name)
     """)
 
+    # Per-regime winrate (continuous, used by ranker for regime-conditional boost)
+    sql_regime_winrates = text("""
+        SELECT c.setup_name, c.regime_at_gen,
+               100.0 * COUNT(*) FILTER (WHERE t.return_pct >= 5.0) / NULLIF(COUNT(*), 0) AS wr,
+               COUNT(*) AS n
+        FROM ta.candidates_daily c
+        JOIN ta.candidate_tracking t
+          ON t.candidate_id = c.candidate_id AND t.horizon_days = 10
+        WHERE c.trade_date >= :w250 AND c.trade_date <= :on_date
+          AND c.regime_at_gen IS NOT NULL
+        GROUP BY c.setup_name, c.regime_at_gen
+    """)
+    # Legacy boolean ARRAY (for M5.3 governance & backward compat)
     sql_regime = text("""
         WITH t AS (
             SELECT c.setup_name, c.regime_at_gen,
@@ -106,10 +119,11 @@ def compute_setup_metrics(engine: Engine, on_date: date) -> int:
     sql_upsert = text("""
         INSERT INTO ta.setup_metrics_daily
             (trade_date, setup_name, triggers_count, winrate_60d, avg_return_60d,
-             pl_ratio_60d, winrate_250d, decay_score, suitable_regimes)
+             pl_ratio_60d, winrate_250d, decay_score, suitable_regimes,
+             regime_winrates)
         VALUES
             (:trade_date, :setup_name, :n, :wr60, :avg_ret, :plr,
-             :wr250, :decay, :regimes)
+             :wr250, :decay, :regimes, CAST(:regime_winrates AS jsonb))
         ON CONFLICT (trade_date, setup_name) DO UPDATE SET
             triggers_count = EXCLUDED.triggers_count,
             winrate_60d = EXCLUDED.winrate_60d,
@@ -117,7 +131,8 @@ def compute_setup_metrics(engine: Engine, on_date: date) -> int:
             pl_ratio_60d = EXCLUDED.pl_ratio_60d,
             winrate_250d = EXCLUDED.winrate_250d,
             decay_score = EXCLUDED.decay_score,
-            suitable_regimes = EXCLUDED.suitable_regimes
+            suitable_regimes = EXCLUDED.suitable_regimes,
+            regime_winrates = EXCLUDED.regime_winrates
     """)
 
     with engine.connect() as conn:
@@ -126,11 +141,21 @@ def compute_setup_metrics(engine: Engine, on_date: date) -> int:
         regime_rows = {r[0]: list(r[1])
                        for r in conn.execute(sql_regime,
                                              {"w250": window_250_start, "on_date": on_date})}
+        # Per-regime winrate map: setup → {regime: winrate}
+        regime_winrate_map: dict[str, dict[str, float]] = {}
+        for r in conn.execute(sql_regime_winrates,
+                              {"w250": window_250_start, "on_date": on_date}):
+            setup_name, regime, wr, n_samples = r
+            if wr is None or n_samples is None or n_samples < 5:
+                continue   # skip thin samples
+            regime_winrate_map.setdefault(setup_name, {})[regime] = float(wr)
 
+    import json as _json
     n_written = 0
     with engine.begin() as conn:
         for setup, n, avg_ret, wr60, plr, wr250 in rows:
             decay = (float(wr60) - float(wr250)) if (wr60 is not None and wr250 is not None) else None
+            rw_map = regime_winrate_map.get(setup, {})
             conn.execute(sql_upsert, {
                 "trade_date": on_date,
                 "setup_name": setup,
@@ -141,6 +166,7 @@ def compute_setup_metrics(engine: Engine, on_date: date) -> int:
                 "wr250": float(wr250) if wr250 is not None else None,
                 "decay": decay,
                 "regimes": regime_rows.get(setup, []),
+                "regime_winrates": _json.dumps(rw_map) if rw_map else None,
             })
             n_written += 1
     log.info("setup_metrics_daily: %d rows for %s", n_written, on_date)

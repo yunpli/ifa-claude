@@ -8,6 +8,13 @@ ranker:
   winrate:
     floor_ratio: 0.4
     target_pct: 30
+  tiers:
+    a_size: 10
+    b_size: 20
+    c_size: 100
+universe:
+  min_avg_amount_yi: 0.2          # 20d avg amount 下限：0.2 亿元 = 2000 万元
+  min_coverage_pct: 90            # 20d 内有 raw_daily 行的天数比例（剔除停牌）
 regime:
   thresholds:
     cooldown:

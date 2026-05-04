@@ -52,7 +52,7 @@ def build_evening_report(engine: Engine, on_date: date,
     metrics = _section_metrics(engine, on_date)
     attribution = _section_attribution(engine, on_date)
     risk = _section_risk_scan(engine, on_date)
-    hypotheses = _section_hypotheses(engine, on_date)
+    # hypotheses section removed — redundant with §04 Tier A picks
     disclaimer = _section_disclaimer()
 
     sections.extend([overview, index_panel, market_state])
@@ -67,6 +67,7 @@ def build_evening_report(engine: Engine, on_date: date,
                              "body": narrative})
     sections.append(methodology)
     sections.extend([tier_a, tier_b, tier_c, strategy_spotlight])
+    # NOTE: §14 hypotheses removed — redundant with §04 重点池 (same picks)
     if augmenter is not None:
         narrative = augmenter.candidate_narrator(
             top5=[c for c in tier_a.get("candidates", [])][:5],
@@ -86,7 +87,7 @@ def build_evening_report(engine: Engine, on_date: date,
         if narrative:
             sections.append({"type": "narrative", "title": "§13-N 策略评论",
                              "body": narrative})
-    sections.extend([hypotheses, disclaimer])
+    sections.append(disclaimer)
 
     # Banner-level fields (consumed by template header)
     from ifa.config import get_settings
@@ -352,31 +353,68 @@ def _section_verification(engine: Engine, on_date: date) -> dict:
     # Pick the lowest-rank candidate row per (ts_code, trade_date) — that's the
     # "primary" strategy for that pick; its tracking row carries the T+N return
     # which is the same regardless of which strategy fired (it's a stock-level outcome).
-    sql = text("""
-        WITH primary_picks AS (
-            SELECT DISTINCT ON (ts_code, trade_date)
-                ts_code, trade_date, candidate_id, final_score,
-                evidence_json->>'resonance_count' AS rc,
-                evidence_json->>'resonance_families' AS fams
+    sql_picks = text("""
+        SELECT DISTINCT ON (ts_code, trade_date)
+            ts_code, trade_date, candidate_id, final_score,
+            evidence_json->>'resonance_count' AS rc,
+            evidence_json->>'resonance_families' AS fams
+        FROM ta.candidates_daily
+        WHERE trade_date = ANY(:days) AND evidence_json->>'tier' = 'A'
+        ORDER BY ts_code, trade_date, rank
+    """)
+    # Daily forward closes for each pick — used to build the 15-day cumulative
+    # return series for the sparkline (no horizon limitation; uses raw_daily).
+    sql_daily = text("""
+        WITH picks AS (
+            SELECT DISTINCT ON (ts_code, trade_date) ts_code, trade_date
             FROM ta.candidates_daily
             WHERE trade_date = ANY(:days) AND evidence_json->>'tier' = 'A'
-            ORDER BY ts_code, trade_date, rank
+            ORDER BY ts_code, trade_date
         )
-        SELECT p.trade_date, p.ts_code, p.final_score, p.rc, p.fams,
-               t1.return_pct, t3.return_pct, t5.return_pct, t10.return_pct
-        FROM primary_picks p
-        LEFT JOIN ta.candidate_tracking t1
-            ON t1.candidate_id = p.candidate_id AND t1.horizon_days = 1
-        LEFT JOIN ta.candidate_tracking t3
-            ON t3.candidate_id = p.candidate_id AND t3.horizon_days = 3
-        LEFT JOIN ta.candidate_tracking t5
-            ON t5.candidate_id = p.candidate_id AND t5.horizon_days = 5
-        LEFT JOIN ta.candidate_tracking t10
-            ON t10.candidate_id = p.candidate_id AND t10.horizon_days = 10
-        ORDER BY p.trade_date DESC, p.final_score DESC
+        SELECT p.ts_code, p.trade_date AS pick_date,
+               entry.close AS entry_close,
+               d.trade_date AS forward_date,
+               d.close AS forward_close,
+               ROW_NUMBER() OVER (PARTITION BY p.ts_code, p.trade_date
+                                  ORDER BY d.trade_date) AS day_idx
+        FROM picks p
+        JOIN smartmoney.raw_daily entry
+          ON entry.ts_code = p.ts_code AND entry.trade_date = p.trade_date
+        JOIN smartmoney.raw_daily d
+          ON d.ts_code = p.ts_code AND d.trade_date > p.trade_date
     """)
     with engine.connect() as conn:
-        rows = conn.execute(sql, {"days": days}).fetchall()
+        rows_pk = conn.execute(sql_picks, {"days": days}).fetchall()
+        rows_daily = conn.execute(sql_daily, {"days": days}).fetchall()
+
+    # Build (ts_code, pick_date) → list[15] of cum_returns (None if未到期)
+    cum_map: dict[tuple[str, date], list[float | None]] = {}
+    for ts_code, pick_date, entry, forward_date, forward_close, day_idx in rows_daily:
+        if int(day_idx) > 15:
+            continue
+        key = (ts_code, pick_date)
+        series = cum_map.setdefault(key, [None] * 15)
+        try:
+            cum_pct = (float(forward_close) / float(entry) - 1.0) * 100
+            series[int(day_idx) - 1] = cum_pct
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+
+    # Stub T+N from cum series at corresponding indices (1, 3, 5, 10)
+    rows = []
+    for r in rows_pk:
+        ts_code, pick_date, _, final_score, rc, fams = r
+        series = cum_map.get((ts_code, pick_date), [None] * 15)
+        rows.append((
+            pick_date, ts_code, final_score, rc, fams,
+            series[0] if len(series) > 0 else None,    # T+1
+            series[2] if len(series) > 2 else None,    # T+3
+            series[4] if len(series) > 4 else None,    # T+5
+            series[9] if len(series) > 9 else None,    # T+10
+            series,                                     # full 15-day series
+        ))
+    rows.sort(key=lambda r: (r[0] or date.min, -(r[2] or 0)), reverse=False)
+    rows = sorted(rows, key=lambda r: (r[0] or date.min), reverse=True)
 
     if not rows:
         return {
@@ -390,8 +428,19 @@ def _section_verification(engine: Engine, on_date: date) -> dict:
     ts_codes = list({r[1] for r in rows})
     names = _load_stock_names(engine, ts_codes)
 
+    # Lazy import to avoid pulling Ningbo deps when TA report is unused
+    from ifa.families.ningbo.tracking.sparkline import render_sparkline
+
     out_rows = []
     for r in rows:
+        series = r[9] or []
+        # Convert to fractional (Ningbo expects 0.05 = 5%, our values are %)
+        series_frac = [v / 100.0 if v is not None else None for v in series]
+        # current cum = last non-None value
+        valid = [(i, v) for i, v in enumerate(series) if v is not None]
+        latest_cum = valid[-1][1] if valid else None
+        peak_cum = max((v for _, v in valid), default=None)
+        # entry close (推荐价) — read from raw_daily at trade_date
         out_rows.append({
             "trade_date": r[0].isoformat() if r[0] else None,
             "ts_code": r[1],
@@ -399,11 +448,27 @@ def _section_verification(engine: Engine, on_date: date) -> dict:
             "stock_score": float(r[2]) if r[2] is not None else None,
             "resonance_count": int(r[3]) if r[3] is not None else None,
             "resonance_families": r[4] or "",
-            "ret_t1": float(r[5]) if r[5] is not None else None,
-            "ret_t3": float(r[6]) if r[6] is not None else None,
-            "ret_t5": float(r[7]) if r[7] is not None else None,
-            "ret_t10": float(r[8]) if r[8] is not None else None,
+            "ret_t1": r[5],
+            "ret_t3": r[6],
+            "ret_t5": r[7],
+            "ret_t10": r[8],
+            "cum_series": series,           # raw % values
+            "current_cum_pct": latest_cum,
+            "peak_cum_pct": peak_cum,
+            "n_settled_days": len(valid),
+            "sparkline_svg": render_sparkline(series_frac, width=140, height=28),
         })
+
+    # Entry prices already returned in sql_daily (entry_close column).
+    # Re-extract from rows_daily into a quick lookup.
+    entry_lookup: dict[tuple[str, date], float] = {}
+    for ts_code, pick_date, entry_close, *_ in rows_daily:
+        key = (ts_code, pick_date)
+        if key not in entry_lookup and entry_close is not None:
+            entry_lookup[key] = float(entry_close)
+    for r in out_rows:
+        td = date.fromisoformat(r["trade_date"]) if r["trade_date"] else None
+        r["entry_close"] = entry_lookup.get((r["ts_code"], td))
 
     # Summary stats: of all picks where T+10 settled, what's the win rate / avg ret
     settled = [r for r in out_rows if r["ret_t10"] is not None]

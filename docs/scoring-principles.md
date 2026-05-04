@@ -118,6 +118,52 @@ Setups using these ranks (T1, V1, V2, S1) become **adaptive to market regime
 without parameter changes** — top-30% volume on a quiet day automatically
 qualifies as confirmation, while same absolute level fails on a busy day.
 
+### 1b. Bayesian resonance (M9.6)
+
+Resonance bonus weights are now **scaled by the historical edge** of each
+confirming family:
+
+```python
+EXTRA_FAMILY_WEIGHTS = [0.08, 0.05, 0.03]   # base for 2nd / 3rd / 4th family
+for (score_i, winrate_i), base_w in zip(extras, EXTRA_FAMILY_WEIGHTS):
+    wr_factor = clip(winrate_i / 30%, 0.4, 1.5)   # 30% target, 45% → ×1.5
+    bonus += score_i × base_w × wr_factor
+```
+
+Previously every family contributed at its base weight. Now a high-edge family
+(e.g. 45% historical winrate) contributes 1.5× its base weight, while a
+weak-edge family (15% winrate) contributes only 0.5×. Resonance from
+*reliable* signals pushes scores higher than resonance from *frequent but
+weak* signals — exactly what conviction trading wants.
+
+Implementation: `setups/ranker.py` Pass 2.
+
+### 1c. Continuous regime × setup boost (M9.6)
+
+Per-setup regime adaptation switched from boolean to continuous via a
+new `setup_metrics_daily.regime_winrates JSONB` column populated by
+`metrics.compute_setup_metrics`:
+
+```jsonb
+{"trend_continuation": 22.07, "cooldown": 27.35,
+ "sector_rotation": 48.43, "range_bound": 21.27}
+```
+
+Ranker boost formula:
+
+```python
+ratio = regime_winrate / overall_winrate     # 1.5 = 50% better in this regime
+boost = clip((ratio - 1) × 0.20, -0.05, 0.20)
+# 1.0× → 0; 1.5× → +0.10; 2.0× → cap +0.20; below baseline → small minus
+```
+
+A setup that historically wins 48% in `sector_rotation` (vs 30% overall)
+gets a +0.12 boost on a sector_rotation day; the same setup gets near 0
+boost on `range_bound` days. Cold-start fallback: when JSONB is empty
+(<5 samples per regime), reverts to the legacy boolean +0.10.
+
+Migration: `a8b9c0d1e2f3_ta_setup_metrics_regime_winrates.py`.
+
 ### 2. ATR-normalized magnitudes
 
 A 5% move on a low-volatility stock (5d realized 1%/day) is huge; on a meme
