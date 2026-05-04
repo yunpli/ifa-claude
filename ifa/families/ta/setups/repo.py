@@ -42,6 +42,11 @@ def upsert_candidates(
         conn.execute(sql_delete, {"d": on_date})
         for rc in ranked:
             c = rc.candidate
+            evidence_payload = {
+                **c.evidence,
+                "triggers": list(c.triggers),
+                "governance_status": rc.governance_status,
+            }
             conn.execute(sql_insert, {
                 "trade_date": on_date,
                 "ts_code": c.ts_code,
@@ -50,8 +55,7 @@ def upsert_candidates(
                 "final_score": c.score,
                 "star_rating": rc.star_rating,
                 "regime_at_gen": regime_at_gen,
-                "evidence": json.dumps({**c.evidence, "triggers": list(c.triggers)},
-                                       ensure_ascii=False, default=str),
+                "evidence": json.dumps(evidence_payload, ensure_ascii=False, default=str),
                 "in_top_watchlist": rc.in_top_watchlist,
             })
     return len(ranked)

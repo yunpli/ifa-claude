@@ -64,7 +64,27 @@ def run_backfill(start: date, end: date, *, top_n: int = 20, horizons=(1, 3, 10)
         if not contexts:
             continue
         candidates = scan_setups(contexts.values())
-        ranked = rank_candidates(candidates, top_n=top_n)
+
+        # Load most recent setup_metrics for M5.3 gating (uses prior-day metrics)
+        with engine.connect() as conn:
+            latest = conn.execute(
+                text("SELECT MAX(trade_date) FROM ta.setup_metrics_daily WHERE trade_date < :d"),
+                {"d": d},
+            ).scalar()
+            setup_metrics: dict = {}
+            if latest:
+                for row in conn.execute(
+                    text("""SELECT setup_name, decay_score, suitable_regimes
+                            FROM ta.setup_metrics_daily WHERE trade_date = :d"""),
+                    {"d": latest},
+                ):
+                    setup_metrics[row[0]] = {
+                        "decay_score": float(row[1]) if row[1] is not None else None,
+                        "suitable_regimes": list(row[2]) if row[2] else [],
+                    }
+
+        ranked = rank_candidates(candidates, top_n=top_n,
+                                 current_regime=regime, setup_metrics=setup_metrics)
         n = upsert_candidates(engine, d, ranked, regime_at_gen=regime)
         n_candidates_total += n
         if i % 5 == 0 or i == len(days):

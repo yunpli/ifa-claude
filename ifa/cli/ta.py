@@ -95,7 +95,29 @@ def scan_candidates(
     candidates = scan_setups(contexts.values())
     console.print(f"  raw candidates: {len(candidates)}")
 
-    ranked = rank_candidates(candidates, top_n=top_n)
+    # Load setup_metrics for the most recent date <= target — governs M5.3 gating
+    from sqlalchemy import text as _text
+    with engine.connect() as _conn:
+        latest = _conn.execute(
+            _text("SELECT MAX(trade_date) FROM ta.setup_metrics_daily WHERE trade_date <= :d"),
+            {"d": target},
+        ).scalar()
+        setup_metrics: dict = {}
+        if latest:
+            for row in _conn.execute(
+                _text("""SELECT setup_name, decay_score, suitable_regimes
+                         FROM ta.setup_metrics_daily WHERE trade_date = :d"""),
+                {"d": latest},
+            ):
+                setup_metrics[row[0]] = {
+                    "decay_score": float(row[1]) if row[1] is not None else None,
+                    "suitable_regimes": list(row[2]) if row[2] else [],
+                }
+    if setup_metrics:
+        console.print(f"  metrics from {latest}: {len(setup_metrics)} setups")
+
+    ranked = rank_candidates(candidates, top_n=top_n,
+                             current_regime=regime, setup_metrics=setup_metrics)
     if not ranked:
         console.print("[yellow]no candidates triggered today[/]")
         return
