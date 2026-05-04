@@ -182,49 +182,54 @@ def _classify_market_state(
     retreat = p.get("retreat", {})
     defense = p.get("defense", {})
 
-    # ── 进攻 ─────────────────────────────────────────────────────────────────
-    attack_score = 0
-    if amount_percentile_60d >= attack.get("amount_pct_min", 0.65):
-        attack_score += 2
-    if amount_ratio_10d >= attack.get("amount_ratio_min", 1.10):
-        attack_score += 1
-    if up_ratio >= attack.get("up_ratio_min", 0.55):
-        attack_score += 1
-    if limit_up_count >= attack.get("limit_up_min", 20):
-        attack_score += 1
-    if max_consecutive_limit_up >= attack.get("consec_min", 3):
-        attack_score += 1
-    if blow_up_rate <= attack.get("blow_up_rate_max", 0.35):
-        attack_score += 1
+    def _clip01(x: float) -> float:
+        return max(0.0, min(1.0, x))
+
+    # ── Continuous scoring (each component returns 0..1 strength) ────────────
+    # Higher value = stronger signal in that direction.
+
+    # 进攻 (attack): 量能放大 + 普涨 + 涨停高度 + 炸板低
+    attack_score = (
+        # 量能分位（high = stronger attack）：0.65→0, 1.0→2.0
+        2.0 * _clip01((amount_percentile_60d - attack.get("amount_pct_min", 0.65))
+                       / (1.0 - attack.get("amount_pct_min", 0.65)))
+        + 1.0 * _clip01((amount_ratio_10d - attack.get("amount_ratio_min", 1.10)) / 0.40)
+        + 1.0 * _clip01((up_ratio - attack.get("up_ratio_min", 0.55))
+                         / (1.0 - attack.get("up_ratio_min", 0.55)))
+        + 1.0 * _clip01((limit_up_count - attack.get("limit_up_min", 20)) / 80.0)
+        + 1.0 * _clip01((max_consecutive_limit_up - attack.get("consec_min", 3)) / 7.0)
+        + 1.0 * _clip01((attack.get("blow_up_rate_max", 0.35) - blow_up_rate) / 0.35)
+    )
+
+    # 退潮 (retreat): 缩量 + 炸板多 + 跌多
+    retreat_score = (
+        2.0 * _clip01((retreat.get("amount_pct_max", 0.20) - amount_percentile_60d)
+                       / retreat.get("amount_pct_max", 0.20))
+        + 2.0 * _clip01((blow_up_rate - retreat.get("blow_up_rate_min", 0.50)) / 0.50)
+        + 1.0 * _clip01(((1 - retreat.get("down_ratio_min", 0.55)) - up_ratio)
+                         / (1 - retreat.get("down_ratio_min", 0.55)))
+        + 1.0 * (1.0 if limit_down_count > limit_up_count else 0.0)
+    )
+
+    # 防守 (defense): 中等缩量 + 跌略多 + 涨停弱
+    defense_score = (
+        1.0 * _clip01((defense.get("amount_pct_max", 0.35) - amount_percentile_60d)
+                       / defense.get("amount_pct_max", 0.35))
+        + 1.0 * _clip01(((1 - defense.get("down_ratio_min", 0.50)) - up_ratio)
+                         / (1 - defense.get("down_ratio_min", 0.50)))
+        + 1.0 * (1.0 if limit_down_count > limit_up_count * 0.8 else 0.0)
+        + 1.0 * (1.0 if max_consecutive_limit_up <= 1 else 0.0)
+    )
+
+    # Threshold-based final classification — but THRESHOLDS now compare against
+    # continuous accumulated scores, so a weak attack (3.5) won't trigger 进攻
+    # while a borderline strong (4.8) might.
     if attack_score >= attack.get("min_score", 5):
         return "进攻"
-
-    # ── 退潮 ─────────────────────────────────────────────────────────────────
-    retreat_score = 0
-    if amount_percentile_60d <= retreat.get("amount_pct_max", 0.20):
-        retreat_score += 2
-    if blow_up_rate >= retreat.get("blow_up_rate_min", 0.50):
-        retreat_score += 2
-    if up_ratio <= (1 - retreat.get("down_ratio_min", 0.55)):
-        retreat_score += 1
-    if limit_down_count > limit_up_count:
-        retreat_score += 1
     if retreat_score >= retreat.get("min_score", 4):
         return "退潮"
-
-    # ── 防守 ─────────────────────────────────────────────────────────────────
-    defense_score = 0
-    if amount_percentile_60d <= defense.get("amount_pct_max", 0.35):
-        defense_score += 1
-    if up_ratio <= (1 - defense.get("down_ratio_min", 0.50)):
-        defense_score += 1
-    if limit_down_count > limit_up_count * 0.8:
-        defense_score += 1
-    if max_consecutive_limit_up <= 1:
-        defense_score += 1
     if defense_score >= defense.get("min_score", 3):
         return "防守"
-
     return "中性"
 
 
