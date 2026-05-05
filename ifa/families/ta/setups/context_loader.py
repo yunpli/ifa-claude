@@ -45,7 +45,10 @@ def _rank_dict(values: dict) -> dict[str, float]:
     return out
 
 
-def _tradeable_universe(engine: Engine, on_date: date) -> tuple[set[str], set[str]]:
+def _tradeable_universe(
+    engine: Engine, on_date: date,
+    *, regime: Regime | None = None,
+) -> tuple[set[str], set[str]]:
     """Return (liquid_universe, long_universe).
 
     · liquid_universe — passes liquidity filter (min avg amount + coverage).
@@ -104,7 +107,14 @@ def _tradeable_universe(engine: Engine, on_date: date) -> tuple[set[str], set[st
     # M10 P1.5 — Fundamental二筛 (market cap + ST status; ROE TODO)
     fund = load_params().get("fundamental_filter", {}) or {}
     if fund.get("enabled", False):
-        min_mv_wan = fund.get("min_total_mv_yi", 30) * 10000   # 亿元 → 万元
+        # iter19 (path C) — regime-aware mv 门. trend regime 放宽至小盘以
+        # 提高趋势市的 alpha 捕获;range/cooldown 维持 30亿 风险控制.
+        # yaml: fundamental_filter.by_regime.<regime_name>.min_total_mv_yi
+        # Regime is Literal[str] — pass-through; None when caller doesn't supply.
+        regime_name = regime if isinstance(regime, str) else None
+        by_regime = (fund.get("by_regime") or {}).get(regime_name, {}) if regime_name else {}
+        eff_mv_yi = by_regime.get("min_total_mv_yi", fund.get("min_total_mv_yi", 30))
+        min_mv_wan = float(eff_mv_yi) * 10000   # 亿元 → 万元
         sql_mv = text("""
             SELECT ts_code FROM smartmoney.raw_daily_basic
             WHERE trade_date = :on_date AND total_mv >= :min_mv
@@ -115,8 +125,8 @@ def _tradeable_universe(engine: Engine, on_date: date) -> tuple[set[str], set[st
             })}
         before_n = len(long_universe)
         long_universe &= mv_pass
-        log.info("fundamental: market-cap ≥ %s亿 cut %d stocks (kept %d)",
-                 fund.get("min_total_mv_yi"),
+        log.info("fundamental: market-cap ≥ %s亿 (regime=%s) cut %d stocks (kept %d)",
+                 eff_mv_yi, regime_name,
                  before_n - len(long_universe), len(long_universe))
 
         # ST/*ST detection — name from sw_member_monthly latest snapshot.
@@ -235,7 +245,7 @@ def build_contexts(
     are tuples ascending by date; today's row sits at index -1.
     """
     cutoff = on_date - timedelta(days=LOOKBACK_DAYS)
-    liquid_universe, long_universe = _tradeable_universe(engine, on_date)
+    liquid_universe, long_universe = _tradeable_universe(engine, on_date, regime=regime)
 
     # OHLCV — one wide query, partition by ts_code in Python.
     sql_ohlcv = text("""

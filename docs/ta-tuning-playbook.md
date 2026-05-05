@@ -242,6 +242,43 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
 - **Sweet spot**: -50%。再降 (-75%) 反而退化(失去多族确认信号)。
 - **Speed**: 4 个 variant 共 ~2 分钟 fast_rerank ✓ (vs 100 min full re-scan)
 
+### iter19 (2026-05-04) ✅ KEPT — Regime-aware fundamental filter (path C 首战)
+- **Hypothesis**: 全局 mv≥30亿 在 trend regime 下过滤掉了趋势市最猛的小中盘票。
+  by_regime: trend/early_risk_on→20亿, sector_rotation→25亿, range/cooldown→30亿(原值),
+  distribution_risk/high_difficulty→50亿(更严)。
+- **Code change**: `setups/context_loader.py::_tradeable_universe(..., regime=...)` 读 yaml `fundamental_filter.by_regime.<regime>.min_total_mv_yi` overlay。
+- **Smoke test (2026-04-14)**: trend regime 下 long_universe 4275(vs 默认 3886),即多 389 只小中盘票纳入候选。
+- **Result (full re-scan 360d, 1589s)**:
+
+| Window | Tier | iter19 | iter13c | Δ |
+|---|---|---|---|---|
+| 60d  | A | +0.98pp | +0.84pp | **+0.14 ✅** |
+| 60d  | B | +0.06pp | -0.03pp | **+0.09 ✅** |
+| 180d | A | +1.18pp | +0.95pp | **+0.23 ⭐** |
+| 180d | B | -0.31pp | -0.40pp | +0.09 (still WORSE 但缩小) |
+| 360d | A | +0.13pp | +0.15pp | -0.02 ≈ wash (n=2258, noise) |
+| 360d | B | -0.58pp | -0.50pp | -0.08 ⚠️ |
+
+- **Decision**: ✅ **KEEP** — Tier A 三窗口 +0.14/+0.23/wash,180d 大幅改善;net aggregate +0.35pp。
+- **Caveat (H8)**: Tier B 360d 退化 0.08pp。说明放小盘的 high-beta 红利集中在最近半年,跨 regime 拉长后被 down-market 拖累。后续若想救 Tier B 360d,考虑(a)Tier B 单独保留 mv≥30亿,或(b)给 trend-mv-relaxed picks 加 stop loss 收紧。
+- **Lesson**: **path C 第一刀就出 alpha**,印证 H4(regime-aware 是 alpha 真正杠杆)。继续 by_regime 化其他参数(ATR / winrate floor / concentration)。
+
+### iter15 / iter15b / iter16 / iter18 (2026-05-04) ⏹️ NO-OP via fast_rerank — ranker 空间已耗尽
+
+### iter15 / iter15b / iter16 / iter18 (2026-05-04) ⏹️ NO-OP via fast_rerank — ranker 空间已耗尽
+- **Hypothesis & Change**:
+  - iter15: `top_cap_per_setup 3→2`, iter15b: `→1` — 强制 Tier A 每票不同 setup
+  - iter16a: `winrate.floor_ratio 0.4→0.45`, iter16b: `→0.35` — 提高 / 降低低胜率惩罚下限
+  - iter18a: sector_flow 权重 (rank/phase/conf) `0.5/0.3/0.2 → 0.4/0.4/0.2`,iter18b: `→0.6/0.2/0.2`
+- **Result**: 全部 4 + 2 个 variant **数字与 iter13c baseline 完全一致** (60d A +0.84 / 180d +0.95 / 360d +0.15)
+- **Decision**: ⏹️ NO-OP — 不改 yaml
+- **Lesson — 重要诊断**:
+  1. **diversity cap 不咬人**: Tier A=10 / 30 setup,平均每 setup ~0.33 picks,cap=3 已远松于实际分布
+  2. **winrate floor 不咬人**: floor=0.4 × target=30% = 12% 阈值;大多数 setup winrate ≥ 30%,ratio_w 已饱和到 1.0,floor 永不触发
+  3. **sector_flow 权重必须 full re-scan**: 这些权重在 scanner-time 计算 sector_quality_factor 写入 `evidence.sector_quality`,fast_rerank 直接读现有值,改 yaml 不重算
+- **结论**: **fast_rerank 可达到的 ranker 调参空间在 iter13c 已耗尽**。继续推进需要 (a) full re-scan 改 universe / scanner / sector / 二筛(慢 50x)或 (b) 代码改动启用新维度
+- **Speed**: 6 个 variant 共 ~3 分钟 fast_rerank ✓
+
 ### iter12 (2026-05-04) ❌ REVERTED — 全局集中度放松也无效
 - **Hypothesis**: 集中度进一步分散(全局 3→4)+ trend regime 更松(5→6)
 - **Change**: `tier_a_per_l2_max 3→4` + `by_regime.trend.a 5→6`
@@ -258,10 +295,11 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
 
 按学到的启发式,future tuning 应**按这个优先级**展开:
 
-### P1 — Regime-aware 进一步细化
-- iter8 (trend mv 20亿) 验证后,做 `fundamental_filter.by_regime`(让 trend 单独松绑)
+### P1 — Regime-aware 进一步细化 ⬅ **NEXT (path C)**
+- ⬅ **`fundamental_filter.by_regime`**: trend regime 放小盘 (mv 30→20亿), range/cooldown 维持 30亿。
+  需要 `context_loader.py` 代码改动读 yaml `by_regime` 段。这是 fast_rerank 路径耗尽后的下一站。
 - ATR by_regime: trend 用 1.5/3.0, range 用 1.2/2.5
-- winrate floor by_regime: trend 0.4 / range 0.55
+- winrate floor by_regime: trend 0.4 / range 0.55(注:全局 floor 不咬人,by_regime 才有意义)
 
 ### P2 — Setup 库扩展(只在结构性需求时做)
 - C3 主力洗盘(chip 集中度变窄但价格不涨)
@@ -290,7 +328,8 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
 | baseline (P1 完成时) | — | -? | -1.35% (-0.24pp) | — |
 | iter1-iter4 (M10 P2 早期) | ATR + Q3 + Z3+R4 + regime sizes | +0.40pp | -0.07pp | KEPT |
 | **iter5** | regime-aware concentration cap (trend 3→5) | +0.71pp | +0.06pp | ✅ 阶段最优 |
-| **iter13c** | **Bayesian resonance weights × 0.5** | **+0.84pp** | **+0.15pp** | **✅ 当前最优** |
+| **iter13c** | **Bayesian resonance weights × 0.5** | **+0.84pp** | **+0.15pp** | ✅ KEPT(累积进 iter19) |
+| **iter19** | **regime-aware mv 门 (trend 20亿)** | **+0.98pp** (180d +1.18pp) | **+0.13pp** | **✅ 当前最优** |
 | iter6 | ATR k_stop 1.2 / k_target 2.5 | +0.96 | -0.44 | ❌ 60d 过拟合 |
 | iter7 | A_size 10→5 (Tier A_strict) | +0.57 | +0.08 | ❌ 反而变差 |
 | iter8 | mv門 30→20亿 (全局) | +0.93 | +0.01 | ❌ 360d 持平 + Tier B 退 |

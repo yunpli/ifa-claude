@@ -121,9 +121,23 @@ backtest_objective:
 # Fundamental二筛 (pre-Tier filter). All three must pass to enter long pool.
 fundamental_filter:
   enabled: true
-  min_total_mv_yi: 30        # iter5 baseline. iter8 tried 20 (60d/180d marginal +0.2pp but 360d wash + Tier B 退 0.17pp); reverted. TODO: regime-aware mv門(只 trend regime 用 20亿)
+  min_total_mv_yi: 30        # global default. iter8 tried 20 globally → 360d wash + Tier B 退. Now restricted via by_regime.
   roe_lookback_quarters: 4   # 近 N 季 ROE 不能全部为负
   st_lookback_days: 365      # 1 年内戴过 ST/*ST 帽子 → 剔除
+  # iter19 (path C, 2026-05-04) — Regime-aware mv門.
+  # Hypothesis: trend regime 中小盘往往跑得更猛(beta-like alpha),
+  # 全局 30亿过滤掉了趋势市的最佳猎物;range/cooldown 维持 30亿 风控。
+  # Falls back to min_total_mv_yi when regime not in this map.
+  by_regime:
+    trend_continuation:    {min_total_mv_yi: 20}
+    early_risk_on:         {min_total_mv_yi: 20}
+    sector_rotation:       {min_total_mv_yi: 25}
+    range_bound:           {min_total_mv_yi: 30}
+    weak_rebound:          {min_total_mv_yi: 30}
+    cooldown:              {min_total_mv_yi: 30}
+    emotional_climax:      {min_total_mv_yi: 30}
+    distribution_risk:     {min_total_mv_yi: 50}
+    high_difficulty:       {min_total_mv_yi: 50}
 
 # 集中度约束 (per L2 SW sector cap).
 concentration:
