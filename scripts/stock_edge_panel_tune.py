@@ -31,6 +31,7 @@ from ifa.core.db import get_engine
 from ifa.families.stock.backtest.optimizer import fit_global_preset_via_panel
 from ifa.families.stock.backtest.panel_evaluator import (
     evaluate_overlay_on_panel,
+    k_fold_rolling_walk_forward,
     panel_matrix_from_rows,
     walk_forward_split,
 )
@@ -104,6 +105,9 @@ def main() -> int:
     parser.add_argument("--oos", action="store_true", help="Walk-forward OOS: tune on older half, gate on newer half")
     parser.add_argument("--train-fraction", type=float, default=0.5, help="OOS train fraction (default 0.5)")
     parser.add_argument("--embargo-days", type=int, default=10, help="OOS embargo days between train end and val start (default 10)")
+    parser.add_argument("--k-fold", type=int, default=0, help="K-fold rolling walk-forward (default 0 = single split). Each fold tunes on growing train window, evaluates on next val_dates_per_fold dates")
+    parser.add_argument("--val-dates-per-fold", type=int, default=2, help="Validation dates per fold (default 2)")
+    parser.add_argument("--min-train-dates", type=int, default=4, help="Minimum train dates for first fold (default 4)")
     args = parser.parse_args()
 
     engine = get_engine()
@@ -175,8 +179,87 @@ def main() -> int:
         print("ERROR: panel is empty; cannot tune", file=sys.stderr)
         return 3
 
+    # K-fold rolling walk-forward (Phase 5 v2 — robust OOS)
+    k_fold_done = False
+    if args.k_fold and args.k_fold >= 2:
+        folds = k_fold_rolling_walk_forward(
+            rows,
+            n_folds=args.k_fold,
+            val_dates_per_fold=args.val_dates_per_fold,
+            min_train_dates=args.min_train_dates,
+            embargo_days=args.embargo_days,
+        )
+        if not folds:
+            print("ERROR: not enough dates for k-fold; falling back to single split", file=sys.stderr)
+            args.k_fold = 0
+        else:
+            print(f"\n[K-fold rolling walk-forward] {len(folds)} folds, val_dates={args.val_dates_per_fold} each, min_train={args.min_train_dates}, embargo={args.embargo_days}d")
+            for i, (tr, va) in enumerate(folds):
+                tr_dates = sorted({r.as_of_date for r in tr})
+                va_dates = sorted({r.as_of_date for r in va})
+                print(f"  Fold {i+1}: train={len(tr)} rows ({len(tr_dates)} dates: {tr_dates[0]}..{tr_dates[-1]}) | val={len(va)} rows ({va_dates[0]}..{va_dates[-1]})")
+
+            # Run search per fold; aggregate val metrics
+            print(f"\n[4/4] Running K-fold search (each fold: {args.max_candidates} candidates × {args.n_iterations} iter)...")
+            fold_results = []
+            t0 = time.monotonic()
+            for i, (train_rows, val_rows) in enumerate(folds):
+                fold_artifact = fit_global_preset_via_panel(
+                    train_rows, as_of_date=as_of, base_params=base,
+                    universe=f"{args.universe_id}_top{args.top}_fold{i}",
+                    max_candidates=args.max_candidates,
+                    n_iterations=args.n_iterations,
+                    use_ic_warmstart=not args.no_warmstart,
+                    allow_negative_weights=not args.no_negative_weights,
+                    on_progress=None,
+                )
+                val_panel = panel_matrix_from_rows(val_rows)
+                val_baseline = evaluate_overlay_on_panel(val_panel, {}, base)
+                val_tuned = evaluate_overlay_on_panel(val_panel, fold_artifact.overlay, base)
+                fold_results.append({
+                    "fold": i + 1,
+                    "train_dates": [d.isoformat() for d in sorted({r.as_of_date for r in train_rows})],
+                    "val_dates": [d.isoformat() for d in sorted({r.as_of_date for r in val_rows})],
+                    "train_artifact": fold_artifact,
+                    "val_baseline": val_baseline,
+                    "val_tuned": val_tuned,
+                })
+                vt5 = val_tuned['objective_5d']['rank_ic']
+                vt10 = val_tuned['objective_10d']['rank_ic']
+                vt20 = val_tuned['objective_20d']['rank_ic']
+                vb5 = val_baseline['objective_5d']['rank_ic']
+                vb10 = val_baseline['objective_10d']['rank_ic']
+                vb20 = val_baseline['objective_20d']['rank_ic']
+                print(f"  Fold {i+1}: val rank IC 5d {vb5:+.3f}→{vt5:+.3f} (Δ {vt5-vb5:+.3f}) | "
+                      f"10d {vb10:+.3f}→{vt10:+.3f} (Δ {vt10-vb10:+.3f}) | "
+                      f"20d {vb20:+.3f}→{vt20:+.3f} (Δ {vt20-vb20:+.3f})")
+            elapsed = time.monotonic() - t0
+            print(f"      total search across {len(folds)} folds: {elapsed:.1f}s")
+
+            # Summary table
+            print(f"\n=== K-Fold Aggregate (median across {len(folds)} folds) ===")
+            import statistics
+            for h in (5, 10, 20):
+                lifts = [r['val_tuned'][f'objective_{h}d']['rank_ic'] - r['val_baseline'][f'objective_{h}d']['rank_ic'] for r in fold_results]
+                tuneds = [r['val_tuned'][f'objective_{h}d']['rank_ic'] for r in fold_results]
+                bases = [r['val_baseline'][f'objective_{h}d']['rank_ic'] for r in fold_results]
+                pos_folds = sum(1 for l in lifts if l > 0)
+                print(f"  {h}d: median val_lift {statistics.median(lifts):+.4f} | per-fold lifts {[f'{l:+.3f}' for l in lifts]} | positive {pos_folds}/{len(folds)} folds")
+                print(f"      tuned IC range: {min(tuneds):+.3f}..{max(tuneds):+.3f}, baseline range: {min(bases):+.3f}..{max(bases):+.3f}")
+
+            # Pick "best fold" artifact for downstream auto-promote (latest fold = most recent training)
+            artifact = fold_results[-1]['train_artifact']
+            val_metrics_baseline = fold_results[-1]['val_baseline']
+            val_metrics_tuned = fold_results[-1]['val_tuned']
+            print(f"\n  [auto-promote will use latest fold's artifact + its val metrics]")
+            search_elapsed = elapsed
+
+            # Skip the regular [4/4] search and the single-OOS split
+            k_fold_done = True
+            args.oos = False
+
     # Walk-forward OOS split (Phase 5)
-    if args.oos:
+    if not k_fold_done and args.oos:
         train_rows, val_rows = walk_forward_split(
             rows, train_fraction=args.train_fraction, embargo_days=args.embargo_days,
         )
@@ -187,40 +270,41 @@ def main() -> int:
             print(f"      ERROR: validation set empty (panel only spans {len(set(r.as_of_date for r in rows))} dates with embargo {args.embargo_days}d). Cannot do OOS.", file=sys.stderr)
             return 4
         search_rows = train_rows
-    else:
+    elif not k_fold_done:
         search_rows = rows
 
-    print(f"\n[4/4] Running search ({args.max_candidates} candidates × {args.n_iterations} iterations over decision_layer space)...")
-    t0 = time.monotonic()
-    artifact = fit_global_preset_via_panel(
-        search_rows,
-        as_of_date=as_of,
-        base_params=base,
-        universe=f"{args.universe_id}_top{args.top}",
-        max_candidates=args.max_candidates,
-        n_iterations=args.n_iterations,
-        use_ic_warmstart=not args.no_warmstart,
-        allow_negative_weights=not args.no_negative_weights,
-        on_progress=lambda p: print(f"      iter {p.get('iteration', 0)} cand {p['candidate']}/{p['total']} score={p['score']:.4f} best={p['best_score']:.4f}") if p.get("candidate", 0) % max(1, args.max_candidates // 8) == 0 else None,
-    )
-    search_elapsed = time.monotonic() - t0
-    print(f"      search: {search_elapsed:.2f}s ({artifact.candidate_count}/{search_elapsed:.1f}s = {artifact.candidate_count/max(search_elapsed, 0.001):.0f} cand/sec, {artifact.metrics.get('search_iterations', 1)} iterations)")
+    if not k_fold_done:
+        print(f"\n[4/4] Running search ({args.max_candidates} candidates × {args.n_iterations} iterations over decision_layer space)...")
+        t0 = time.monotonic()
+        artifact = fit_global_preset_via_panel(
+            search_rows,
+            as_of_date=as_of,
+            base_params=base,
+            universe=f"{args.universe_id}_top{args.top}",
+            max_candidates=args.max_candidates,
+            n_iterations=args.n_iterations,
+            use_ic_warmstart=not args.no_warmstart,
+            allow_negative_weights=not args.no_negative_weights,
+            on_progress=lambda p: print(f"      iter {p.get('iteration', 0)} cand {p['candidate']}/{p['total']} score={p['score']:.4f} best={p['best_score']:.4f}") if p.get("candidate", 0) % max(1, args.max_candidates // 8) == 0 else None,
+        )
+        search_elapsed = time.monotonic() - t0
+        print(f"      search: {search_elapsed:.2f}s ({artifact.candidate_count}/{search_elapsed:.1f}s = {artifact.candidate_count/max(search_elapsed, 0.001):.0f} cand/sec, {artifact.metrics.get('search_iterations', 1)} iterations)")
 
-    print(f"\n=== Results ===")
-    print(f"  best objective score: {artifact.objective_score:.6f}")
-    print(f"  candidates evaluated: {artifact.candidate_count}")
-    print(f"  panel rows used:      {artifact.metrics.get('panel_n_rows', 0)}")
-    for h in (5, 10, 20):
-        m = artifact.metrics.get(f"objective_{h}d", {})
-        print(f"  {h}d: n={m.get('sample_count', 0):4d} ic={m.get('ic', 0):+.3f} rank_ic={m.get('rank_ic', 0):+.3f} "
-              f"pos_ret={m.get('positive_return_rate', 0):.2f} target_first={m.get('target_first_rate', 0):.2f} "
-              f"buy_n={m.get('buy_signals', 0)} buy_hit={m.get('buy_hit_rate', 0):.2f}")
+        print(f"\n=== Results ===")
+        print(f"  best objective score: {artifact.objective_score:.6f}")
+        print(f"  candidates evaluated: {artifact.candidate_count}")
+        print(f"  panel rows used:      {artifact.metrics.get('panel_n_rows', 0)}")
+        for h in (5, 10, 20):
+            m = artifact.metrics.get(f"objective_{h}d", {})
+            print(f"  {h}d: n={m.get('sample_count', 0):4d} ic={m.get('ic', 0):+.3f} rank_ic={m.get('rank_ic', 0):+.3f} "
+                  f"pos_ret={m.get('positive_return_rate', 0):.2f} target_first={m.get('target_first_rate', 0):.2f} "
+                  f"buy_n={m.get('buy_signals', 0)} buy_hit={m.get('buy_hit_rate', 0):.2f}")
 
-    print(f"\n  Top 10 weight changes:")
-    weight_deltas = [(k, v) for k, v in artifact.overlay.items() if "weights." in k]
-    weight_deltas.sort(key=lambda kv: -abs(float(kv[1]) - 1.0))
-    for k, v in weight_deltas[:10]:
-        print(f"    {k} = {v:.3f}")
+        print(f"\n  Top 10 weight changes:")
+        weight_deltas = [(k, v) for k, v in artifact.overlay.items() if "weights." in k]
+        weight_deltas.sort(key=lambda kv: -abs(float(kv[1]) - 1.0))
+        for k, v in weight_deltas[:10]:
+            print(f"    {k} = {v:.3f}")
 
     if not args.dry_run:
         path = write_tuning_artifact(artifact)
@@ -261,8 +345,9 @@ def main() -> int:
     # ── Auto-promotion (Phase 4) ──────────────────────────────
     if args.auto_promote:
         print(f"\n=== Auto-Promotion Gates ===")
-        if args.oos:
-            print(f"      (Gating on VALIDATION set, not training)")
+        if args.oos or k_fold_done:
+            origin = "K-fold latest fold" if k_fold_done else "single OOS split"
+            print(f"      (Gating on VALIDATION set from {origin}, not training)")
             candidate_metrics_for_gate = val_metrics_tuned
             baseline_metrics = val_metrics_baseline
         else:

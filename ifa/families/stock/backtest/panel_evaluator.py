@@ -514,6 +514,57 @@ def walk_forward_split(
     return train_rows, val_rows
 
 
+def k_fold_rolling_walk_forward(
+    rows: Sequence[PanelRow],
+    *,
+    n_folds: int = 3,
+    val_dates_per_fold: int = 1,
+    min_train_dates: int = 3,
+    embargo_days: int = 10,
+) -> list[tuple[list[PanelRow], list[PanelRow]]]:
+    """Anchored rolling walk-forward: K folds, each with growing train window.
+
+    Standard practice in financial walk-forward. For 12 dates with K=3, val=1:
+        Fold 1: train dates [1..6], val date 7
+        Fold 2: train dates [1..7], val date 8
+        Fold 3: train dates [1..8], val date 9
+    (with embargo handling for dates near the train/val boundary)
+
+    Returns list of (train_rows, val_rows). If panel doesn't have enough dates
+    for K folds, falls back to a single 50/50 split.
+    """
+    if not rows:
+        return []
+    sorted_rows = sorted(rows, key=lambda r: r.as_of_date)
+    distinct_dates = sorted({r.as_of_date for r in sorted_rows})
+    needed = min_train_dates + n_folds * val_dates_per_fold
+    if len(distinct_dates) < needed:
+        # Fall back: single 50/50
+        train, val = walk_forward_split(rows, train_fraction=0.5, embargo_days=embargo_days)
+        return [(train, val)] if val else []
+
+    folds: list[tuple[list[PanelRow], list[PanelRow]]] = []
+    # First train window covers the oldest min_train_dates dates; each fold extends it
+    for k in range(n_folds):
+        train_end_idx = min_train_dates + k * val_dates_per_fold
+        val_start_idx = train_end_idx
+        val_end_idx = val_start_idx + val_dates_per_fold
+        if val_end_idx > len(distinct_dates):
+            break
+        train_dates_set = set(distinct_dates[:train_end_idx])
+        val_dates_set = set(distinct_dates[val_start_idx:val_end_idx])
+        train_end_date = distinct_dates[train_end_idx - 1]
+        train_rows_fold = [r for r in sorted_rows if r.as_of_date in train_dates_set]
+        val_rows_fold = [
+            r for r in sorted_rows
+            if r.as_of_date in val_dates_set
+            and (r.as_of_date - train_end_date).days >= embargo_days
+        ]
+        if val_rows_fold:
+            folds.append((train_rows_fold, val_rows_fold))
+    return folds
+
+
 # ──────────────────────────────────────────────────────────────────────────
 
 
