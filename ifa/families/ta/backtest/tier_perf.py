@@ -9,7 +9,7 @@ For each generation_date:
   · For each candidate marked Tier A or B (one row per ts_code, dedup'd from
     multiple-setup hits via DISTINCT ON), join its position event row.
   · Compute equal-weight portfolio mean of T+5/T+10/T+15 returns.
-  · Compute combined per ta_v2.3.yaml.backtest_objective.weights.
+  · Compute combined per ta_v2.2.yaml.backtest_objective.weights.
 
 Aggregate over a window:
   · daily portfolio returns time series (mean + std)

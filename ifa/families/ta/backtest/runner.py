@@ -183,7 +183,7 @@ def walk_forward(
 ) -> BacktestResult:
     """Run IS / OOS walk-forward analysis ending at end_date.
 
-    Defaults from ta_v2.3.yaml.backtest_objective.walk_forward:
+    Defaults from ta_v2.2.yaml.backtest_objective.walk_forward:
       is_days  = 90 (in-sample window)
       oos_days = 30 (out-of-sample validation)
       n_rolls  = 12 (≈ 1 year)

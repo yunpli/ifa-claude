@@ -46,7 +46,7 @@
 
 虽然两 Tier 都还是负值(市场太弱),但**已经跑赢被动等权基准**。这是真正的 alpha.
 
-## 已落地的参数 (ta_v2.3.yaml)
+## 已落地的参数 (ta_v2.2.yaml)
 
 ```yaml
 recommended_price:

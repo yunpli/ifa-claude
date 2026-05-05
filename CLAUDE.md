@@ -511,7 +511,7 @@ uv run alembic current
 6. ✅ Q9 §13 顶部综合风险红绿灯 dashboard
 
 **P1 ✅ 全部完成**
-7. ✅ params bumped to **v2.3.0**（删除 v2.2;新增 recommended_price / backtest_objective / fundamental_filter / concentration / blacklist / position_tracking 6 节）
+7. ✅ params bumped to **v2.2.1**（删除 v2.2;新增 recommended_price / backtest_objective / fundamental_filter / concentration / blacklist / position_tracking 6 节）
 8. ✅ 推荐价持久化（5 列上提 candidates_daily;evidence_json 留审计）
 9. ✅ 持仓状态机 `ta.position_events_daily`（fill 检测 + stop/target/T+15 出场 + max_drawdown_pct）
 10. ✅ Forward-return ETL（return_t5/t10/t15 + combined_score_60d 用于 walk-forward 目标）
@@ -524,13 +524,13 @@ uv run alembic current
 17. ✅ Tushare `fina_indicator` 调用脚手架（`ta.fina_indicator_quarterly` + ETL,等回填后 ROE 自动启用）
 
 **P2 调参（用户已要求 P2/P3 互换,即调参在前）**
-- ✅ **所有 28 setup 阈值 YAML 化** — `setups:` 段在 ta_v2.3.yaml,覆盖 ~50 个 gate
+- ✅ **所有 28 setup 阈值 YAML 化** — `setups:` 段在 ta_v2.2.yaml,覆盖 ~50 个 gate
   阈值;每个 setup 通过 `setup_param(name, key, default)` 读取(`setups/_params.py`)
 - ✅ Tushare `fina_indicator` 6 季度回填(45,501 行)→ ROE 4Q 检查激活
 - ✅ Jan-April events + blacklist + candidates 全量回填(78 d × 28 setup)
 - ✅ Position state machine 跑全 65 天(9,452 positions, fill rate 68.5%, 真实 T+15 信息率)
 - ✅ tune 脚本 `scripts/ta_setup_param_tune.py` 50+ axes + greedy 1-axis 搜索
-- ⏳ 跑 60-day backtest baseline + tune iteration → 冻结新 v2.3 参数
+- ⏳ 跑 60-day backtest baseline + tune iteration → 冻结新 v2.2.x 参数
 - ⏳ Q8.1 setup 相关性去重(用历史命中矩阵)
 
 **P3 装饰性历史回放**
@@ -560,8 +560,8 @@ ifa/families/ta/
   etl/fina_etl.py              ← M10 fina_indicator quarterly (ROE)
   etl/runner.py                ← M10 unified daily ETL + coverage_check
   backtest/runner.py           ← M10 walk-forward + backtest_window
-  metrics_v2.py                ← M10 v2.3 metrics from position_events (T+15 weighted)
-  params/ta_v2.3.yaml          ← v2.3 生产参数 (was 2.2.0; bumped 2026-05-04)
+  metrics_v2.py                ← M10 v2.2.1 metrics from position_events (T+15 weighted)
+  params/ta_v2.2.yaml          ← v2.2.1 生产参数 (M10 P2 同名 minor bump,2026-05-04)
   report/                      ← evening builder + templates + labels + llm_aug
   sector_phase_metrics.py      ← 数据驱动 phase 评分
 

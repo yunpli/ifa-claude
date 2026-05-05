@@ -285,7 +285,7 @@ def walk_forward_cmd(
     horizon: int = typer.Option(15, "--horizon", help="Position-tracking horizon (trade days)"),
 ) -> None:
     """Run scan + position-tracking + aggregation for a date range, using
-    the T+15-weighted combined objective (per ta_v2.3.yaml.backtest_objective)."""
+    the T+15-weighted combined objective (per ta_v2.2.yaml.backtest_objective)."""
     from ifa.families.ta.backtest import backtest_window
     engine = get_engine()
     start_d = date.fromisoformat(start)

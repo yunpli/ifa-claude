@@ -4,10 +4,10 @@ Auto-applies any change that improves oracle agreement by ≥ MIN_DELTA_PP
 percentage points. Backs up the prior YAML to tmp/ first so revert is easy.
 
 Workflow:
-  1. Snapshots current `ta_v2.3.yaml` to `tmp/ta_v2.3_before_<ts>.yaml`
+  1. Snapshots current `ta_v2.2.yaml` to `tmp/ta_v2.2_before_<ts>.yaml`
   2. Greedy 1-axis search across tunable thresholds (in-memory)
   3. If total improvement ≥ MIN_DELTA_PP: writes tuned values back to
-     `ta_v2.3.yaml`, prints the diff
+     `ta_v2.2.yaml`, prints the diff
   4. If improvement < MIN_DELTA_PP: leaves YAML untouched, says so
 
 Run weekly via cron; the only side effect is the YAML file (which is
@@ -172,7 +172,7 @@ def main():
     tmp_dir = Path("tmp")
     tmp_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M")
-    backup_path = tmp_dir / f"ta_v2.3_before_{stamp}.yaml"
+    backup_path = tmp_dir / f"ta_v2.2_before_{stamp}.yaml"
     backup_path.write_text(yaml.safe_dump(backup_dict), encoding="utf-8")
 
     if args.dry_run:

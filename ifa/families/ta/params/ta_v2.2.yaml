@@ -83,7 +83,7 @@ regime:
       n_down_max: 3700
       n_limit_down_max: 25
       udr_min: 1.265
-version: 2.3.0
+version: 2.2.1
 
 # ─── M10 P1 — new sections ──────────────────────────────────────────────
 

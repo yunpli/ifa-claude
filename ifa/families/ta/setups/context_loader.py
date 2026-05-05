@@ -229,7 +229,7 @@ def build_contexts(
     """Returns {ts_code: SetupContext} for every stock in the tradeable universe.
 
     Tradeable universe = stocks with raw_daily on on_date AND meeting
-    universe.min_avg_amount_yi + universe.min_coverage_pct (per ta_v2.3.yaml).
+    universe.min_avg_amount_yi + universe.min_coverage_pct (per ta_v2.2.yaml).
 
     Stocks lacking on_date row are excluded. SetupContext closes/highs/lows/volumes
     are tuples ascending by date; today's row sits at index -1.

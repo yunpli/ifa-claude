@@ -1,9 +1,9 @@
-"""TA setup metrics — v2.3 forward-return ETL.
+"""TA setup metrics — v2.2.1 (M10 P2) forward-return ETL.
 
 Sources data from `ta.position_events_daily` (filled-only, real exits) instead
 of legacy `ta.candidate_tracking` (close-to-close, no fill check).
 
-Objective (per ta_v2.3.yaml.backtest_objective.weights):
+Objective (per ta_v2.2.yaml.backtest_objective.weights):
     combined_score = 0.7 × T+15 win-rate × avg-ret
                    + 0.2 × T+5  win-rate × avg-ret
                    + 0.1 × T+10 win-rate × avg-ret
@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 
 def compute_setup_metrics_v2(engine: Engine, on_date: date) -> int:
-    """Compute v2.3 setup metrics using position_events_daily as ground truth."""
+    """Compute v2.2.1 setup metrics using position_events_daily as ground truth."""
     p = load_params()
     weights = p.get("backtest_objective", {}).get("weights", {})
     w_t5 = float(weights.get("t5", 0.2))

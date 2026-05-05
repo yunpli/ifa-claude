@@ -4,10 +4,10 @@ Distinct from `ta_param_tune.py` which tunes the regime classifier against
 an oracle. This script tunes RANKER + SECTOR_FLOW + CONCENTRATION parameters
 (yaml-driven, no setup-code changes needed) against the real backtest
 objective: weighted T+15 / T+10 / T+5 win-rate × avg-return per
-ta_v2.3.yaml.backtest_objective.weights.
+ta_v2.2.yaml.backtest_objective.weights.
 
 Workflow:
-  1. Snapshot current ta_v2.3.yaml to tmp/ta_v2.3_before_<ts>.yaml
+  1. Snapshot current ta_v2.2.yaml to tmp/ta_v2.2_before_<ts>.yaml
   2. Compute baseline combined_score over [start, end] window from existing
      candidates_daily + position_events_daily (no re-scan).
   3. For each tunable axis, try ±20% / ±10% deltas, re-aggregate, keep best.
@@ -38,7 +38,7 @@ from ifa.families.ta.params import load_params, reload_params
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger(__name__)
 
-YAML_PATH = Path("ifa/families/ta/params/ta_v2.3.yaml")
+YAML_PATH = Path("ifa/families/ta/params/ta_v2.2.yaml")
 
 # Tunable yaml-driven axes (P2 fully dynamic).
 # Three groups:
@@ -257,7 +257,7 @@ def main():
     # Backup + write
     Path("tmp").mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = Path(f"tmp/ta_v2.3_before_{stamp}.yaml")
+    backup_path = Path(f"tmp/ta_v2.2_before_{stamp}.yaml")
     shutil.copy(YAML_PATH, backup_path)
     log.info("backed up YAML to %s", backup_path)
 

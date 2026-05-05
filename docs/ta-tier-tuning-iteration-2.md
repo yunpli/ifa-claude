@@ -60,7 +60,7 @@ Z3_RANGE_FADE: ~800+ hits
 
 R4 触发频繁(MA60 支撑测试是常见模式),Z3 触发稀少(横盘 60d + spike 是稀缺信号)。两者并存为 portfolio 提供差异化机会。
 
-## 落地参数 (ta_v2.3.yaml)
+## 落地参数 (ta_v2.2.yaml)
 
 新增 setups 段:
 ```yaml

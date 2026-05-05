@@ -108,7 +108,7 @@ n=38, wr 仅 24%, avg 3%。单纯"机构净买入"信号噪声大。
    - O2: lhb_net_buy_pct_float [0.3, 0.5, 0.8, 1.0, 1.5]
 3. 每个候选参数集跑 backtest,选 combined 最大的
 4. **Walk-forward 验证**: 90d-IS 选 → 30d-OOS 看稳定性
-5. 写回 `ta_v2.3.yaml`
+5. 写回 `ta_v2.2.yaml`
 
 **P3 装饰回放**:
 当前 4 月报告样本(reports/ta_evening_2026-04-28.html)已能展示完整新功能,
