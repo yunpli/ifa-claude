@@ -24,9 +24,12 @@ Applies M5.3 governance + M8 winrate scoring + M9 multi-strategy resonance:
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from ifa.families.ta.params import load_params
+
+log = logging.getLogger(__name__)
 from ifa.families.ta.regime.classifier import Regime
 from ifa.families.ta.setups.base import Candidate
 
@@ -135,9 +138,14 @@ def rank(
         if current_regime:
             regime_wr = regime_winrates.get(current_regime)
             if regime_wr is not None and overall_wr and overall_wr > 0:
-                # Continuous boost — scaled by relative regime advantage
+                # Continuous boost — scaled by relative regime advantage.
+                # M10 P2 iteration 3: WIDENED from [-0.05, 0.20] × 0.20 to
+                # [-0.20, 0.50] × 0.50. Driven by 180d regime-breakdown finding
+                # that range_bound (91 days, 62% of window) was Tier A's main
+                # loss source — narrow regime boost wasn't enough to swap setup
+                # composition between trend / range regimes.
                 ratio_r = regime_wr / overall_wr
-                boost = max(-0.05, min(0.20, (ratio_r - 1.0) * 0.20))
+                boost = max(-0.20, min(0.50, (ratio_r - 1.0) * 0.50))
             elif current_regime in suitable:
                 # Cold-start fallback (no per-regime data yet)
                 boost = boost_pp
@@ -259,6 +267,21 @@ def rank(
     a_size = tiers.get("a_size", 10)
     b_size = tiers.get("b_size", 20)
     c_size = tiers.get("c_size", 100)
+
+    # M10 P2 iteration 4 — Regime-aware Tier sizing override.
+    # Alpha is scarce in range_bound and dangerous in distribution_risk —
+    # don't force full 10/20 picks every day. Driven by 180d regime breakdown
+    # showing range_bound (62% of days) drove most of Tier A's loss while
+    # trend regimes were break-even or positive.
+    regime_sizes = rp.get("regime_tier_sizes", {}) or {}
+    if current_regime and current_regime in regime_sizes:
+        rs = regime_sizes[current_regime] or {}
+        if "a" in rs:
+            a_size = int(rs["a"])
+        if "b" in rs:
+            b_size = int(rs["b"])
+        log.debug("regime-aware tier sizes for %s: A=%d B=%d",
+                  current_regime, a_size, b_size)
     conc = (rp_root := load_params()).get("concentration", {}) or {}
     cap_a_per_l2 = conc.get("tier_a_per_l2_max", 99) if conc.get("enabled", False) else 99
     cap_b_per_l2 = conc.get("tier_b_per_l2_max", 99) if conc.get("enabled", False) else 99

@@ -12,6 +12,21 @@ ranker:
     a_size: 10
     b_size: 20
     c_size: 100
+  # M10 P2 iteration 4 — Regime-aware Tier sizing.
+  # When alpha is scarce (range_bound) → cut Tier A to top 5 — only highest
+  # conviction, smaller portfolio. When market dangerous → 0 (no new longs).
+  # When market is trending → keep full 10/20.
+  # Falls back to tiers.a_size/b_size when regime not in this map.
+  regime_tier_sizes:
+    trend_continuation:    {a: 10, b: 20}
+    early_risk_on:         {a: 10, b: 20}
+    sector_rotation:       {a: 8,  b: 16}
+    range_bound:           {a: 5,  b: 15}    # alpha-scarce → halve Tier A
+    weak_rebound:          {a: 5,  b: 15}    # similar choppy regime
+    cooldown:              {a: 3,  b: 10}    # only highest conviction
+    emotional_climax:      {a: 3,  b: 10}    # frothy — be picky
+    distribution_risk:     {a: 0,  b: 5}     # do not open new longs
+    high_difficulty:       {a: 0,  b: 5}     # mixed signals — wait
 universe:
   min_avg_amount_yi: 0.2          # 20d avg amount 下限：0.2 亿元 = 2000 万元
   min_coverage_pct: 90            # 20d 内有 raw_daily 行的天数比例（剔除停牌）
