@@ -195,47 +195,62 @@
       </header>
       <div class="ifa-tone" style="border-left-color: var(--accent-2);">
         <p class="ifa-tone__summary">
-          系统全市场扫描 <b>19 个独立策略</b>（分 7 族），每个策略独立判定个股是否命中。
+          系统全市场扫描 <b>30 个独立策略</b>（分 11 族），每个策略独立判定个股是否命中。
           同一支股票若被多个策略同时命中，**多策略共振 = 高 conviction 信号**。
+          每个候选股进一步基于 ATR 计算<b>挂单价 / 止损 / 目标价</b>，机构交易员可直接执行。
         </p>
 
         <table class="ifa-panel" style="margin-top:14px; font-size:12.5px;">
           <thead>
-            <tr><th style="width:10%">族</th><th>策略</th></tr>
+            <tr><th style="width:14%">族</th><th>策略</th></tr>
           </thead>
           <tbody>
             <tr><td><b>T 趋势</b></td><td>突破启动 · 回踩续涨 · 加速冲刺</td></tr>
             <tr><td><b>P 回踩</b></td><td>20 日线回踩 · 缺口回补 · 紧密整理</td></tr>
-            <tr><td><b>R 反转</b></td><td>双底反转 · 头肩底 · 锤子线</td></tr>
+            <tr><td><b>R 反转</b></td><td>双底反转 · 头肩底 · 锤子线 · MA60 支撑反弹</td></tr>
             <tr><td><b>F 形态</b></td><td>旗形整理 · 三角收敛 · 矩形整理</td></tr>
             <tr><td><b>V 量价</b></td><td>量价齐升 · 缩量蓄势</td></tr>
             <tr><td><b>S 板块</b></td><td>板块共振 · 龙头跟风 · 落后补涨</td></tr>
             <tr><td><b>C 筹码</b></td><td>筹码集中 · 筹码松动（警示）</td></tr>
+            <tr><td><b>O 主力资金</b></td><td>机构连续抢筹 · 龙虎榜机构净买入 · 涨停封单结构</td></tr>
+            <tr><td><b>D 顶部反转</b><span class="ifa-tone__bullet-dim">（警示）</span></td><td>双顶 · 头肩顶 · 流星线（不进 Tier A/B，§13 风险扫描）</td></tr>
+            <tr><td><b>Z 统计</b></td><td>极端 Z-score · 超卖反弹 · 横盘 fade-rally</td></tr>
+            <tr><td><b>E 事件</b></td><td>业绩预告 / 快报 / 披露窗口催化</td></tr>
           </tbody>
         </table>
 
         <p class="ifa-tone__summary" style="margin-top:14px;">
-          <b>综合分计算</b>（决定星级、决定是否进观察池）：
+          <b>综合分计算</b>（决定星级、决定是否进 Tier A/B）：
         </p>
         <ul class="ifa-tone__bullets">
           <li class="ifa-tone__bullet">
             <span class="ifa-tone__bullet-dim">基础</span>
-            <span class="ifa-tone__bullet-text">取该股所有命中策略中的最高分（已含 trigger 累加 + 体制加成 + 胜率折算）</span>
+            <span class="ifa-tone__bullet-text">取该股所有命中策略中的最高分（trigger 累加 + 连续体制加成 + 胜率折算）</span>
             <span class="ifa-tone__bullet-conf">MAX(scores)</span>
           </li>
           <li class="ifa-tone__bullet">
-            <span class="ifa-tone__bullet-dim">共振加成</span>
-            <span class="ifa-tone__bullet-text">每多一个不同 <b>族</b> 命中加 +0.05（同族不重复算），最多 +0.15</span>
-            <span class="ifa-tone__bullet-conf">+0.05/族</span>
+            <span class="ifa-tone__bullet-dim">Bayesian 共振</span>
+            <span class="ifa-tone__bullet-text">次族 setup 按各自胜率加权累加（高胜率族贡献大），最多 3 个次族贡献</span>
+            <span class="ifa-tone__bullet-conf">+0.08/0.05/0.03</span>
           </li>
           <li class="ifa-tone__bullet">
-            <span class="ifa-tone__bullet-dim">体制加成</span>
-            <span class="ifa-tone__bullet-text">当日体制契合该策略历史擅长场景，已加在基础分内</span>
-            <span class="ifa-tone__bullet-conf">+0.10</span>
+            <span class="ifa-tone__bullet-dim">体制连续加成</span>
+            <span class="ifa-tone__bullet-text">基于该策略当前体制 60d 胜率 vs 整体胜率比值的连续 boost</span>
+            <span class="ifa-tone__bullet-conf">[-0.20, +0.50]</span>
+          </li>
+          <li class="ifa-tone__bullet">
+            <span class="ifa-tone__bullet-dim">边际自调</span>
+            <span class="ifa-tone__bullet-text">基于该策略近 60 日 combined T+15 边际自动加权，弱边际 setup 自动降权</span>
+            <span class="ifa-tone__bullet-conf">× [0.80, 1.20]</span>
+          </li>
+          <li class="ifa-tone__bullet">
+            <span class="ifa-tone__bullet-dim">板块乘子</span>
+            <span class="ifa-tone__bullet-text">SmartMoney 板块净流入排名 + cycle phase + 置信度合成的板块质量乘子</span>
+            <span class="ifa-tone__bullet-conf">× [0.60, 1.00]</span>
           </li>
           <li class="ifa-tone__bullet">
             <span class="ifa-tone__bullet-dim">胜率折算</span>
-            <span class="ifa-tone__bullet-text">按策略近 60 日 T+10 实际胜率打折（30% 不打折、15% 折半、地板 40%）</span>
+            <span class="ifa-tone__bullet-text">按策略近 60 日 T+15 实际胜率打折（30% 不打折、15% 折半、地板 40%）</span>
             <span class="ifa-tone__bullet-conf">× 胜率/30%</span>
           </li>
           <li class="ifa-tone__bullet">

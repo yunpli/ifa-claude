@@ -69,7 +69,6 @@ def build_evening_report(engine: Engine, on_date: date,
         if narrative:
             sections.append({"type": "narrative", "title": "§02-N 体制解读",
                              "body": narrative})
-    sections.append(methodology)
     sections.append(sector_flow_gate)             # §04 — macro filter, before Tier A/B
     sections.extend([tier_a, tier_b, strategy_spotlight])
     # NOTE: §14 hypotheses removed — redundant with §04 重点池 (same picks)
@@ -93,6 +92,10 @@ def build_evening_report(engine: Engine, on_date: date,
         if narrative:
             sections.append({"type": "narrative", "title": "§13-N 策略评论",
                              "body": narrative})
+    # Methodology block placed at the end (before disclaimer) so the
+    # actionable picks lead the report and the "how it works" explainer
+    # is reference material readers can scroll to.
+    sections.append(methodology)
     sections.append(disclaimer)
 
     # Banner-level fields (consumed by template header)
