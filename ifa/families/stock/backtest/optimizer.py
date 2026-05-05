@@ -66,6 +66,98 @@ def fit_pre_report_overlay(
     )
 
 
+def fit_global_preset_via_panel(
+    panel_rows,
+    *,
+    as_of_date: dt.date,
+    base_params: Mapping[str, Any],
+    universe: str = "top_liquidity_500",
+    max_candidates: int = 256,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+    progress_every: int = 8,
+) -> "TuningArtifact":
+    """Tune global preset by replaying a pre-built PIT panel.
+
+    This is the production-aligned tuner: it scores every candidate overlay using the REAL
+    `compute_strategy_matrix → build_decision_layer` signal map (cached in panel rows),
+    not a surrogate. Search space includes `decision_layer.horizons.*` which are the
+    actually load-bearing params for 5/10/20 decisions.
+    """
+    from .panel_evaluator import evaluate_overlay_on_panel, panel_matrix_from_rows
+    from .objectives import panel_only_overlay_bounds
+
+    panel = panel_matrix_from_rows(panel_rows)
+    bounds = panel_only_overlay_bounds()
+    # YAML overrides
+    raw = base_params.get("tuning", {}).get("search_bounds", {})
+    if isinstance(raw, Mapping):
+        for key, value in raw.items():
+            if isinstance(value, (list, tuple)) and len(value) == 2 and key in bounds:
+                low, high = float(value[0]), float(value[1])
+                if low < high:
+                    bounds[str(key)] = (low, high)
+    keys = list(bounds.keys())
+
+    seed = f"{universe}:{as_of_date:%Y%m%d}:panel_v1"
+    rng = random.Random(int(hashlib.sha256(seed.encode()).hexdigest()[:12], 16))
+
+    # Generate candidates: gaussian around current center, clipped to bounds
+    candidates: list[dict[str, Any]] = [{}]   # baseline as candidate 0
+    for _ in range(max(0, max_candidates - 1)):
+        overlay: dict[str, Any] = {}
+        for key in keys:
+            low, high = bounds[key]
+            center_val = _get_param(base_params, key)
+            center = float(center_val) if center_val is not None else (low + high) / 2.0
+            width = (high - low) * 0.22
+            value = max(low, min(high, rng.gauss(center, width)))
+            overlay[key] = round(value, 6)
+        candidates.append(overlay)
+
+    started = time.monotonic()
+    best_overlay: dict[str, Any] = {}
+    best_metrics: dict[str, Any] = {}
+    best_score = -999.0
+    for idx, overlay in enumerate(candidates, start=1):
+        metrics = evaluate_overlay_on_panel(panel, overlay, base_params)
+        score = float(metrics.get("composite_objective", {}).get("score", 0.0))
+        if score > best_score:
+            best_overlay = dict(overlay)
+            best_metrics = metrics
+            best_score = score
+        if on_progress and (idx == 1 or idx == len(candidates) or idx % max(1, progress_every) == 0):
+            elapsed = time.monotonic() - started
+            eta = elapsed / idx * max(len(candidates) - idx, 0) if idx else 0.0
+            on_progress({
+                "candidate": idx,
+                "total": len(candidates),
+                "score": round(score, 6),
+                "best_score": round(best_score, 6),
+                "elapsed_seconds": round(elapsed, 2),
+                "eta_seconds": round(eta, 2),
+            })
+
+    metrics = dict(best_metrics)
+    metrics["panel_n_rows"] = panel.n_rows
+    metrics["search_keys"] = len(keys)
+    return TuningArtifact(
+        ts_code="__GLOBAL__",
+        as_of_trade_date=as_of_date,
+        kind="global_preset",
+        base_param_hash=params_hash(dict(base_params)),
+        overlay=best_overlay,
+        objective_score=best_score,
+        metrics=metrics,
+        candidate_count=len(candidates),
+        history_start=None,
+        history_end=None,
+        history_rows=panel.n_rows,
+        created_at=dt.datetime.now(dt.timezone.utc),
+        namespace=f"stock_edge/global_preset/panel/{universe}/{as_of_date:%Y%m%d}",
+        objective_version=str(metrics.get("objective_version", "stock_edge_5_10_20_v1")),
+    )
+
+
 def fit_global_preset(
     bars_by_stock: Mapping[str, pd.DataFrame],
     *,
@@ -665,11 +757,15 @@ def _first_path_event(future: pd.DataFrame, *, target_price: float, stop_price: 
     return None
 
 
+_ROOT_LEVEL_PREFIXES = ("risk.", "decision_layer.", "tuning.", "runtime.", "data.", "intraday.", "cache.", "report.", "model.", "position_sizing.")
+
+
 def _get_param(params: Mapping[str, Any], dotted_key: str) -> Any:
-    current: Any = params.get("strategy_matrix", params)
     parts = dotted_key.split(".")
-    if parts[0] == "risk":
-        current = params
+    if any(dotted_key.startswith(p) for p in _ROOT_LEVEL_PREFIXES):
+        current: Any = params
+    else:
+        current = params.get("strategy_matrix", params)
     for part in parts:
         if not isinstance(current, Mapping) or part not in current:
             return None

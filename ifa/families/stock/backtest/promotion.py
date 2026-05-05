@@ -26,6 +26,8 @@ ALLOWED_PROMOTION_PREFIXES = (
     "cluster_weights.",
     "signal_weights.",
     "risk.",
+    "decision_layer.",
+    "ta_family_weights.",
 )
 
 
@@ -163,7 +165,8 @@ def _within_bounds(key: str, value: Any, bounds: Mapping[str, tuple[float, float
 
 
 def _get_dotted(params: Mapping[str, Any], dotted_key: str) -> Any:
-    current: Any = params if dotted_key.startswith(("risk.", "t0.", "model.", "runtime.", "data.", "intraday.", "cache.", "report.", "tuning.")) else params.get("strategy_matrix", {})
+    root_prefixes = ("risk.", "t0.", "model.", "runtime.", "data.", "intraday.", "cache.", "report.", "tuning.", "decision_layer.", "ta_family_weights.", "position_sizing.")
+    current: Any = params if dotted_key.startswith(root_prefixes) else params.get("strategy_matrix", {})
     for part in dotted_key.split("."):
         if not isinstance(current, Mapping) or part not in current:
             return None

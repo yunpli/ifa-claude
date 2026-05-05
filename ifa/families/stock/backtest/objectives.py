@@ -164,7 +164,72 @@ def build_composite_objective(
 
 
 def continuous_overlay_bounds() -> dict[str, tuple[float, float]]:
-    """Return first-pass continuous parameter bounds for overlay search."""
+    """Return first-pass continuous parameter bounds for overlay search.
+
+    Includes both the legacy strategy_matrix-level weights AND the actually-load-bearing
+    decision_layer.horizons.<h>.weights/base_score/raw_edge_scale/thresholds. The legacy
+    weights (signal_weights/cluster_weights) feed `_apply_param_weights` inside the matrix
+    and only nudge `aggregate_score`; the production 5/10/20 decisions are decided by
+    decision_layer.* params, which is what panel-based tuning should focus on.
+    """
+    bounds = _base_overlay_bounds()
+    bounds.update(_decision_layer_bounds())
+    return bounds
+
+
+def panel_only_overlay_bounds() -> dict[str, tuple[float, float]]:
+    """Bounds restricted to params that actually affect cached signal aggregation.
+
+    A pre-built replay panel caches signal SCORES computed under baseline matrix params.
+    Re-aggregating those scores depends only on `decision_layer.horizons.*` (weights /
+    base_score / raw_edge_scale / thresholds). Legacy `signal_weights.*` / `cluster_weights.*`
+    / `smooth_scoring.*` would require rebuilding the panel to take effect, so panel-based
+    tuners must restrict search to this slice.
+    """
+    return _decision_layer_bounds()
+
+
+def _decision_layer_bounds() -> dict[str, tuple[float, float]]:
+    """Decision-layer search bounds: per-horizon signal weights + scoring params + thresholds.
+
+    Drawn from `decision_layer.DEFAULT_KEYS` + reasonable production-grade band:
+    - weights: [0.30, 1.80] around 1.0 baseline
+    - base_score: [0.45, 0.55] — small wiggle around 0.50
+    - raw_edge_scale: [0.30, 0.70] — controls how far edge translates to score
+    - thresholds.buy: [0.62, 0.78] etc. — preserve ordering buy > watch > wait > avoid via post-clip
+    """
+    from ifa.families.stock.decision_layer import DEFAULT_KEYS
+
+    out: dict[str, tuple[float, float]] = {}
+    horizons = ("5d", "10d", "20d")
+    for h in horizons:
+        keys = DEFAULT_KEYS.get(h, {})
+        for key in list(keys.get("positive", [])) + list(keys.get("risk", [])):
+            out[f"decision_layer.horizons.{h}.weights.{key}"] = (0.30, 1.80)
+        out[f"decision_layer.horizons.{h}.weights.risk_penalty_weight"] = (0.50, 1.50)
+        out[f"decision_layer.horizons.{h}.base_score"] = (0.45, 0.55)
+        out[f"decision_layer.horizons.{h}.raw_edge_scale"] = (0.30, 0.70)
+        # Thresholds — bounds chosen to keep ordering buy > watch > wait > avoid
+        if h == "5d":
+            out[f"decision_layer.horizons.{h}.thresholds.buy"] = (0.62, 0.78)
+            out[f"decision_layer.horizons.{h}.thresholds.watch"] = (0.50, 0.62)
+            out[f"decision_layer.horizons.{h}.thresholds.wait"] = (0.40, 0.50)
+            out[f"decision_layer.horizons.{h}.thresholds.avoid"] = (0.32, 0.42)
+        elif h == "10d":
+            out[f"decision_layer.horizons.{h}.thresholds.buy"] = (0.60, 0.76)
+            out[f"decision_layer.horizons.{h}.thresholds.watch"] = (0.48, 0.60)
+            out[f"decision_layer.horizons.{h}.thresholds.wait"] = (0.38, 0.48)
+            out[f"decision_layer.horizons.{h}.thresholds.avoid"] = (0.30, 0.40)
+        else:  # 20d
+            out[f"decision_layer.horizons.{h}.thresholds.buy"] = (0.58, 0.74)
+            out[f"decision_layer.horizons.{h}.thresholds.watch"] = (0.46, 0.58)
+            out[f"decision_layer.horizons.{h}.thresholds.wait"] = (0.36, 0.46)
+            out[f"decision_layer.horizons.{h}.thresholds.avoid"] = (0.28, 0.38)
+    return out
+
+
+def _base_overlay_bounds() -> dict[str, tuple[float, float]]:
+    """Legacy strategy_matrix-level overlay bounds (kept for backward compatibility)."""
     return {
         "aggregate.raw_edge_scale": (0.25, 0.85),
         "aggregate.buy_threshold": (0.58, 0.78),
