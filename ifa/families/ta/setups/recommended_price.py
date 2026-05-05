@@ -48,8 +48,10 @@ _PULLBACK_SETUPS = {
 }
 _REVERSAL_SETUPS = {
     "R1_DOUBLE_BOTTOM", "R2_HS_BOTTOM", "R3_HAMMER",
+    "R4_SUPPORT_BOUNCE",   # M10 P2 Q2 — MA60 bounce (mean-reversion long)
     "Z1_ZSCORE_EXTREME",   # long-direction case; for short z, treat at close (handled below)
     "Z2_OVERSOLD_REBOUND",
+    "Z3_RANGE_FADE",       # M10 P2 Q2 — fade-rally in range (deep limit, wait retrace)
 }
 
 

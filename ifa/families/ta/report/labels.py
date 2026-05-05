@@ -65,6 +65,8 @@ SETUP_ZH: dict[str, dict[str, str]] = {
     "D3_SHOOTING_STAR":       {"name": "流星线（警示）", "family": "顶部反转"},
     "Z1_ZSCORE_EXTREME":      {"name": "极端 Z-score", "family": "统计"},
     "Z2_OVERSOLD_REBOUND":    {"name": "超卖反弹", "family": "统计"},
+    "Z3_RANGE_FADE":          {"name": "横盘 fade-rally", "family": "统计"},
+    "R4_SUPPORT_BOUNCE":      {"name": "MA60 支撑反弹", "family": "反转"},
     "E1_EVENT_CATALYST":      {"name": "事件催化", "family": "事件"},
 }
 

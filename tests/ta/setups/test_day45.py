@@ -246,20 +246,22 @@ class TestC2ChipLoose:
 # ──────────────────────── Registry sanity ────────────────────────
 class TestRegistryDay45:
     def test_all_registered(self):
-        # Original 19 (T/P/R/F/V/S/C) + M10 expansion 9 (O/D/Z/E) = 28
+        # Original 19 (T/P/R/F/V/S/C) + M10 expansion 9 (O/D/Z/E)
+        # + M10 P2 Q2 add 2 (Z3, R4) = 30
         expected = {
             "T1_BREAKOUT", "T2_PULLBACK_RESUME", "T3_ACCELERATION",
             "P1_MA20_PULLBACK", "P2_GAP_FILL", "P3_TIGHT_CONSOLIDATION",
             "R1_DOUBLE_BOTTOM", "R2_HS_BOTTOM", "R3_HAMMER",
+            "R4_SUPPORT_BOUNCE",
             "F1_FLAG", "F2_TRIANGLE", "F3_RECTANGLE",
             "V1_VOL_PRICE_UP", "V2_QUIET_COIL",
             "S1_SECTOR_RESONANCE", "S2_LEADER_FOLLOWTHROUGH", "S3_LAGGARD_CATCHUP",
             "C1_CHIP_CONCENTRATED", "C2_CHIP_LOOSE",
             "O1_INST_PERSISTENT_BUY", "O2_LHB_INST_BUY", "O3_LIMIT_SEAL_STRENGTH",
             "D1_DOUBLE_TOP", "D2_HS_TOP", "D3_SHOOTING_STAR",
-            "Z1_ZSCORE_EXTREME", "Z2_OVERSOLD_REBOUND",
+            "Z1_ZSCORE_EXTREME", "Z2_OVERSOLD_REBOUND", "Z3_RANGE_FADE",
             "E1_EVENT_CATALYST",
         }
         assert set(SETUPS.keys()) == expected, \
             f"missing: {expected - set(SETUPS.keys())}, extra: {set(SETUPS.keys()) - expected}"
-        assert len(SETUPS) == 28
+        assert len(SETUPS) == 30

@@ -1,12 +1,16 @@
-"""TA setups — 28 candidate detectors organized by family.
+"""TA setups — 30 candidate detectors organized by family.
 
 Families:
-    T1-T3 trend       · P1-P3 pullback     · R1-R3 reversal
+    T1-T3 trend       · P1-P3 pullback     · R1-R4 reversal (R4 = MA60 bounce)
     F1-F3 pattern     · V1-V2 volume       · S1-S3 sector     · C1-C2 chip
-    O1-O3 order-flow  · D1-D3 top reversal · Z1-Z2 statistical · E1 event
+    O1-O3 order-flow  · D1-D3 top reversal
+    Z1-Z3 statistical (Z3 = range fade-rally) · E1 event
 
 Each setup is a callable `(SetupContext) -> Candidate | None`. Use the
 `SETUPS` registry to iterate or look up by name.
+
+M10 P2 Q2 — added Z3 (range-fade) + R4 (MA60 bounce) for mean-reversion
+edge in choppy / range-bound regimes where T1/T3/V1 lose.
 """
 from __future__ import annotations
 
@@ -38,6 +42,8 @@ from ifa.families.ta.setups.d2_hs_top import D2_HS_TOP
 from ifa.families.ta.setups.d3_shooting_star import D3_SHOOTING_STAR
 from ifa.families.ta.setups.z1_zscore_extreme import Z1_ZSCORE_EXTREME
 from ifa.families.ta.setups.z2_oversold_rebound import Z2_OVERSOLD_REBOUND
+from ifa.families.ta.setups.z3_range_fade import Z3_RANGE_FADE
+from ifa.families.ta.setups.r4_support_bounce import R4_SUPPORT_BOUNCE
 from ifa.families.ta.setups.e1_event_catalyst import E1_EVENT_CATALYST
 
 SETUPS: dict[str, SetupFn] = {
@@ -68,6 +74,8 @@ SETUPS: dict[str, SetupFn] = {
     "D3_SHOOTING_STAR": D3_SHOOTING_STAR,
     "Z1_ZSCORE_EXTREME": Z1_ZSCORE_EXTREME,
     "Z2_OVERSOLD_REBOUND": Z2_OVERSOLD_REBOUND,
+    "Z3_RANGE_FADE": Z3_RANGE_FADE,
+    "R4_SUPPORT_BOUNCE": R4_SUPPORT_BOUNCE,
     "E1_EVENT_CATALYST": E1_EVENT_CATALYST,
 }
 

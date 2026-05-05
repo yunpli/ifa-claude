@@ -256,3 +256,15 @@ setups:
 
   E1_EVENT_CATALYST:
     days_to_disclosure_max: 5
+
+  Z3_RANGE_FADE:
+    box_max_pct: 0.25                  # 60d range ≤ 25% (range-bound)
+    today_min_pct: 4.0                 # today's spike ≥ 4%
+    near_top_quartile: 0.75            # close in upper quartile of 60d range
+    rsi_overbought: 70                 # confirmation
+
+  R4_SUPPORT_BOUNCE:
+    above_ma60_min_x: 1.005             # close ≥ 1.005 × ma60 (back above support)
+    today_pct_min: 1.5                  # today bounce ≥ 1.5%
+    drop_floor_x: 0.85                  # not catastrophic: close ≥ 0.85 × close[-60]
+    touch_lookback_days: 5              # ma60 touched within last N days
