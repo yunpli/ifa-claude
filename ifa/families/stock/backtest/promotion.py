@@ -358,6 +358,47 @@ def evaluate_promotion_gates(
 
     gates = [g1, g2, g6, g7]
 
+    # ── G3: Sharpe-like ratio non-degradation (T2.3) ─────────
+    g3_tolerance = float(cfg.get("g3_sharpe_tolerance", 0.05))
+    g3_per_horizon: dict[str, bool] = {}
+    g3_failures: list[str] = []
+    g3_ratios: dict[str, dict[str, float]] = {}
+    for h in (5, 10, 20):
+        cand = cand_per_horizon[h]
+        base = base_per_horizon[h]
+        cand_ret = float(cand.get("avg_return", 0.0))
+        cand_dd = max(0.01, float(cand.get("avg_drawdown", 0.01)))
+        base_ret = float(base.get("avg_return", 0.0))
+        base_dd = max(0.01, float(base.get("avg_drawdown", 0.01)))
+        cand_ratio = cand_ret / cand_dd
+        base_ratio = base_ret / base_dd
+        ratio_delta = cand_ratio - base_ratio
+        passed_h = ratio_delta >= -g3_tolerance
+        g3_per_horizon[f"{h}d"] = passed_h
+        g3_ratios[f"{h}d"] = {
+            "baseline": round(base_ratio, 4),
+            "tuned": round(cand_ratio, 4),
+            "delta": round(ratio_delta, 4),
+        }
+        if not passed_h:
+            g3_failures.append(
+                f"{h}d ratio {cand_ratio:+.3f} < base {base_ratio:+.3f} - {g3_tolerance}"
+            )
+    all_pass_g3 = all(g3_per_horizon.values())
+    g3 = GateResult(
+        gate_id="G3",
+        name="sharpe_like_ratio",
+        passed=all_pass_g3,
+        value=min(g3_ratios[f"{h}d"]["delta"] for h in (5, 10, 20)),
+        threshold=-g3_tolerance,
+        detail="; ".join(
+            f"{h} ratio Δ={g3_ratios[h]['delta']:+.3f} (base {g3_ratios[h]['baseline']:+.3f} → tuned {g3_ratios[h]['tuned']:+.3f})"
+            for h in ("5d", "10d", "20d")
+        ),
+        per_horizon=g3_per_horizon,
+    )
+    gates.append(g3)
+
     # ── G8: Search convergence stat (T2.4) ───────────────────
     # Read from artifact_metrics["search_history"] (preferred) or candidate_metrics
     src = artifact_metrics if artifact_metrics is not None else candidate_metrics
