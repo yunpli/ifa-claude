@@ -1,19 +1,33 @@
 # TA Strategy Deep Dive — 技术策略晚盘报告家族
 
-> **状态**：V2.2 已实现 + 持续优化中
+> **状态**：V2.2.1 (M10 P0+P1+P2) 已落地 + 经 180d walk-forward 验证
+> **接手必读**: 📌 [`ta-handover-2026-05-04.md`](ta-handover-2026-05-04.md)
 > **定位**：iFA 第一个**自上而下、跨家族汇聚**型策略产品 — 不是新策略，而是**策略元层**
 > **关键差异**：不替代 Smart Money、不放大 Ningbo、不黑盒 AI 选股，是**纪律化的次日交易准备文档**
 >
-> **打分原则**：所有 28 个策略的内部加分均为 **连续 strength function**（非 boolean）；
-> 跨族共振 bonus 按"次族强度 × 递减权重"累计。M9.5 增强：cross-sectional rank
-> + ATR-normalized magnitudes。详见 [`scoring-principles.md`](scoring-principles.md)。
+> **打分原则**：所有 30 个策略的内部加分 + ranker 多步加权均为 **连续 function**（非 boolean）；
+> 跨族 Bayesian 共振 + 连续 regime boost + 边际自调 + 板块乘子 + 集中度约束 + regime-aware Tier sizing。
+> 详见 [`scoring-principles.md`](scoring-principles.md) + [`ta-tier-tuning-iteration-1.md`](ta-tier-tuning-iteration-1.md) + [`ta-tier-tuning-iteration-2.md`](ta-tier-tuning-iteration-2.md)。
 >
-> **M10 扩张（2026-05-04）**：原 19 setup（7 族）→ **28 setup（11 族）**。新增 4 族：
-> · **O 主力资金**（O1 机构连续抢筹 / O2 龙虎榜机构净买入 / O3 涨停封单结构）
-> · **D 顶部反转**（D1 双顶 / D2 头肩顶 / D3 流星线 — 警示型，进 §13 风险扫描而非 Tier A/B）
-> · **Z 统计**（Z1 极端 z-score / Z2 超卖反弹）
-> · **E 事件**（E1 业绩预告/快报/披露窗口催化 — 数据由 `ta.event_signal_daily` 承载，
->   ETL: `ifa.families.ta.etl.event_etl` 拉 Tushare `forecast`/`express`/`disclosure_date`）
+> **M10 全景 (2026-05-04)**：
+> - **P0**: D 族双轨 universe + ATR 三段位推荐价 + Tier 折叠 + §13 红绿灯 dashboard
+> - **P1**: 持仓状态机 (fill/stop/target/T+15) + walk-forward 回测引擎 + 黑天鹅过滤 + 基本面二筛 + 集中度约束
+> - **P2**: 全 50+ gate 阈值 yaml 化 + Z3+R4 mean-reversion + 温和 Q3 自动降权 + regime-aware Tier sizing
+> - **数据**: factor_pro / cyq_perf 回填 180d (Jun 2025 → Apr 2026)
+> - **验证**: Tier A 180d realized -0.44%(vs market -1.11%, 跑赢 +0.67pp);Tier B +0.26pp。60d 同步跑赢 +0.64pp。
+>
+> **30 setup / 11 族 总览**：
+> · **T 趋势**: T1 突破 / T2 回踩续涨 / T3 加速
+> · **P 回踩**: P1 MA20 / P2 缺口 / P3 紧密整理
+> · **R 反转**: R1 双底 / R2 头肩底 / R3 锤子线 / R4 MA60 支撑反弹 (M10 mean-reversion)
+> · **F 形态**: F1 旗形 / F2 三角 / F3 矩形
+> · **V 量价**: V1 量价齐升 / V2 缩量蓄势
+> · **S 板块**: S1 共振 / S2 跟风 / S3 落后补涨
+> · **C 筹码**: C1 集中 / C2 松动 (警示)
+> · **O 主力资金** (M10): O1 机构连续抢筹 / O2 龙虎榜机构净买入 / O3 涨停封单结构
+> · **D 顶部反转** (M10, 警示): D1 双顶 / D2 头肩顶 / D3 流星线 (跑 full liquid universe → warnings_daily,不进 Tier A/B)
+> · **Z 统计** (M10): Z1 极端 z-score / Z2 超卖反弹 / Z3 横盘 fade-rally (mean-reversion)
+> · **E 事件** (M10): E1 业绩预告/快报/披露窗口催化
 >
 > **历史重点池关注（§08）**：每日 Tier A（重点池）选股保留过去 15 个交易日的
 > 跟踪记录，展示 T+1/T+3/T+5/T+10 实际收益（仅观察、不止盈止损）。冷启动

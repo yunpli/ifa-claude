@@ -1,7 +1,14 @@
 # IFA SmartMoney — Codex/Agents 上下文
 
-> **更新**: 2026-05-05
-> **当前阶段**: SmartMoney A 阶段全部完成；TA family M10 扩张完成（28 setup / 11 族）→ 下一步 TA P0（双轨 universe + ATR 推荐价 + Tier 折叠 + 28-setup 报告适配）
+> **更新**: 2026-05-05 (Claude session 收口,等 Codex 接手 360d 验证)
+> **接手必读**: 📌 [`docs/ta-handover-2026-05-04.md`](docs/ta-handover-2026-05-04.md) — Claude 写的完整 TA family handover,包括做了什么、回测结果、调参演进、还有什么没做。
+> **TA deep-dive**: [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md)
+> **当前状态**:
+> - TA M10 P0+P1+P2 (4 次调参 iteration) 已完成 + push,head commit `dc56965`
+> - 30 setups / 11 families / 180d 真实持仓回测,Tier A 跑赢 universe +0.67pp
+> - 用户会 terminal 跑 `scripts/ta_backfill_360d.py` (~55-60 min) 扩到 360d
+> - 跑完后:`uv run python -m ifa.cli ta tier-perf --start 2024-12-01 --end 2026-04-14` 验证 alpha 在 360d 仍 ≥ +0.5pp
+> - 如果 robust → production-ready;否则诊断哪些参数过拟合
 
 ---
 

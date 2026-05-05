@@ -1,7 +1,10 @@
 # IFA SmartMoney — Claude Code 上下文
 
-> **更新**: 2026-05-04
-> **当前阶段**: SmartMoney A 阶段全部完成；TA family M10 扩张完成（28 setup / 11 族）→ 下一步 TA P0（双轨 universe + ATR 推荐价 + Tier 折叠 + 28-setup 报告适配）
+> **更新**: 2026-05-04 (M10 P0+P1+P2 完成,等 360d backfill)
+> **接手必读**: 📌 [`docs/ta-handover-2026-05-04.md`](docs/ta-handover-2026-05-04.md) — 完整接手 context;做了什么、回测结果、参数调优演进、还有什么没做。
+> **TA deep-dive**: [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md)
+> **TA tuning history**: [`docs/ta-tier-tuning-iteration-1.md`](docs/ta-tier-tuning-iteration-1.md) + [`docs/ta-tier-tuning-iteration-2.md`](docs/ta-tier-tuning-iteration-2.md)
+> **当前状态**: 30 setups / 11 families / 180d 验证 Tier A 跑赢 universe +0.67pp / Tier B +0.26pp。等用户 terminal 跑 `scripts/ta_backfill_360d.py` 后做最终 robust 验证。
 
 ---
 
