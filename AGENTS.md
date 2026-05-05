@@ -32,9 +32,9 @@
 
 ### Stock Edge / 个股作战室当前实现记录（Codex 2026-05-05）
 
-- **最新 handover（调参重点）**：`docs/stock_edge_v2_2_tuning_handover_2026_05_05.md` 已记录 2026-05-05 的数据补足、全局 preset、单股 overlay、artifact 路径、报告落库校验和下一轮 review 清单。下一位 agent 接手 Stock Edge 调参前必须先读这个文件。
-- **提交状态**：Stock Edge v2.2 三周期主实现已 commit/push 到 `origin/main`，commit `5a578a6` (`Implement Stock Edge v2.2 decision layer`)。handover 文档为后续补充提交。
-- **调参机制口径**：当前调参不会自动改写 `ifa/families/stock/params/stock_edge_v2.2.yaml`。YAML 是 baseline 和搜索边界；全局 preset / 单股 overlay 的最优参数写到 `/Users/neoclaw/claude/ifaenv/models/stock/tuning/**/*.json`，报告运行时通过 `apply_param_overlay()` 叠加 JSON overlay。
+- **最新 handover（调参治理重点）**：`docs/stock_edge_v2_2_tuning_governance_handover_2026_05_05.md` 是当前最新接手入口；旧 `docs/stock_edge_v2_2_tuning_handover_2026_05_05.md` 已标记 superseded，只能作历史背景。
+- **提交状态**：Stock Edge v2.2 三周期主实现已 commit/push 到 `origin/main`，commit `5a578a6`；调参治理修正已 commit/push，commit `9b4b4a0` (`Refactor Stock Edge tuning governance`)。
+- **调参机制口径**：YAML 是 baseline 和搜索边界；global preset 实验阶段仍写 JSON artifact，但经过验证后必须通过 `scripts/stock_edge_promote_global_preset.py` 生成可审计 YAML patch / baseline variant 并人工晋升。single-stock overlay 只作为 runtime JSON 局部适配，永远不写回 YAML。
 - **调参 review 历史风险（已修）**：此前 `prepare_report_params()` 没有先读取 `global_preset/__GLOBAL__`，optimizer/objectives 也有 `40d` 主 objective 遗留；这些已在 2026-05-05 调参治理修正中处理。下一轮 review 重点转为：global preset 是否应晋升 YAML baseline、objective 权重是否经过 OOS 验证、是否需要更强搜索器/校准器。
 - **2026-05-05 调参治理修正**：已补 `docs/stock_edge_v2_2_tuning_architecture_review.md`、`docs/stock_edge_v2_2_5_10_20_objective_refactor.md`、`docs/stock_edge_v2_2_global_preset_promotion.md`、`docs/stock_edge_v2_2_strategy_tuning_coverage.md`、`docs/stock_edge_v2_2_tuning_runtime_handoff.md`。当前 global preset 兼容时会先叠加，single overlay 再覆盖；objective 主路径改为 `stock_edge_5_10_20_v1`，40d 只做 legacy audit；新增 `scripts/stock_edge_promote_global_preset.py` 用于 emit/apply 可审计 YAML patch，默认不静默修改 YAML。
 - **产品命名**：原 `stock intel` 改为 **Stock Edge（个股作战室）**；代码继续复用 `ifa/families/stock/**`，不要新建平行 `stockedge` package。
@@ -42,13 +42,13 @@
 - **as-of 规则**：交易日北京时间 15:00 前用 T-1，15:00 后用当天；非交易日用最近已完成交易日。
 - **默认调参**：默认报告会先走 `prepare_report_params()`；若 10 天 TTL 内已有兼容单股 overlay 则复用，否则做单股 pre-report overlay，再生成报告。周末全市场/top-liquidity preset 与单股 overlay 都是独立 script/CLI，可被外部系统单独调用。
 - **当前策略数**：`IMPLEMENTED_STRATEGIES` 已到 85 个；其中 84 个进入策略矩阵打分，1 个为报告层 `scenario_tree_llm`。覆盖规则/统计/TA/SmartMoney/Research/ML/DL(Kronos)/LLM cache/execution。新增重点模块包括 `historical_replay_edge`、`target_stop_replay`、`entry_fill_replay`、`liquidity_slippage`、`t0_uplift`、`flow_persistence_decay`、`analog_kronos_nearest_neighbors`、`kronos_path_cluster_transition`、`right_tail_meta_gbm`、`temporal_fusion_sequence_ranker`、`target_stop_survival_model`、`stop_loss_hazard_model`、`gap_risk_open_model`、`multi_horizon_target_classifier`、`target_ladder_probability_model`、`path_shape_mixture_model`、`mfe_mae_surface_model`、`forward_entry_timing_model`、`entry_price_surface_model`、`regime_adaptive_weight_model`、`peer_financial_alpha_model`、`limit_up_event_path_model`、`position_sizing_model`、`pullback_rebound_classifier`、`squeeze_breakout_classifier`、`fundamental_price_dislocation_model`、`model_stack_blender`、`event_catalyst_llm`、`fundamental_contradiction_llm`、`scenario_tree_llm`。
-- **预测核心**：报告不是固定“40 天 50%”，而是同时评估 15d/+20%、25d/+30%、40d/+50%，输出今日是否可买、买入价、未来 5 日条件买点、目标价、止损、目标/止损先触发概率、平均触达天数、仓位建议。
+- **预测核心**：Stock Edge v2.2 主 decision layer 聚焦 5/10/20 个交易日，分别输出是否可买/等待/持有/减仓、买入区间、追高警戒、止损、第一止盈、目标区间、支持/反对模型与冲突解释。旧 40d / 20-40d 只能作为 legacy audit 或 20d 辅助证据，不进入用户主决策。
 - **场景树**：报告新增“预测执行场景树”，把今日执行/今日等待/未来5日买点/失效路径拆成可证伪条件，每条路径必须显示触发条件、动作、买入带、目标、失效价和观察信号。数值只来自结构化模型；任何 LLM 表述压缩必须用项目工具 `ifa.core.llm.LLMClient`，不得改写价格、概率、止损。
 - **Research deep 前置依赖**：Stock Edge 默认在最终计划生成前调用 `ensure_stock_edge_research_prefetch()`，确保目标股 + 最多 4 个 SW L2 可见龙头都有 `annual deep` 与 `quarterly deep`。已有 `research.report_runs` 成功资产则复用，缺失才通过 `ifa.families.research.report.service.ensure_research_report()` 生成；生成/复用后重新加载 snapshot，让 `research.memory.load_fundamental_lineup()` 消费最新持久化因子。目标股 deep 可用项目 `LLMClient` 且有 timeout；同行 deep 默认 rules-only，避免多个同行 narrative 调用阻塞交易执行卡。
 - **同板块对比主轴**：同板块/同行对比主要看财务报表与 Research deep 结构化因子，包括 ROE、营收增速、CFO/NI、资产负债率、估值分位；市值和 5/10/15 日涨跌幅只作为辅助交易定位，不作为主排序。
 - **T+0 约束**：A 股 T+0 只能用于有底仓；`t0_uplift` 可评估日内高抛低吸增益，但 executable T+0 plan 仍必须检查 `has_base_position`。
 - **参数治理**：新增策略参数必须 YAML 化，当前主配置为 `ifa/families/stock/params/stock_edge_v2.2.yaml`；不要硬编码离散档位作为生产逻辑。
-- **当前验证**：`uv run pytest tests/stock` 通过 61 条；编译命令 `uv run python -m compileall -q ifa/families/stock ifa/cli/stock.py tests/stock` 通过。最新 manual deep 朗科科技报告：`/Users/neoclaw/claude/ifaenv/out/manual/20260430/stock_edge/CN_stock_edge_300042_SZ_20260430_225208.html`；桌面/移动 QA 截图在同目录 `qa/` 下，Playwright 检查 `scrollWidth == innerWidth`，场景树/免责声明/目标股标记、同板块财务对照主图、财务分表、财报-价格错配模型、多目标周期模型、未来5日择时模型、回踩反弹模型、收敛突破模型、目标/止损生存模型、模型融合器均存在，用户侧“数据新鲜度”不存在。
+- **当前验证**：`uv run pytest tests/stock -q` 通过 68 条；调参治理相关 `py_compile` 通过。最新 manual deep 朗科科技报告：`/Users/neoclaw/claude/ifaenv/out/manual/20260430/stock_edge/CN_stock_edge_300042_SZ_20260430_225208.html`；桌面/移动 QA 截图在同目录 `qa/` 下，Playwright 检查 `scrollWidth == innerWidth`，场景树/免责声明/目标股标记、同板块财务对照主图、财务分表、财报-价格错配模型、多目标周期模型、未来5日择时模型、回踩反弹模型、收敛突破模型、目标/止损生存模型、模型融合器均存在，用户侧“数据新鲜度”不存在。
 
 ---
 

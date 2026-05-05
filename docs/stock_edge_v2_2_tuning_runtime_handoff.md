@@ -1,5 +1,7 @@
 # Stock Edge v2.2 Tuning Runtime Handoff
 
+> 最新完整 handover：`docs/stock_edge_v2_2_tuning_governance_handover_2026_05_05.md`。本文只保留 runtime 摘要。
+
 ## 已实现
 
 1. global preset 兼容时进入报告运行路径。
@@ -69,4 +71,3 @@ uv run pytest tests/stock -q
 6. 通过 OOS 后 emit YAML patch。
 7. 人工 review 后 promotion 到 baseline 或 YAML variant。
 8. 再跑 report smoke 和 `tests/stock`。
-

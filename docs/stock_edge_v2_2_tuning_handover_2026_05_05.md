@@ -1,5 +1,7 @@
 # Stock Edge v2.2 调参 Handover — 2026-05-05
 
+> **Superseded note (2026-05-05 later update)**: 本文件记录的是三周期 decision layer 刚落地后的旧调参状态，其中关于 “global preset 尚未进入 runtime” 和 “optimizer 仍由 40d 主 objective 污染” 的问题已经在 commit `9b4b4a0` 修正。最新接手文件请读：`docs/stock_edge_v2_2_tuning_governance_handover_2026_05_05.md`。
+
 > 目的：给下一位 agent/reviewer 快速接手 Stock Edge v2.2 的数据补足、全局 preset、单股 pre-report overlay、报告运行时参数叠加逻辑，重点 review “调参是否正确服务 5/10/20 交易日 decision layer”。
 
 ## 1. 先回答核心问题
@@ -291,4 +293,3 @@ PYTHONUNBUFFERED=1 uv run python -m ifa.cli stock report \
 - 不要绕过 `ifa.core.tushare` / 现有 data gateway 新写 token/client。
 - 不要在日志或文档里打印 token。
 - 不要用外部大模型直接解释/改数值；需要 LLM 时使用项目内 `LLMClient`。
-
