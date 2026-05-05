@@ -148,17 +148,21 @@ def rank(
             ratio_w = max(wr_floor, min(1.0, overall_wr / wr_target))
             adj_score *= ratio_w
 
-        # M10 P2 Q3 — auto-demote setups with negative combined edge.
-        # combined_score_60d ∈ ~[-1.0, +1.0] (per metrics_v2). Continuous map:
-        #   ≤ -0.5 → 0.30  (severe; almost veto)
-        #   = -0.3 → 0.45
-        #   =  0.0 → 0.85  (mild penalty for break-even setups)
-        #   = +0.3 → 1.10
-        #   ≥ +0.6 → 1.40  (strong boost)
-        # Linear interpolation between knees; clipped to [0.30, 1.40].
+        # M10 P2 Q3 (revised) — gentle nudge based on combined_score_60d.
+        #
+        # Empirical finding: aggressive demote (factor 0.30 at combined=-0.5)
+        # backfires in regime-shift conditions because combined_60d is a
+        # LAGGED signal — by the time a setup's combined drops, the regime
+        # may have already shifted and demoting locks in stale data.
+        #
+        # Revised mapping (much weaker):
+        #   ≤ -1.0 → 0.80  (mild discount even for terrible setups)
+        #   =  0.0 → 1.00  (neutral)
+        #   ≥ +1.0 → 1.20  (mild boost for strong-edge setups)
+        # Linear; clipped to [0.80, 1.20]. Maximum effect ≤ 20%.
         combined = m.get("combined_score_60d")
         if combined is not None:
-            c_factor = max(0.30, min(1.40, 0.85 + 0.85 * float(combined)))
+            c_factor = max(0.80, min(1.20, 1.0 + 0.20 * float(combined)))
             adj_score *= c_factor
 
         enriched.append((adj_score, c, status, overall_wr))
