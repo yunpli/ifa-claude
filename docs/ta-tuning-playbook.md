@@ -114,6 +114,36 @@ uv run python -c "from ifa.families.ta.params import reload_params; print(reload
 - 用 `scripts/ta_tune_experiment.py` 它会自动 backup + restore
 - 或 git diff 每次 iter 之间确认 yaml 状态干净
 
+### H11. Ranker-only iter 用 fast_rerank,5-10x 提速
+**证据**: `_scan_and_persist_one_day` 每天 ~5-7 秒,主要是 `build_contexts` 14 张表查询。
+但 ranker-only 改动(a_size / cap / Q3 factor / winrate floor)**不需要重 build contexts**。
+
+**应用**:
+- 写入 `ifa.families.ta.setups.fast_rerank.fast_rerank_window` 实现:
+  从已存在 candidates_daily 重建 Candidate → 重 rank → UPDATE
+- ranker-only iter (iter5/7/12 类) 用 fast_rerank:**~3 min vs ~25 min**
+- 适用场景见 `fast_rerank.py` docstring
+
+### H12. universe 改动(mv門 / blacklist / 二筛)必须 full re-scan
+**证据**: iter8 reverted 后,candidates_daily 仍含 mv=20-30亿股票(已被 iter8 选入)。
+即使 yaml 还原回 30,数据库里这些"不该在"的 candidates 仍存在,
+fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baseline**。
+
+**应用**:
+- universe 类改动后,要么(a) 不 revert 用新 baseline,要么(b) full re-scan 还原
+- 不要混淆 ranker-only 和 universe 类 iter
+
+### H13. 改善 0.2pp 边缘:看 Tier B / 360d / sample size
+**证据**: iter8 60d Tier A +0.22pp 看似有效,但
+- 360d 持平(噪声内)
+- Tier B 退化 0.17pp(几乎全亏)
+- 综合**净改善 ~0**
+
+**应用**:
+- 任何"看起来有点改善但又不显著"的 iter,**优先 reject 而非 keep**
+- 假阳性比假阴性危险得多 — 错过一个 +0.2 改进只是慢,
+  采纳一个假改进会污染未来 baseline 让真信号被埋
+
 ---
 
 ## 2. Iteration Log
@@ -174,10 +204,20 @@ uv run python -c "from ifa.families.ta.params import reload_params; print(reload
 - **Plan**: 如果 trend Q (2025 Q2/Q3, 2026 Q2) alpha 改善 + 360d 不退,
          保留;否则做成 regime-aware 版本
 
+### iter8 (2026-05-04) ❌ REVERTED — universe 改全局,边际改善但 360d wash
+- **Hypothesis**: 全局 mv門 30亿→20亿 → 让小盘进 trend regime
+- **Change**: `fundamental_filter.min_total_mv_yi 30→20`
+- **Result**: 60d Tier A +0.93pp (vs iter5 +0.71, +0.22), 180d +1.15pp (vs +0.96, +0.19), **360d +0.01pp (vs +0.06, -0.05)**
+- **Tier B 退化**: 180d -0.18pp (vs iter5 -0.01, -0.17pp)
+- **Decision**: ❌ REVERT(改善幅度在统计噪声边缘 H7,360d 持平,Tier B 退化)
+- **Lesson**: H4 重申 — 全局 universe 改动不如 regime-aware。
+  `fundamental_filter.by_regime` 需要 context_loader code change,**留作 P1 future work**。
+
 ### iter12 (planned) ⏸
-- **Hypothesis**: trend regime 集中度更激进(5→6)
-- **Change**: `concentration.by_regime.trend_continuation.a 5→6`
-- **Plan**: iter8 跑完后启动
+- **Hypothesis**: 集中度进一步分散(全局 cap 3→4)+ trend regime 5→6
+- **Change**: `concentration.tier_a_per_l2_max 3→4` + `by_regime.trend.a 5→6`
+- **Plan**: iter7 跑完后启动 (fast_rerank,~3 min)
+- **Note**: ranker-only 改动,可用 fast_rerank
 
 ---
 

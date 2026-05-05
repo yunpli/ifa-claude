@@ -92,8 +92,8 @@ version: 2.2.1
 # stop  = entry × (1 − k_stop × ATR%)         k_stop = 2.0 → -2 ATR
 # target= entry × (1 + k_target × ATR%)       k_target = 4.0 → +4 ATR → R:R 2:1
 recommended_price:
-  k_stop: 1.5      # tightened from 2.0 — smaller stops in choppy market
-  k_target: 3.0    # tightened from 4.0 — smaller targets, easier to hit (R:R 2:1 preserved)
+  k_stop: 1.5      # iter5 baseline (iter6 tried 1.2, 360d alpha worsened, reverted)
+  k_target: 3.0    # iter5 baseline (iter6 tried 2.5, reverted)
   # entry_offset_atr is per-setup-category in code (not tunable per-yaml).
 
 # T+15 holding-period optimization weights for backtest objective.
@@ -112,16 +112,28 @@ backtest_objective:
 # Fundamental二筛 (pre-Tier filter). All three must pass to enter long pool.
 fundamental_filter:
   enabled: true
-  min_total_mv_yi: 30        # 总市值 ≥ 30 亿元
+  min_total_mv_yi: 30        # iter5 baseline. iter8 tried 20 (60d/180d marginal +0.2pp but 360d wash + Tier B 退 0.17pp); reverted. TODO: regime-aware mv門(只 trend regime 用 20亿)
   roe_lookback_quarters: 4   # 近 N 季 ROE 不能全部为负
   st_lookback_days: 365      # 1 年内戴过 ST/*ST 帽子 → 剔除
 
 # 集中度约束 (per L2 SW sector cap).
 concentration:
   enabled: true
-  tier_a_per_l2_max: 3       # Tier A 同 L2 上限
+  tier_a_per_l2_max: 3       # Tier A 同 L2 上限 (default — applies to range/down regimes)
   tier_b_per_l2_max: 6       # Tier B 同 L2 上限
   tier_ab_per_l2_max: 7      # Tier A+B 合计上限
+  # M10 P2 iter 5 — Regime-aware concentration relaxation.
+  # Driven by 360d quarterly breakdown: trend_continuation (135 days, 1350
+  # picks) had Tier A alpha = -0.10pp (vs market). System underperforms
+  # in trending markets because tight concentration cap (3) blocks sector
+  # leaders from dominating Tier A. In trend regime, single-sector blow-ups
+  # (e.g. AI / 新能源) = real alpha; cap should relax.
+  by_regime:
+    trend_continuation:    {a: 5, b: 10, ab: 12}
+    early_risk_on:         {a: 5, b: 10, ab: 12}
+    sector_rotation:       {a: 4, b: 8,  ab: 10}
+    # range_bound / weak_rebound / cooldown / distribution_risk / high_difficulty
+    # use defaults (3 / 6 / 7) — defensive caps preserve in choppy / down regimes
 
 # 黑天鹅 — 6 类(硬剔 + 软警示)
 blacklist:
