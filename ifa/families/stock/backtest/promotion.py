@@ -219,6 +219,8 @@ class PromotionDecision:
     candidate_score: float
     baseline_score: float
     rank_ic_summary: dict[str, dict[str, float]] = field(default_factory=dict)
+    bootstrap_ci: dict[str, dict[str, float]] = field(default_factory=dict)
+    """Per-horizon bootstrap CI on rank IC lift (T1.2 G5 input artifact)."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -227,6 +229,7 @@ class PromotionDecision:
             "candidate_score": self.candidate_score,
             "baseline_score": self.baseline_score,
             "rank_ic_summary": self.rank_ic_summary,
+            "bootstrap_ci": self.bootstrap_ci,
             "gates": [g.to_dict() for g in self.gates],
         }
 
@@ -242,6 +245,7 @@ def evaluate_promotion_gates(
     *,
     config: Mapping[str, Any] | None = None,
     kfold_results: list[dict[str, Any]] | None = None,
+    bootstrap_results: Mapping[str, Mapping[str, float]] | None = None,
 ) -> PromotionDecision:
     """Run G1/G2/G6/G7 (and G9 if K-fold results provided) against candidate vs baseline.
 
@@ -349,6 +353,39 @@ def evaluate_promotion_gates(
 
     gates = [g1, g2, g6, g7]
 
+    # ── G5: Bootstrap CI on val rank IC lift (per-horizon) ───
+    if bootstrap_results:
+        g5_per_horizon: dict[str, bool] = {}
+        g5_detail_parts = []
+        for h in ("5d", "10d", "20d"):
+            stat = bootstrap_results.get(h, {})
+            ci_low = float(stat.get("lift_ci_low", 0.0))
+            ci_high = float(stat.get("lift_ci_high", 0.0))
+            mean = float(stat.get("lift_mean", 0.0))
+            n_iter = int(stat.get("n_iterations", 0)) or "—"
+            passed_h = ci_low > 0
+            g5_per_horizon[h] = passed_h
+            mark = "✓" if passed_h else "✗"
+            g5_detail_parts.append(
+                f"{h} {mark} mean {mean:+.4f}, 95% CI [{ci_low:+.4f}, {ci_high:+.4f}] (n_iter={n_iter})"
+            )
+        all_pass_g5 = all(g5_per_horizon.values())
+        # gate value = min CI low across horizons (most conservative)
+        min_ci_low = min(
+            (float(bootstrap_results.get(h, {}).get("lift_ci_low", 0.0)) for h in ("5d", "10d", "20d")),
+            default=0.0,
+        )
+        g5 = GateResult(
+            gate_id="G5",
+            name="bootstrap_ci_positive",
+            passed=all_pass_g5,
+            value=min_ci_low,
+            threshold=0.0,
+            detail="; ".join(g5_detail_parts),
+            per_horizon=g5_per_horizon,
+        )
+        gates.append(g5)
+
     # ── G9: K-fold consistency (per-horizon) ─────────────────
     if kfold_results:
         n_folds = len(kfold_results)
@@ -401,6 +438,7 @@ def evaluate_promotion_gates(
             }
             for h in (5, 10, 20)
         },
+        bootstrap_ci={k: dict(v) for k, v in (bootstrap_results or {}).items()},
     )
 
 

@@ -418,6 +418,112 @@ def _ranks_with_average_ties(values: np.ndarray) -> np.ndarray:
     return ranks
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Bootstrap CI for per-horizon rank IC (T1.2 G5 gate)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def bootstrap_rank_ic_lift(
+    panel: PanelMatrix,
+    overlay: Mapping[str, Any],
+    base_params: Mapping[str, Any],
+    *,
+    n_iterations: int = 1000,
+    confidence: float = 0.95,
+    seed: int = 42,
+) -> dict[str, dict[str, float]]:
+    """Bootstrap CI for per-horizon rank IC LIFT (tuned − baseline) on val panel.
+
+    For each horizon, resamples panel rows with replacement n_iterations times,
+    computes baseline rank IC and tuned rank IC on each resample, and reports
+    the lift distribution's confidence interval lower bound.
+
+    Returns {"5d": {"lift_mean": x, "lift_ci_low": y, "lift_ci_high": z, ...}, ...}
+    """
+    from .objectives import build_composite_objective  # noqa: F401  (kept import path stable)
+
+    rng = np.random.default_rng(seed)
+    out: dict[str, dict[str, float]] = {}
+
+    # Pre-compute scores for ALL panel rows under baseline AND tuned
+    # (vectorized so 1000 bootstrap iters are fast)
+    horizon_score_baseline: dict[str, np.ndarray] = {}
+    horizon_score_tuned: dict[str, np.ndarray] = {}
+    decision_cfg = (base_params.get("decision_layer") or {}).get("horizons") or {}
+    eff_params = _apply_overlay(base_params, overlay)
+    eff_decision_cfg = (eff_params.get("decision_layer") or {}).get("horizons") or {}
+
+    for h_int in (5, 10, 20):
+        h = f"{h_int}d"
+        cfg_b = decision_cfg.get(h, {}) or {}
+        cfg_t = eff_decision_cfg.get(h, {}) or {}
+        horizon_score_baseline[h] = compute_horizon_scores(
+            panel, h,
+            (cfg_b.get("weights") or {}),
+            float(cfg_b.get("base_score", 0.50)),
+            float(cfg_b.get("raw_edge_scale", 0.50)),
+        )
+        horizon_score_tuned[h] = compute_horizon_scores(
+            panel, h,
+            (cfg_t.get("weights") or {}),
+            float(cfg_t.get("base_score", 0.50)),
+            float(cfg_t.get("raw_edge_scale", 0.50)),
+        )
+
+    alpha = 1.0 - confidence
+    lower_q = alpha / 2.0
+    upper_q = 1.0 - alpha / 2.0
+
+    for h_int in (5, 10, 20):
+        h = f"{h_int}d"
+        valid = getattr(panel, f"forward_{h_int}d_valid")
+        if int(valid.sum()) < 30:
+            out[h] = {"lift_mean": 0.0, "lift_ci_low": 0.0, "lift_ci_high": 0.0,
+                      "baseline_mean": 0.0, "tuned_mean": 0.0, "n": int(valid.sum())}
+            continue
+
+        valid_idx = np.flatnonzero(valid)
+        n_valid = len(valid_idx)
+        fwd = getattr(panel, f"forward_{h_int}d_return")[valid]
+        score_b = horizon_score_baseline[h][valid]
+        score_t = horizon_score_tuned[h][valid]
+
+        # Pre-compute ranks for baseline (used directly when no resample)
+        # For bootstrap, rank within each resample
+        lifts = np.zeros(n_iterations, dtype=np.float64)
+        baseline_ics = np.zeros(n_iterations, dtype=np.float64)
+        tuned_ics = np.zeros(n_iterations, dtype=np.float64)
+        for i in range(n_iterations):
+            sample_idx = rng.integers(0, n_valid, size=n_valid)
+            f_sample = fwd[sample_idx]
+            sb_sample = score_b[sample_idx]
+            st_sample = score_t[sample_idx]
+            f_rank = _ranks_with_average_ties(f_sample)
+            sb_rank = _ranks_with_average_ties(sb_sample)
+            st_rank = _ranks_with_average_ties(st_sample)
+            if np.std(sb_rank) > 1e-9 and np.std(f_rank) > 1e-9:
+                ic_b = float(np.corrcoef(sb_rank, f_rank)[0, 1])
+            else:
+                ic_b = 0.0
+            if np.std(st_rank) > 1e-9 and np.std(f_rank) > 1e-9:
+                ic_t = float(np.corrcoef(st_rank, f_rank)[0, 1])
+            else:
+                ic_t = 0.0
+            baseline_ics[i] = ic_b
+            tuned_ics[i] = ic_t
+            lifts[i] = ic_t - ic_b
+        out[h] = {
+            "lift_mean": float(np.mean(lifts)),
+            "lift_ci_low": float(np.quantile(lifts, lower_q)),
+            "lift_ci_high": float(np.quantile(lifts, upper_q)),
+            "baseline_mean": float(np.mean(baseline_ics)),
+            "tuned_mean": float(np.mean(tuned_ics)),
+            "n": n_valid,
+            "n_iterations": n_iterations,
+        }
+    return out
+
+
 def ic_to_weight(ic: float, *, allow_negative: bool = True) -> float:
     """Map a per-signal rank IC to a recommended overlay weight.
 

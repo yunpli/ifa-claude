@@ -30,6 +30,7 @@ from sqlalchemy import text
 from ifa.core.db import get_engine
 from ifa.families.stock.backtest.optimizer import fit_global_preset_via_panel
 from ifa.families.stock.backtest.panel_evaluator import (
+    bootstrap_rank_ic_lift,
     evaluate_overlay_on_panel,
     k_fold_rolling_walk_forward,
     panel_matrix_from_rows,
@@ -109,6 +110,8 @@ def main() -> int:
     parser.add_argument("--val-dates-per-fold", type=int, default=2, help="Validation dates per fold (default 2)")
     parser.add_argument("--min-train-dates", type=int, default=4, help="Minimum train dates for first fold (default 4)")
     parser.add_argument("--k-fold-min-positive", type=int, default=0, help="G9 gate: minimum number of folds with positive val lift per horizon (default = ceil(0.75 * n_folds))")
+    parser.add_argument("--bootstrap-iterations", type=int, default=1000, help="G5 gate: bootstrap iterations for CI (default 1000; 0 disables G5)")
+    parser.add_argument("--bootstrap-confidence", type=float, default=0.95, help="G5 gate: confidence level (default 0.95)")
     args = parser.parse_args()
 
     engine = get_engine()
@@ -364,10 +367,31 @@ def main() -> int:
         gate_config: dict = {}
         if args.k_fold_min_positive > 0:
             gate_config["g9_min_positive_folds"] = args.k_fold_min_positive
+
+        # ── G5 Bootstrap CI: compute on val panel ─────────────
+        bootstrap_results = None
+        val_panel_for_boot = None
+        if args.bootstrap_iterations > 0 and (args.oos or k_fold_done):
+            # Pick val panel: k-fold uses latest fold's val; single-oos uses the val_rows
+            if k_fold_done:
+                val_panel_for_boot = panel_matrix_from_rows(folds[-1][1])  # latest fold val
+            elif args.oos:
+                val_panel_for_boot = panel_matrix_from_rows(val_rows)
+            if val_panel_for_boot is not None:
+                t0_boot = time.monotonic()
+                bootstrap_results = bootstrap_rank_ic_lift(
+                    val_panel_for_boot, artifact.overlay, base,
+                    n_iterations=args.bootstrap_iterations,
+                    confidence=args.bootstrap_confidence,
+                )
+                t_boot = time.monotonic() - t0_boot
+                print(f"      bootstrap CI: {args.bootstrap_iterations} iter on val panel, {t_boot:.2f}s")
+
         decision = evaluate_promotion_gates(
             candidate_metrics_for_gate, baseline_metrics, artifact.overlay,
             config=gate_config or None,
             kfold_results=kfold_for_gate,
+            bootstrap_results=bootstrap_results,
         )
         for g in decision.gates:
             mark = "✓" if g.passed else "✗"
