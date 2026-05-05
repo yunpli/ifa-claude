@@ -29,6 +29,11 @@ from sqlalchemy import text
 
 from ifa.core.db import get_engine
 from ifa.families.stock.backtest.optimizer import fit_global_preset_via_panel
+from ifa.families.stock.backtest.panel_evaluator import (
+    evaluate_overlay_on_panel,
+    panel_matrix_from_rows,
+)
+from ifa.families.stock.backtest.promotion import auto_promote_if_passing, evaluate_promotion_gates
 from ifa.families.stock.backtest.replay_panel import build_replay_panel
 from ifa.families.stock.backtest.tuning_artifact import write_tuning_artifact
 from ifa.families.stock.params import load_params
@@ -89,6 +94,12 @@ def main() -> int:
     parser.add_argument("--universe-id", default="top_liquidity", help="Cache key prefix")
     parser.add_argument("--include-llm", action="store_true", help="Include LLM signals (slower)")
     parser.add_argument("--dry-run", action="store_true", help="Build panel + tune but don't write artifact")
+    parser.add_argument("--n-iterations", type=int, default=3, help="Search iterations (default 3)")
+    parser.add_argument("--no-warmstart", action="store_true", help="Disable IC-derived warmstart")
+    parser.add_argument("--no-negative-weights", action="store_true", help="Disable negative weights for inverted signals")
+    parser.add_argument("--auto-promote", action="store_true", help="Apply gates; if passed, write YAML variant")
+    parser.add_argument("--variant-output", default=None, help="Where to write YAML variant (default: side-by-side .variant.yaml)")
+    parser.add_argument("--base-yaml", default="ifa/families/stock/params/stock_edge_v2.2.yaml")
     args = parser.parse_args()
 
     engine = get_engine()
@@ -160,7 +171,7 @@ def main() -> int:
         print("ERROR: panel is empty; cannot tune", file=sys.stderr)
         return 3
 
-    print(f"\n[4/4] Running search ({args.max_candidates} candidates over decision_layer space)...")
+    print(f"\n[4/4] Running search ({args.max_candidates} candidates × {args.n_iterations} iterations over decision_layer space)...")
     t0 = time.monotonic()
     artifact = fit_global_preset_via_panel(
         rows,
@@ -168,10 +179,13 @@ def main() -> int:
         base_params=base,
         universe=f"{args.universe_id}_top{args.top}",
         max_candidates=args.max_candidates,
-        on_progress=lambda p: print(f"      cand {p['candidate']}/{p['total']} score={p['score']:.4f} best={p['best_score']:.4f}") if p.get("candidate") % max(1, args.max_candidates // 8) == 0 else None,
+        n_iterations=args.n_iterations,
+        use_ic_warmstart=not args.no_warmstart,
+        allow_negative_weights=not args.no_negative_weights,
+        on_progress=lambda p: print(f"      iter {p.get('iteration', 0)} cand {p['candidate']}/{p['total']} score={p['score']:.4f} best={p['best_score']:.4f}") if p.get("candidate", 0) % max(1, args.max_candidates // 8) == 0 else None,
     )
     search_elapsed = time.monotonic() - t0
-    print(f"      search: {search_elapsed:.2f}s ({args.max_candidates/max(search_elapsed, 0.001):.0f} cand/sec)")
+    print(f"      search: {search_elapsed:.2f}s ({artifact.candidate_count}/{search_elapsed:.1f}s = {artifact.candidate_count/max(search_elapsed, 0.001):.0f} cand/sec, {artifact.metrics.get('search_iterations', 1)} iterations)")
 
     print(f"\n=== Results ===")
     print(f"  best objective score: {artifact.objective_score:.6f}")
@@ -194,6 +208,38 @@ def main() -> int:
         print(f"\n  artifact written: {path}")
     else:
         print(f"\n  [dry-run] artifact NOT written")
+
+    # ── Auto-promotion (Phase 4) ──────────────────────────────
+    if args.auto_promote:
+        print(f"\n=== Auto-Promotion Gates ===")
+        panel = panel_matrix_from_rows(rows)
+        baseline_metrics = evaluate_overlay_on_panel(panel, {}, base)
+        decision = evaluate_promotion_gates(
+            artifact.metrics, baseline_metrics, artifact.overlay,
+        )
+        for g in decision.gates:
+            mark = "✓" if g.passed else "✗"
+            print(f"  {mark} {g.gate_id} {g.name:35s} passed={g.passed}")
+            print(f"      {g.detail}")
+        print(f"\n  → {decision.summary}")
+
+        base_yaml = Path(args.base_yaml)
+        variant_path = Path(args.variant_output) if args.variant_output else base_yaml.with_suffix(".variant.yaml")
+        reject_dir = Path("/Users/neoclaw/claude/ifaenv/manifests/stock_edge_global_promotion/rejected")
+        result = auto_promote_if_passing(
+            decision,
+            candidate_overlay=artifact.overlay,
+            base_yaml=base_yaml,
+            variant_output=variant_path,
+            reject_dir=reject_dir,
+            backup=True,
+        )
+        if result["accepted"]:
+            print(f"\n  ✅ ACCEPTED — variant YAML written: {result['variant_path']}")
+            if result.get("backup_path"):
+                print(f"     backup: {result['backup_path']}")
+        else:
+            print(f"\n  ⚠ REJECTED — reject report: {result.get('reject_path', '(no reject_dir)')}")
 
     print(f"\n  total wall time: {panel_elapsed + search_elapsed:.1f}s")
     return 0

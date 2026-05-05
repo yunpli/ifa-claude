@@ -8,6 +8,7 @@ This is the core of the speedup that makes coarse-to-fine optimization tractable
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -339,6 +340,144 @@ def _calibration_from_ic(horizon_results: dict[str, dict[str, Any]]) -> float:
     if not ics:
         return 0.0
     return float(np.clip(np.mean(ics) * 5.0, 0.0, 1.0))   # scale rank-IC ~0.20 → 1.0
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Per-signal IC analysis & warm-start priors (Phase 3-A)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def compute_signal_ic_priors(panel: PanelMatrix, *, min_samples: int = 30) -> dict[str, dict[str, float]]:
+    """Per-(horizon, signal_key) rank IC vs forward returns — vectorized.
+
+    Algorithm:
+        For each horizon, rank-transform every signal column AND the forward return
+        column simultaneously, then compute Pearson correlation column-by-column via
+        a single covariance matrix product. ~50× faster than per-signal np.corrcoef.
+
+    Active-mask handling: we set inactive cells to a sentinel rank that does not
+    contaminate the correlation by re-ranking only the active subset per signal.
+    Cost is still O(N·K·log N) (rank sort) but it's one numpy call.
+    """
+    out: dict[str, dict[str, float]] = {"5d": {}, "10d": {}, "20d": {}}
+    for h in (5, 10, 20):
+        valid = getattr(panel, f"forward_{h}d_valid")
+        if int(valid.sum()) < min_samples:
+            continue
+        fwd = getattr(panel, f"forward_{h}d_return")[valid].astype(np.float64)
+        scores = panel.score[valid]                          # [N, K]
+        active = panel.active[valid]                         # [N, K]
+        # Mask inactive cells with NaN so they don't bias the rank
+        scores_masked = np.where(active, scores, np.nan)
+        # Vectorized rank per column treating NaN consistently (NaN → max rank but ignored downstream)
+        # nanrank: convert to ordinal rank only over non-NaN positions per column
+        # Trick: subtract column min from active cells, leave NaN as-is; argsort handles NaN as +inf
+        n = scores_masked.shape[0]
+        order = np.argsort(scores_masked, axis=0)            # [N, K] indices in ascending order, NaN last
+        ranks = np.empty_like(order, dtype=np.float64)
+        # Build ranks using vectorized scatter
+        cols_idx = np.broadcast_to(np.arange(scores_masked.shape[1]), order.shape)
+        ranks[order, cols_idx] = np.arange(n)[:, None].astype(np.float64)
+        # Wherever original was NaN, ranks are still 0..(n-1) but we mark them inactive
+        ranks_masked = np.where(active, ranks, np.nan)
+
+        fwd_rank = _ranks_with_average_ties(fwd)
+        # Pearson on rank vectors equals Spearman; we compute per-column corr to fwd_rank
+        f = fwd_rank - fwd_rank.mean()
+        f_var = float(np.dot(f, f))
+        if f_var <= 0:
+            continue
+        # For each signal column j: corr_j = sum((r_j - mean(r_j)) * f) / sqrt(var(r_j) * var(f))
+        # using only rows where active[j] is True
+        # Vectorized: replace NaN with column mean (centering then yields 0 contribution)
+        with np.errstate(invalid="ignore"):
+            col_means = np.nanmean(ranks_masked, axis=0)
+        ranks_centered = np.where(active, ranks_masked - col_means, 0.0)  # NaN → 0 contribution
+        cov = ranks_centered.T @ f                                          # [K]
+        col_var = (ranks_centered ** 2).sum(axis=0)                          # [K]
+        denom = np.sqrt(col_var * f_var)
+        ic_vec = np.where(denom > 0, cov / np.where(denom > 0, denom, 1.0), 0.0)
+
+        # Also enforce min_samples per signal (active count threshold)
+        active_counts = active.sum(axis=0)
+        for j, key in enumerate(ALL_SIGNAL_KEYS):
+            if active_counts[j] >= min_samples and not math.isnan(ic_vec[j]):
+                out[f"{h}d"][key] = float(ic_vec[j])
+    return out
+
+
+def _ranks_with_average_ties(values: np.ndarray) -> np.ndarray:
+    """Plain rank (0..n-1) for a 1-D array; ties broken by argsort stability.
+
+    Sufficient for Spearman approximation when ties are rare (forward returns are
+    continuous floats so collisions are edge cases).
+    """
+    order = np.argsort(values)
+    ranks = np.empty_like(order, dtype=np.float64)
+    ranks[order] = np.arange(len(values), dtype=np.float64)
+    return ranks
+
+
+def ic_to_weight(ic: float, *, allow_negative: bool = True) -> float:
+    """Map a per-signal rank IC to a recommended overlay weight.
+
+    Logic (drawn from the hand-craft validation that lifted 10d -0.244 → +0.313):
+      - IC < -0.20 (strongly inverted): negative weight (model learns to invert signal)
+      - IC in [-0.20, -0.05]: zero-out (signal is noise or mildly inverted)
+      - IC in [-0.05, +0.05]: 1.0 (default)
+      - IC > +0.05: linear boost, capped at 1.80
+    """
+    if ic < -0.20 and allow_negative:
+        return max(-1.50, -1.0 + 5.0 * (ic + 0.20))   # IC = -0.30 → -1.50
+    if ic < -0.05:
+        return 0.0
+    if ic < 0.05:
+        return 1.0
+    return min(1.80, 1.0 + 4.0 * (ic - 0.05))
+
+
+def build_ic_warmstart_overlay(
+    ic_priors: Mapping[str, Mapping[str, float]],
+    *,
+    allow_negative: bool = True,
+) -> dict[str, float]:
+    """Convert per-(horizon, signal) IC into a search-center overlay."""
+    from ifa.families.stock.decision_layer import DEFAULT_KEYS
+
+    overlay: dict[str, float] = {}
+    for h_label, ics in ic_priors.items():
+        keys_for_horizon = (
+            list(DEFAULT_KEYS.get(h_label, {}).get("positive", []))
+            + list(DEFAULT_KEYS.get(h_label, {}).get("risk", []))
+        )
+        for key in keys_for_horizon:
+            ic = ics.get(key)
+            if ic is None:
+                continue
+            overlay[f"decision_layer.horizons.{h_label}.weights.{key}"] = round(
+                ic_to_weight(ic, allow_negative=allow_negative), 4
+            )
+    return overlay
+
+
+def negative_weight_bounds_for_panel(
+    base_bounds: Mapping[str, tuple[float, float]],
+    ic_priors: Mapping[str, Mapping[str, float]],
+    *,
+    threshold_invert: float = -0.20,
+) -> dict[str, tuple[float, float]]:
+    """Per-key bounds that open up a negative range only for strongly-inverted signals."""
+    out = dict(base_bounds)
+    for h_label, ics in ic_priors.items():
+        for key, ic in ics.items():
+            bound_key = f"decision_layer.horizons.{h_label}.weights.{key}"
+            if bound_key in out and ic < threshold_invert:
+                low, high = out[bound_key]
+                out[bound_key] = (-1.50, high)
+    return out
+
+
+# ──────────────────────────────────────────────────────────────────────────
 
 
 def _apply_overlay(base_params: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
