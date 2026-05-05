@@ -9,7 +9,7 @@ ranker:
     floor_ratio: 0.4
     target_pct: 30
   tiers:
-    a_size: 10
+    a_size: 10        # iter5 baseline (iter7 tried 5, reverted: -0.14pp)
     b_size: 20
     c_size: 100
   # M10 P2 iteration 4 — Regime-aware Tier sizing.
@@ -18,15 +18,15 @@ ranker:
   # When market is trending → keep full 10/20.
   # Falls back to tiers.a_size/b_size when regime not in this map.
   regime_tier_sizes:
-    trend_continuation:    {a: 10, b: 20}
+    trend_continuation:    {a: 10, b: 20}    # iter5 baseline
     early_risk_on:         {a: 10, b: 20}
     sector_rotation:       {a: 8,  b: 16}
     range_bound:           {a: 5,  b: 15}    # alpha-scarce → halve Tier A
-    weak_rebound:          {a: 5,  b: 15}    # similar choppy regime
-    cooldown:              {a: 3,  b: 10}    # only highest conviction
-    emotional_climax:      {a: 3,  b: 10}    # frothy — be picky
-    distribution_risk:     {a: 0,  b: 5}     # do not open new longs
-    high_difficulty:       {a: 0,  b: 5}     # mixed signals — wait
+    weak_rebound:          {a: 5,  b: 15}
+    cooldown:              {a: 3,  b: 10}
+    emotional_climax:      {a: 3,  b: 10}
+    distribution_risk:     {a: 0,  b: 5}
+    high_difficulty:       {a: 0,  b: 5}
 universe:
   min_avg_amount_yi: 0.2          # 20d avg amount 下限：0.2 亿元 = 2000 万元
   min_coverage_pct: 90            # 20d 内有 raw_daily 行的天数比例（剔除停牌）
@@ -119,9 +119,9 @@ fundamental_filter:
 # 集中度约束 (per L2 SW sector cap).
 concentration:
   enabled: true
-  tier_a_per_l2_max: 3       # Tier A 同 L2 上限 (default — applies to range/down regimes)
-  tier_b_per_l2_max: 6       # Tier B 同 L2 上限
-  tier_ab_per_l2_max: 7      # Tier A+B 合计上限
+  tier_a_per_l2_max: 3       # iter5 baseline (iter12 tried 4, reverted: -0.04 to -0.07pp)
+  tier_b_per_l2_max: 6
+  tier_ab_per_l2_max: 7
   # M10 P2 iter 5 — Regime-aware concentration relaxation.
   # Driven by 360d quarterly breakdown: trend_continuation (135 days, 1350
   # picks) had Tier A alpha = -0.10pp (vs market). System underperforms
@@ -129,7 +129,7 @@ concentration:
   # leaders from dominating Tier A. In trend regime, single-sector blow-ups
   # (e.g. AI / 新能源) = real alpha; cap should relax.
   by_regime:
-    trend_continuation:    {a: 5, b: 10, ab: 12}
+    trend_continuation:    {a: 5, b: 10, ab: 12}    # iter5 baseline
     early_risk_on:         {a: 5, b: 10, ab: 12}
     sector_rotation:       {a: 4, b: 8,  ab: 10}
     # range_bound / weak_rebound / cooldown / distribution_risk / high_difficulty

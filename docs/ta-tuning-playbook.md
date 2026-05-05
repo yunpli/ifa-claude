@@ -213,11 +213,24 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
 - **Lesson**: H4 重申 — 全局 universe 改动不如 regime-aware。
   `fundamental_filter.by_regime` 需要 context_loader code change,**留作 P1 future work**。
 
-### iter12 (planned) ⏸
-- **Hypothesis**: 集中度进一步分散(全局 cap 3→4)+ trend regime 5→6
-- **Change**: `concentration.tier_a_per_l2_max 3→4` + `by_regime.trend.a 5→6`
-- **Plan**: iter7 跑完后启动 (fast_rerank,~3 min)
-- **Note**: ranker-only 改动,可用 fast_rerank
+### iter7 (2026-05-04) ❌ REVERTED — Tier A_strict 反而略降
+- **Hypothesis**: top 5 conviction 比 top 10 更稳(更纯净)
+- **Change**: `tiers.a_size 10→5, b_size 20→15` + 各 regime_tier_sizes 同步缩 1/2
+- **Result**: 60d +0.57pp(vs +0.71, **-0.14**), 180d +0.89(-0.07), 360d +0.08(+0.02)
+- **Decision**: ❌ REVERT(60d 退化 0.14pp,360d 持平,无净改善)
+- **Lesson**: 排名 6-10 的票**也是有 conviction 的 picks**,缩到 5 反而丢掉一部分 alpha。
+  当前 ranker 的 stock_score 已经精准 — Tier A=10 是合理 size。
+- **Speed**: fast_rerank 28 秒(vs full re-scan 25 min)— **50x 提速** ✓
+
+### iter12 (2026-05-04) ❌ REVERTED — 全局集中度放松也无效
+- **Hypothesis**: 集中度进一步分散(全局 3→4)+ trend regime 更松(5→6)
+- **Change**: `tier_a_per_l2_max 3→4` + `by_regime.trend.a 5→6`
+- **Result**: 60d +0.64(vs +0.71, -0.07), 180d +0.92(-0.04), 360d +0.05(-0.01)
+  + Tier B 180d 退化 -0.11pp
+- **Decision**: ❌ REVERT(全部窗口微跌,Tier B 退化)
+- **Lesson**: iter5 的 cap=3 全局 + cap=5 trend regime 是局部最优。
+  全局放到 4 让 Tier A 入选边缘票,稀释 conviction。
+- **Speed**: fast_rerank 30 秒 ✓
 
 ---
 
@@ -247,6 +260,29 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
 - ❌ 一次改 2+ 参数(无法归因)
 
 ---
+
+## 3.5 P2 调参全周期总结 — **iter5 是最优 yaml**
+
+经过 6 轮 iteration (iter5/6/7/8/12 + restore),所有改动**只有 iter5 真正改善 alpha**:
+
+| Iter | 改动 | 60d Tier A | 360d Tier A | 决策 |
+|---|---|---|---|---|
+| baseline (P1 完成时) | — | -? | -1.35% (-0.24pp) | — |
+| iter1-iter4 (M10 P2 早期) | ATR + Q3 + Z3+R4 + regime sizes | +0.40pp | -0.07pp | KEPT |
+| **iter5** | **regime-aware concentration cap (trend 3→5)** | **+0.71pp** | **+0.06pp** | **✅ 最优** |
+| iter6 | ATR k_stop 1.2 / k_target 2.5 | +0.96 | -0.44 | ❌ 60d 过拟合 |
+| iter7 | A_size 10→5 (Tier A_strict) | +0.57 | +0.08 | ❌ 反而变差 |
+| iter8 | mv門 30→20亿 (全局) | +0.93 | +0.01 | ❌ 360d 持平 + Tier B 退 |
+| iter12 | concentration 全局 3→4 + trend 5→6 | +0.64 | +0.05 | ❌ 全部微跌 |
+
+**关键洞察**:
+- **当前 yaml 已是局部最优** — 6 个方向尝试,5 个 reject
+- 360d Tier A alpha **+0.06pp** 是这套系统的"真实 alpha 上限"(以现有 30 setup 库 + ranker)
+- **想进一步突破必须做结构性改进**:
+  - LLM-based catalyst sentiment(我之前 P0-1 提议)
+  - 更多 mean-reversion / event-driven setup
+  - regime-aware fundamental filter (mv 门 by_regime,iter8 启发)
+  - ML right-tail classifier(stock-edge 路线)
 
 ## 4. 与 stock-edge 的接口
 

@@ -127,23 +127,27 @@ def fast_rerank_one_day(engine: Engine, on_date: date) -> int:
             evidence_json = (evidence_json::jsonb || CAST(:overlay AS jsonb))::json
         WHERE candidate_id = CAST(:cid AS UUID)
     """)
-    sql_clear_dropped = text("""
+    # Two-pass approach to avoid UUID array binding issues:
+    # First clear ALL rows for this date, then UPDATE keep_ids with new values.
+    sql_clear_all = text("""
         UPDATE ta.candidates_daily
         SET in_top_watchlist = false,
             evidence_json = (evidence_json::jsonb - 'tier' - 'stock_score'
-                             - 'rank' - 'star_rating')::json
+                             - 'raw_stock_score' - 'rank' - 'star_rating'
+                             - 'sector_factor' - 'resonance_count'
+                             - 'resonance_families' - 'governance_status')::json
         WHERE trade_date = :d
-          AND candidate_id NOT IN (SELECT CAST(unnest(:keep_ids) AS UUID))
     """)
 
     n = 0
-    keep_ids: list[str] = []
     with engine.begin() as conn:
+        # Pass 1: clear all tier-related fields for this date
+        conn.execute(sql_clear_all, {"d": on_date})
+        # Pass 2: update keep_ids with new ranker decisions
         for rc in ranked:
             cid = id_map.get((rc.candidate.ts_code, rc.candidate.setup_name))
             if not cid:
                 continue
-            keep_ids.append(cid)
             overlay = {
                 "tier": rc.tier,
                 "stock_score": rc.stock_score,
@@ -164,9 +168,6 @@ def fast_rerank_one_day(engine: Engine, on_date: date) -> int:
                 "overlay": json.dumps(overlay, ensure_ascii=False, default=str),
             })
             n += 1
-        # Clear tier/stock_score for candidates that didn't make it into any tier this run
-        if keep_ids:
-            conn.execute(sql_clear_dropped, {"d": on_date, "keep_ids": keep_ids})
     return n
 
 
