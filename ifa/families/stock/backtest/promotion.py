@@ -221,6 +221,8 @@ class PromotionDecision:
     rank_ic_summary: dict[str, dict[str, float]] = field(default_factory=dict)
     bootstrap_ci: dict[str, dict[str, float]] = field(default_factory=dict)
     """Per-horizon bootstrap CI on rank IC lift (T1.2 G5 input artifact)."""
+    regime_breakdown: dict[str, dict[str, dict[str, float]]] = field(default_factory=dict)
+    """Per-(horizon, regime) rank IC lift breakdown (T1.3 G4 input artifact)."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -230,6 +232,7 @@ class PromotionDecision:
             "baseline_score": self.baseline_score,
             "rank_ic_summary": self.rank_ic_summary,
             "bootstrap_ci": self.bootstrap_ci,
+            "regime_breakdown": self.regime_breakdown,
             "gates": [g.to_dict() for g in self.gates],
         }
 
@@ -246,6 +249,7 @@ def evaluate_promotion_gates(
     config: Mapping[str, Any] | None = None,
     kfold_results: list[dict[str, Any]] | None = None,
     bootstrap_results: Mapping[str, Mapping[str, float]] | None = None,
+    regime_breakdown: Mapping[str, Mapping[str, Mapping[str, float]]] | None = None,
 ) -> PromotionDecision:
     """Run G1/G2/G6/G7 (and G9 if K-fold results provided) against candidate vs baseline.
 
@@ -353,6 +357,40 @@ def evaluate_promotion_gates(
 
     gates = [g1, g2, g6, g7]
 
+    # ── G4: Regime-bucketed lift consistency (per-horizon) ───
+    if regime_breakdown:
+        g4_min_pct = float(cfg.get("g4_min_improved_bucket_pct", 0.75))
+        g4_per_horizon: dict[str, bool] = {}
+        g4_detail_parts = []
+        for h in ("5d", "10d", "20d"):
+            buckets = dict(regime_breakdown.get(h, {}) or {})
+            if not buckets:
+                g4_per_horizon[h] = False
+                g4_detail_parts.append(f"{h}: no regime buckets ≥ min_samples")
+                continue
+            improved = sum(1 for stat in buckets.values() if float(stat.get("lift", 0.0)) > 0)
+            total = len(buckets)
+            ratio = improved / total if total > 0 else 0.0
+            passed_h = ratio >= g4_min_pct
+            g4_per_horizon[h] = passed_h
+            mark = "✓" if passed_h else "✗"
+            bucket_summary = "; ".join(
+                f"{b}: lift {stat['lift']:+.3f} (n={stat['n']})"
+                for b, stat in buckets.items()
+            )
+            g4_detail_parts.append(f"{h} {mark} {improved}/{total} buckets improved [{bucket_summary}]")
+        all_pass_g4 = all(g4_per_horizon.values())
+        g4 = GateResult(
+            gate_id="G4",
+            name="regime_bucketed_consistency",
+            passed=all_pass_g4,
+            value=float(min((sum(1 for s in (regime_breakdown.get(h) or {}).values() if float(s.get("lift", 0.0)) > 0) / max(len(regime_breakdown.get(h) or {}), 1) for h in ("5d", "10d", "20d")), default=0.0)),
+            threshold=g4_min_pct,
+            detail=" | ".join(g4_detail_parts),
+            per_horizon=g4_per_horizon,
+        )
+        gates.append(g4)
+
     # ── G5: Bootstrap CI on val rank IC lift (per-horizon) ───
     if bootstrap_results:
         g5_per_horizon: dict[str, bool] = {}
@@ -439,6 +477,7 @@ def evaluate_promotion_gates(
             for h in (5, 10, 20)
         },
         bootstrap_ci={k: dict(v) for k, v in (bootstrap_results or {}).items()},
+        regime_breakdown={k: {bk: dict(bv) for bk, bv in v.items()} for k, v in (regime_breakdown or {}).items()},
     )
 
 

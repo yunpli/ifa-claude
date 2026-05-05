@@ -34,6 +34,7 @@ from ifa.families.stock.backtest.panel_evaluator import (
     evaluate_overlay_on_panel,
     k_fold_rolling_walk_forward,
     panel_matrix_from_rows,
+    regime_bucketed_rank_ic_lift,
     walk_forward_split,
 )
 from ifa.families.stock.backtest.promotion import auto_promote_if_passing, evaluate_promotion_gates
@@ -112,6 +113,8 @@ def main() -> int:
     parser.add_argument("--k-fold-min-positive", type=int, default=0, help="G9 gate: minimum number of folds with positive val lift per horizon (default = ceil(0.75 * n_folds))")
     parser.add_argument("--bootstrap-iterations", type=int, default=1000, help="G5 gate: bootstrap iterations for CI (default 1000; 0 disables G5)")
     parser.add_argument("--bootstrap-confidence", type=float, default=0.95, help="G5 gate: confidence level (default 0.95)")
+    parser.add_argument("--regime-min-bucket-pct", type=float, default=0.75, help="G4 gate: minimum fraction of regime buckets that must improve (default 0.75)")
+    parser.add_argument("--regime-min-samples", type=int, default=30, help="G4 gate: minimum val rows per regime bucket (default 30)")
     args = parser.parse_args()
 
     engine = get_engine()
@@ -367,31 +370,46 @@ def main() -> int:
         gate_config: dict = {}
         if args.k_fold_min_positive > 0:
             gate_config["g9_min_positive_folds"] = args.k_fold_min_positive
+        gate_config["g4_min_improved_bucket_pct"] = args.regime_min_bucket_pct
+
+        # Pick val panel for downstream stat checks
+        val_panel_for_stats = None
+        if args.oos or k_fold_done:
+            if k_fold_done:
+                val_panel_for_stats = panel_matrix_from_rows(folds[-1][1])
+            elif args.oos:
+                val_panel_for_stats = panel_matrix_from_rows(val_rows)
 
         # ── G5 Bootstrap CI: compute on val panel ─────────────
         bootstrap_results = None
-        val_panel_for_boot = None
-        if args.bootstrap_iterations > 0 and (args.oos or k_fold_done):
-            # Pick val panel: k-fold uses latest fold's val; single-oos uses the val_rows
-            if k_fold_done:
-                val_panel_for_boot = panel_matrix_from_rows(folds[-1][1])  # latest fold val
-            elif args.oos:
-                val_panel_for_boot = panel_matrix_from_rows(val_rows)
-            if val_panel_for_boot is not None:
-                t0_boot = time.monotonic()
-                bootstrap_results = bootstrap_rank_ic_lift(
-                    val_panel_for_boot, artifact.overlay, base,
-                    n_iterations=args.bootstrap_iterations,
-                    confidence=args.bootstrap_confidence,
-                )
-                t_boot = time.monotonic() - t0_boot
-                print(f"      bootstrap CI: {args.bootstrap_iterations} iter on val panel, {t_boot:.2f}s")
+        if args.bootstrap_iterations > 0 and val_panel_for_stats is not None:
+            t0_boot = time.monotonic()
+            bootstrap_results = bootstrap_rank_ic_lift(
+                val_panel_for_stats, artifact.overlay, base,
+                n_iterations=args.bootstrap_iterations,
+                confidence=args.bootstrap_confidence,
+            )
+            t_boot = time.monotonic() - t0_boot
+            print(f"      bootstrap CI: {args.bootstrap_iterations} iter on val panel, {t_boot:.2f}s")
+
+        # ── G4 Regime-bucketed: compute on val panel ──────────
+        regime_results = None
+        if val_panel_for_stats is not None:
+            t0_reg = time.monotonic()
+            regime_results = regime_bucketed_rank_ic_lift(
+                val_panel_for_stats, artifact.overlay, base,
+                min_samples_per_bucket=args.regime_min_samples,
+            )
+            t_reg = time.monotonic() - t0_reg
+            n_buckets_total = sum(len(v) for v in regime_results.values())
+            print(f"      regime breakdown: {n_buckets_total} (horizon, regime) buckets ≥ {args.regime_min_samples} samples, {t_reg*1000:.0f}ms")
 
         decision = evaluate_promotion_gates(
             candidate_metrics_for_gate, baseline_metrics, artifact.overlay,
             config=gate_config or None,
             kfold_results=kfold_for_gate,
             bootstrap_results=bootstrap_results,
+            regime_breakdown=regime_results,
         )
         for g in decision.gates:
             mark = "✓" if g.passed else "✗"

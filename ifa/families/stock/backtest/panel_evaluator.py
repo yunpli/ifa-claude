@@ -423,6 +423,69 @@ def _ranks_with_average_ties(values: np.ndarray) -> np.ndarray:
 # ──────────────────────────────────────────────────────────────────────────
 
 
+def regime_bucketed_rank_ic_lift(
+    panel: PanelMatrix,
+    overlay: Mapping[str, Any],
+    base_params: Mapping[str, Any],
+    *,
+    min_samples_per_bucket: int = 30,
+) -> dict[str, dict[str, dict[str, float]]]:
+    """Per-(horizon, regime) rank IC lift.
+
+    Returns nested dict: {"5d": {"trend_continuation": {"baseline_ic": x,
+    "tuned_ic": y, "lift": z, "n": k}, ...}, ...}.
+
+    Buckets with < min_samples_per_bucket are skipped (returned as empty mapping).
+    Used by G4 gate to require ≥75% buckets improved.
+    """
+    decision_cfg = (base_params.get("decision_layer") or {}).get("horizons") or {}
+    eff_params = _apply_overlay(base_params, overlay)
+    eff_decision_cfg = (eff_params.get("decision_layer") or {}).get("horizons") or {}
+
+    out: dict[str, dict[str, dict[str, float]]] = {"5d": {}, "10d": {}, "20d": {}}
+    for h_int in (5, 10, 20):
+        h = f"{h_int}d"
+        cfg_b = decision_cfg.get(h, {}) or {}
+        cfg_t = eff_decision_cfg.get(h, {}) or {}
+        score_b = compute_horizon_scores(
+            panel, h,
+            (cfg_b.get("weights") or {}),
+            float(cfg_b.get("base_score", 0.50)),
+            float(cfg_b.get("raw_edge_scale", 0.50)),
+        )
+        score_t = compute_horizon_scores(
+            panel, h,
+            (cfg_t.get("weights") or {}),
+            float(cfg_t.get("base_score", 0.50)),
+            float(cfg_t.get("raw_edge_scale", 0.50)),
+        )
+        valid = getattr(panel, f"forward_{h_int}d_valid")
+        fwd = getattr(panel, f"forward_{h_int}d_return")
+        regimes = panel.regime
+        # Group val rows by regime
+        unique_regimes = sorted(set(str(r) for r in regimes[valid]) - {"unknown", "None", ""})
+        for regime in unique_regimes:
+            mask = valid & (regimes == regime)
+            n = int(mask.sum())
+            if n < min_samples_per_bucket:
+                continue
+            f_arr = fwd[mask]
+            sb_arr = score_b[mask]
+            st_arr = score_t[mask]
+            f_rank = _ranks_with_average_ties(f_arr)
+            sb_rank = _ranks_with_average_ties(sb_arr)
+            st_rank = _ranks_with_average_ties(st_arr)
+            ic_b = float(np.corrcoef(sb_rank, f_rank)[0, 1]) if np.std(sb_rank) > 1e-9 and np.std(f_rank) > 1e-9 else 0.0
+            ic_t = float(np.corrcoef(st_rank, f_rank)[0, 1]) if np.std(st_rank) > 1e-9 and np.std(f_rank) > 1e-9 else 0.0
+            out[h][regime] = {
+                "baseline_ic": round(ic_b, 6),
+                "tuned_ic": round(ic_t, 6),
+                "lift": round(ic_t - ic_b, 6),
+                "n": n,
+            }
+    return out
+
+
 def bootstrap_rank_ic_lift(
     panel: PanelMatrix,
     overlay: Mapping[str, Any],
