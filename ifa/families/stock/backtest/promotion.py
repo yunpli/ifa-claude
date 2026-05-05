@@ -250,6 +250,7 @@ def evaluate_promotion_gates(
     kfold_results: list[dict[str, Any]] | None = None,
     bootstrap_results: Mapping[str, Mapping[str, float]] | None = None,
     regime_breakdown: Mapping[str, Mapping[str, Mapping[str, float]]] | None = None,
+    artifact_metrics: Mapping[str, Any] | None = None,
 ) -> PromotionDecision:
     """Run G1/G2/G6/G7 (and G9 if K-fold results provided) against candidate vs baseline.
 
@@ -356,6 +357,29 @@ def evaluate_promotion_gates(
     )
 
     gates = [g1, g2, g6, g7]
+
+    # ── G8: Search convergence stat (T2.4) ───────────────────
+    # Read from artifact_metrics["search_history"] (preferred) or candidate_metrics
+    src = artifact_metrics if artifact_metrics is not None else candidate_metrics
+    search_history = src.get("search_history") if isinstance(src, Mapping) else None
+    if search_history and len(search_history) >= 3:
+        # Take last 3 iter_best entries (skip baseline + warmstart labels)
+        iter_bests = [h for h in search_history if str(h.get("label", "")).startswith("iter_")]
+        if len(iter_bests) >= 3:
+            recent = [float(h.get("score", 0.0)) for h in iter_bests[-3:]]
+            mean = sum(recent) / 3
+            convergence_stat = (max(recent) - min(recent)) / max(abs(mean), 1e-9)
+            g8_threshold = float(cfg.get("g8_convergence_threshold", 0.05))   # 5% range/mean
+            g8_passed = convergence_stat < g8_threshold
+            g8 = GateResult(
+                gate_id="G8",
+                name="search_convergence",
+                passed=g8_passed,
+                value=convergence_stat,
+                threshold=g8_threshold,
+                detail=f"last 3 iter best scores {[round(r,4) for r in recent]} (range/|mean|={convergence_stat:.4f}, threshold {g8_threshold})",
+            )
+            gates.append(g8)
 
     # ── G4: Regime-bucketed lift consistency (per-horizon) ───
     if regime_breakdown:

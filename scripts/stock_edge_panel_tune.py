@@ -410,6 +410,7 @@ def main() -> int:
             kfold_results=kfold_for_gate,
             bootstrap_results=bootstrap_results,
             regime_breakdown=regime_results,
+            artifact_metrics=artifact.metrics,
         )
         for g in decision.gates:
             mark = "✓" if g.passed else "✗"
