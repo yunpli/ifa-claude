@@ -23,6 +23,7 @@ class TuningArtifact:
     history_rows: int
     created_at: dt.datetime
     namespace: str
+    objective_version: str = "stock_edge_5_10_20_v1"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -85,4 +86,5 @@ def _artifact_from_dict(raw: dict[str, Any]) -> TuningArtifact:
         history_rows=int(raw.get("history_rows", 0)),
         created_at=dt.datetime.fromisoformat(str(raw["created_at"])),
         namespace=str(raw.get("namespace") or ""),
+        objective_version=str(raw.get("objective_version") or (raw.get("metrics") or {}).get("objective_version") or "legacy_unknown"),
     )

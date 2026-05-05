@@ -1,6 +1,7 @@
 """Report-time tuning preparation for Stock Edge."""
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass
 
 from sqlalchemy.engine import Engine
@@ -22,6 +23,10 @@ class ReportTuningResult:
     reason: str
     artifact: TuningArtifact | None
     artifact_file: str | None
+    global_artifact: TuningArtifact | None = None
+    global_artifact_file: str | None = None
+    single_artifact: TuningArtifact | None = None
+    single_artifact_file: str | None = None
 
 
 def prepare_report_params(
@@ -50,13 +55,25 @@ def prepare_report_params(
         )
 
     ctx = build_context(request, engine=engine, calendar=calendar, params=params)
+    global_cfg = tuning_cfg.get("global_preset", {})
     overlay_cfg = tuning_cfg.get("pre_report_overlay", {})
     ttl_days = int(overlay_cfg.get("ttl_days", tuning_cfg.get("per_stock_ttl_days", 10)))
+    global_ttl_days = int(global_cfg.get("artifact_ttl_days", ttl_days))
     min_history_rows = int(overlay_cfg.get("min_history_rows", tuning_cfg.get("min_history_rows", 360)))
     max_history_rows = int(overlay_cfg.get("max_history_rows", tuning_cfg.get("max_history_rows", 900)))
     max_candidates = int(overlay_cfg.get("max_candidates", 64))
+
+    global_artifact = _compatible_global_artifact(
+        params,
+        reference_datetime=request.requested_at,
+        ttl_days=global_ttl_days,
+        enabled=bool(global_cfg.get("enabled", False)),
+    )
+    params_after_global = apply_param_overlay(params, global_artifact.overlay) if global_artifact else dict(params)
+    global_file = str(artifact_path(global_artifact)) if global_artifact else None
+
     latest = find_latest_tuning_artifact(ts_code=request.ts_code, kind="pre_report_overlay")
-    latest_if_compatible = latest if latest and latest.base_param_hash == params_hash(params) else None
+    latest_if_compatible = latest if latest and latest.base_param_hash == params_hash(params_after_global) else None
     bars = load_daily_bars_for_tuning(
         engine,
         ts_code=request.ts_code,
@@ -74,7 +91,7 @@ def prepare_report_params(
         max_history_rows=max_history_rows,
     )
     backfill_result: BackfillResult | None = None
-    if _should_backfill_short_history(plan, latest_if_compatible=latest_if_compatible, params=params):
+    if _should_backfill_short_history(plan, latest_if_compatible=latest_if_compatible, params=params_after_global):
         backfill_result = backfill_core_stock_window(
             engine,
             request.ts_code,
@@ -103,20 +120,51 @@ def prepare_report_params(
     else:
         plan_reason = plan.reason
     if not plan.should_tune and latest_if_compatible:
-        return _with_artifact(params, latest_if_compatible, status="reused", reason=plan_reason, file_path=str(artifact_path(latest_if_compatible)))
+        return _with_artifacts(
+            params_after_global,
+            global_artifact=global_artifact,
+            single_artifact=latest_if_compatible,
+            status="reused",
+            reason=plan_reason,
+            global_file_path=global_file,
+            single_file_path=str(artifact_path(latest_if_compatible)),
+        )
     if not plan.should_tune:
-        tuned = attach_tuning_runtime(params, status="skipped", reason=plan_reason)
-        return ReportTuningResult(params=tuned, status="skipped", reason=plan_reason, artifact=None, artifact_file=None)
+        tuned = attach_tuning_runtime(
+            params_after_global,
+            status="skipped",
+            reason=plan_reason,
+            global_artifact_path=global_file,
+            global_objective_score=global_artifact.objective_score if global_artifact else None,
+            global_candidate_count=global_artifact.candidate_count if global_artifact else None,
+        )
+        return ReportTuningResult(
+            params=tuned,
+            status="skipped",
+            reason=plan_reason,
+            artifact=None,
+            artifact_file=None,
+            global_artifact=global_artifact,
+            global_artifact_file=global_file,
+        )
 
     artifact = fit_pre_report_overlay(
         bars,
         ts_code=request.ts_code,
         as_of_trade_date=ctx.as_of.as_of_trade_date,
-        base_params=params,
+        base_params=params_after_global,
         max_candidates=max_candidates,
     )
     file_path = str(write_tuning_artifact(artifact))
-    return _with_artifact(params, artifact, status="generated", reason=plan_reason, file_path=file_path)
+    return _with_artifacts(
+        params_after_global,
+        global_artifact=global_artifact,
+        single_artifact=artifact,
+        status="generated",
+        reason=plan_reason,
+        global_file_path=global_file,
+        single_file_path=file_path,
+    )
 
 
 def _should_backfill_short_history(
@@ -140,6 +188,69 @@ def _backfill_note(result: BackfillResult) -> str:
     if result.errors:
         return f"TuShare backfill 已尝试 {len(result.requested_dates)} 个交易日，{counts}，错误 {len(result.errors)} 条。"
     return f"TuShare backfill 已补 {len(result.requested_dates)} 个交易日，{counts}。"
+
+
+def _compatible_global_artifact(
+    base_params: dict,
+    *,
+    reference_datetime,
+    ttl_days: int,
+    enabled: bool,
+) -> TuningArtifact | None:
+    if not enabled:
+        return None
+    latest = find_latest_tuning_artifact(ts_code="__GLOBAL__", kind="global_preset")
+    if latest is None or latest.base_param_hash != params_hash(base_params):
+        return None
+    tuned_at = latest.created_at
+    reference = reference_datetime or dt.datetime.now(tuned_at.tzinfo or dt.timezone.utc)
+    if reference.tzinfo is None and tuned_at.tzinfo is not None:
+        reference = reference.replace(tzinfo=tuned_at.tzinfo)
+    elif reference.tzinfo is not None and tuned_at.tzinfo is None:
+        tuned_at = tuned_at.replace(tzinfo=reference.tzinfo)
+    elif reference.tzinfo is not None and tuned_at.tzinfo is not None:
+        reference = reference.astimezone(tuned_at.tzinfo)
+    if max(0, (reference - tuned_at).days) >= ttl_days:
+        return None
+    return latest
+
+
+def _with_artifacts(
+    params: dict,
+    *,
+    global_artifact: TuningArtifact | None,
+    single_artifact: TuningArtifact,
+    status: str,
+    reason: str,
+    global_file_path: str | None,
+    single_file_path: str,
+) -> ReportTuningResult:
+    overlaid = apply_param_overlay(params, single_artifact.overlay)
+    tuned = attach_tuning_runtime(
+        overlaid,
+        status=status,
+        reason=reason,
+        artifact_path=single_file_path,
+        global_artifact_path=global_file_path,
+        single_artifact_path=single_file_path,
+        objective_score=single_artifact.objective_score,
+        global_objective_score=global_artifact.objective_score if global_artifact else None,
+        single_objective_score=single_artifact.objective_score,
+        candidate_count=single_artifact.candidate_count,
+        global_candidate_count=global_artifact.candidate_count if global_artifact else None,
+        single_candidate_count=single_artifact.candidate_count,
+    )
+    return ReportTuningResult(
+        params=tuned,
+        status=status,
+        reason=reason,
+        artifact=single_artifact,
+        artifact_file=single_file_path,
+        global_artifact=global_artifact,
+        global_artifact_file=global_file_path,
+        single_artifact=single_artifact,
+        single_artifact_file=single_file_path,
+    )
 
 
 def _with_artifact(

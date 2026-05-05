@@ -829,6 +829,10 @@ def test_strategy_matrix_param_surface_has_tuning_contract():
     assert params["tuning"]["global_preset"]["max_candidates"] > params["tuning"]["pre_report_overlay"]["max_candidates"]
     assert params["tuning"]["pre_report_overlay"]["search_space"] == "continuous"
     assert params["tuning"]["offline_validation"]["embargo_days"] > 0
-    assert params["tuning"]["objective"]["weights"]["hit_target_40d_quality"] > 0
+    assert params["tuning"]["objective_version"] == "stock_edge_5_10_20_v1"
+    assert params["tuning"]["objective"]["composite_weights"]["horizon_5d"] > 0
+    assert params["tuning"]["objective"]["composite_weights"]["horizon_10d"] > 0
+    assert params["tuning"]["objective"]["composite_weights"]["horizon_20d"] > 0
     assert params["tuning"]["search_bounds"]["aggregate.buy_threshold"][0] < params["tuning"]["search_bounds"]["aggregate.buy_threshold"][1]
-    assert params["tuning"]["objectives"]["hit_50pct_40d"] > 0
+    assert params["tuning"]["objectives"]["return_20d_quality"] > 0
+    assert params["tuning"]["objectives"]["legacy_40d_audit_only"] == 0.0

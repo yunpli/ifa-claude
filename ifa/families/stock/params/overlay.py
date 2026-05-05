@@ -27,8 +27,14 @@ def attach_tuning_runtime(
     status: str,
     reason: str,
     artifact_path: str | None = None,
+    global_artifact_path: str | None = None,
+    single_artifact_path: str | None = None,
     objective_score: float | None = None,
+    global_objective_score: float | None = None,
+    single_objective_score: float | None = None,
     candidate_count: int | None = None,
+    global_candidate_count: int | None = None,
+    single_candidate_count: int | None = None,
 ) -> dict[str, Any]:
     """Attach runtime tuning metadata to params for hashing/audit."""
     out = copy.deepcopy(dict(params))
@@ -36,8 +42,14 @@ def attach_tuning_runtime(
         "status": status,
         "reason": reason,
         "artifact_path": artifact_path,
+        "global_artifact_path": global_artifact_path,
+        "single_artifact_path": single_artifact_path,
         "objective_score": objective_score,
+        "global_objective_score": global_objective_score,
+        "single_objective_score": single_objective_score,
         "candidate_count": candidate_count,
+        "global_candidate_count": global_candidate_count,
+        "single_candidate_count": single_candidate_count,
     }
     return out
 

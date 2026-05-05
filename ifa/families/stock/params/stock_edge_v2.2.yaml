@@ -67,23 +67,39 @@ tuning:
     train_days: 90
     validation_days: 60
     embargo_days: 5
+  objective_version: stock_edge_5_10_20_v1
   objectives:
-    hit_50pct_40d: 0.35
-    avg_return_40d: 0.20
-    max_drawdown: -0.20
-    stop_first_rate: -0.15
-    fill_rate: 0.05
-    turnover_penalty: -0.05
+    return_5d_quality: 0.18
+    entry_fill_5d: 0.12
+    return_10d_quality: 0.18
+    target_first_10d: 0.12
+    return_20d_quality: 0.18
+    target_first_20d: 0.12
+    max_drawdown_penalty: -0.16
+    stop_first_penalty: -0.12
+    liquidity_slippage_penalty: -0.05
+    legacy_40d_audit_only: 0.0
   objective:
-    weights:
-      hit_target_40d_quality: 0.30
-      expected_return_40d: 0.20
-      entry_fill_quality: 0.15
-      reward_risk: 0.15
-      calibration_quality: 0.10
-      expected_drawdown: -0.15
-      stop_first_rate: -0.10
+    composite_weights:
+      horizon_5d: 0.34
+      horizon_10d: 0.33
+      horizon_20d: 0.33
+      calibration_quality: 0.08
       turnover_liquidity_penalty: -0.05
+      strategy_decay_penalty: -0.04
+    horizon_weights:
+      positive_return_quality: 0.20
+      target_first_quality: 0.18
+      entry_fill_quality: 0.12
+      reward_risk: 0.16
+      risk_adjusted_return: 0.16
+      drawdown_penalty: -0.16
+      stop_first_penalty: -0.12
+      liquidity_penalty: -0.05
+      chase_failure_penalty: -0.05
+      overheat_penalty: -0.04
+      decay_penalty: -0.04
+      auxiliary_penalty: -0.03
   search_bounds:
     aggregate.raw_edge_scale: [0.25, 0.85]
     aggregate.buy_threshold: [0.58, 0.78]
@@ -147,7 +163,7 @@ tuning:
     signal_weights.auction_imbalance_proxy: [0.00, 1.20]
     risk.max_entry_distance_from_support_pct: [3.0, 14.0]
     risk.max_stop_distance_pct: [6.0, 18.0]
-    risk.right_tail_target_pct: [20.0, 60.0]
+    risk.right_tail_target_pct: [12.0, 35.0]
     t0.max_size_pct_of_base: [5.0, 30.0]
 
 model:

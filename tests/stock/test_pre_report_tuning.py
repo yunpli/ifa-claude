@@ -6,8 +6,12 @@ from types import SimpleNamespace
 import pandas as pd
 
 from ifa.families.stock.backtest import (
+    HorizonObjectiveInputs,
     PredictionObjectiveInputs,
+    apply_promotion_patch,
+    build_promotion_patch,
     continuous_overlay_bounds,
+    emit_promotion_patch,
     find_latest_tuning_artifact,
     fit_global_preset,
     fit_pre_report_overlay,
@@ -147,23 +151,17 @@ def test_pre_report_tuning_skips_when_history_is_short():
 
 def test_prediction_objective_rewards_prediction_quality_not_only_return():
     strong = PredictionObjectiveInputs(
-        hit_target_40d_quality=0.70,
-        expected_return_40d=0.55,
-        entry_fill_quality=0.80,
-        reward_risk=0.65,
+        objective_5d=HorizonObjectiveInputs(0.72, 0.55, 0.80, 0.65, 0.58, 0.20, 0.15, 0.10),
+        objective_10d=HorizonObjectiveInputs(0.68, 0.58, 0.75, 0.70, 0.62, 0.18, 0.16, 0.12),
+        objective_20d=HorizonObjectiveInputs(0.64, 0.52, 0.72, 0.68, 0.60, 0.22, 0.18, 0.13),
         calibration_quality=0.75,
-        expected_drawdown=0.20,
-        stop_first_rate=0.15,
         turnover_liquidity_penalty=0.20,
     )
     fragile = PredictionObjectiveInputs(
-        hit_target_40d_quality=0.55,
-        expected_return_40d=0.90,
-        entry_fill_quality=0.35,
-        reward_risk=0.35,
+        objective_5d=HorizonObjectiveInputs(0.42, 0.25, 0.35, 0.35, 0.30, 0.80, 0.70, 0.50),
+        objective_10d=HorizonObjectiveInputs(0.40, 0.22, 0.32, 0.32, 0.28, 0.78, 0.68, 0.55),
+        objective_20d=HorizonObjectiveInputs(0.38, 0.20, 0.30, 0.30, 0.26, 0.82, 0.72, 0.60),
         calibration_quality=0.20,
-        expected_drawdown=0.80,
-        stop_first_rate=0.70,
         turnover_liquidity_penalty=0.60,
     )
 
@@ -225,6 +223,13 @@ def test_fit_pre_report_overlay_writes_reusable_artifact(tmp_path):
     assert loaded.kind == "pre_report_overlay"
     assert loaded.candidate_count == 8
     assert "fill_rate_5d" in loaded.metrics
+    assert loaded.objective_version == "stock_edge_5_10_20_v1"
+    assert "objective_5d" in loaded.metrics
+    assert "objective_10d" in loaded.metrics
+    assert "objective_20d" in loaded.metrics
+    assert "composite_objective" in loaded.metrics
+    assert "hit_target_40d_quality" not in loaded.metrics.get("composite_objective", {})
+    assert loaded.metrics["legacy_40d_audit"] == {} or loaded.metrics["legacy_40d_audit"]["role"] == "legacy_audit_only_not_main_objective"
     assert latest is not None
     assert latest.objective_score == loaded.objective_score
 
@@ -241,6 +246,36 @@ def test_fit_global_preset_aggregates_universe():
     assert artifact.kind == "global_preset"
     assert artifact.metrics["stock_count"] == 2
     assert artifact.candidate_count == 6
+    assert "objective_20d" in artifact.metrics
+
+
+def test_optimizer_progress_callback_is_deterministic():
+    params = load_params()
+    progress_a: list[dict] = []
+    progress_b: list[dict] = []
+    artifact_a = fit_pre_report_overlay(
+        _bars(460),
+        ts_code="300042.SZ",
+        as_of_trade_date=dt.date(2025, 4, 4),
+        base_params=params,
+        max_candidates=8,
+        progress_every=2,
+        on_progress=progress_a.append,
+    )
+    artifact_b = fit_pre_report_overlay(
+        _bars(460),
+        ts_code="300042.SZ",
+        as_of_trade_date=dt.date(2025, 4, 4),
+        base_params=params,
+        max_candidates=8,
+        progress_every=2,
+        on_progress=progress_b.append,
+    )
+
+    assert artifact_a.overlay == artifact_b.overlay
+    assert artifact_a.objective_score == artifact_b.objective_score
+    assert progress_a
+    assert progress_a[-1]["candidate"] == 8
 
 
 def test_param_overlay_updates_nested_strategy_and_risk_values():
@@ -258,6 +293,116 @@ def test_param_overlay_updates_nested_strategy_and_risk_values():
     assert overlaid["strategy_matrix"]["cluster_weights"]["model_ensemble"] == 1.25
     assert overlaid["risk"]["right_tail_target_pct"] == 35.0
     assert params_hash(overlaid) != params_hash(params)
+
+
+def test_global_then_single_overlay_runtime_path(monkeypatch):
+    from ifa.families.stock.backtest import report_runtime
+
+    base = load_params()
+    as_of = dt.date(2026, 4, 30)
+    global_artifact = TuningArtifact(
+        ts_code="__GLOBAL__",
+        as_of_trade_date=as_of,
+        kind="global_preset",
+        base_param_hash=params_hash(base),
+        overlay={"aggregate.buy_threshold": 0.60, "cluster_weights.model_ensemble": 1.20},
+        objective_score=0.21,
+        metrics={"objective_version": "stock_edge_5_10_20_v1"},
+        candidate_count=12,
+        history_start=dt.date(2024, 1, 1),
+        history_end=as_of,
+        history_rows=1000,
+        created_at=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
+        namespace="stock_edge/global_preset/top/20260430",
+    )
+    params_after_global = apply_param_overlay(base, global_artifact.overlay)
+    single_artifact = TuningArtifact(
+        ts_code="300042.SZ",
+        as_of_trade_date=as_of,
+        kind="pre_report_overlay",
+        base_param_hash=params_hash(params_after_global),
+        overlay={"aggregate.buy_threshold": 0.64},
+        objective_score=0.31,
+        metrics={"objective_version": "stock_edge_5_10_20_v1"},
+        candidate_count=8,
+        history_start=dt.date(2024, 1, 1),
+        history_end=as_of,
+        history_rows=420,
+        created_at=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
+        namespace="stock_edge/tuning/300042_SZ/20260430",
+    )
+
+    def fake_find_latest_tuning_artifact(*, ts_code, kind, **_kwargs):
+        if kind == "global_preset":
+            return global_artifact
+        if kind == "pre_report_overlay":
+            return single_artifact
+        return None
+
+    monkeypatch.setattr(report_runtime, "build_context", lambda request, **_kwargs: SimpleNamespace(as_of=SimpleNamespace(as_of_trade_date=as_of)))
+    monkeypatch.setattr(report_runtime, "find_latest_tuning_artifact", fake_find_latest_tuning_artifact)
+    monkeypatch.setattr(report_runtime, "load_daily_bars_for_tuning", lambda *_args, **_kwargs: _bars(420))
+
+    result = report_runtime.prepare_report_params(
+        StockEdgeRequest(ts_code="300042.SZ", requested_at=dt.datetime(2026, 5, 2, tzinfo=dt.UTC)),
+        engine=object(),  # type: ignore[arg-type]
+        base_params=base,
+    )
+
+    runtime = result.params["_runtime_tuning"]
+    assert result.status == "reused"
+    assert result.global_artifact is global_artifact
+    assert result.single_artifact is single_artifact
+    assert result.params["strategy_matrix"]["aggregate"]["buy_threshold"] == 0.64
+    assert result.params["strategy_matrix"]["cluster_weights"]["model_ensemble"] == 1.20
+    assert runtime["global_artifact_path"]
+    assert runtime["single_artifact_path"]
+
+
+def test_incompatible_global_hash_is_not_used(monkeypatch):
+    from ifa.families.stock.backtest import report_runtime
+
+    base = load_params()
+    bad_global = TuningArtifact(
+        ts_code="__GLOBAL__",
+        as_of_trade_date=dt.date(2026, 4, 30),
+        kind="global_preset",
+        base_param_hash="not-compatible",
+        overlay={"aggregate.buy_threshold": 0.60},
+        objective_score=0.21,
+        metrics={},
+        candidate_count=12,
+        history_start=None,
+        history_end=None,
+        history_rows=0,
+        created_at=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
+        namespace="bad",
+    )
+    monkeypatch.setattr(report_runtime, "find_latest_tuning_artifact", lambda **_kwargs: bad_global)
+    assert report_runtime._compatible_global_artifact(base, reference_datetime=dt.datetime(2026, 5, 2, tzinfo=dt.UTC), ttl_days=10, enabled=True) is None
+
+
+def test_stale_global_artifact_is_not_used(monkeypatch):
+    from ifa.families.stock.backtest import report_runtime
+
+    base = load_params()
+    stale = TuningArtifact(
+        ts_code="__GLOBAL__",
+        as_of_trade_date=dt.date(2026, 4, 1),
+        kind="global_preset",
+        base_param_hash=params_hash(base),
+        overlay={"aggregate.buy_threshold": 0.60},
+        objective_score=0.21,
+        metrics={},
+        candidate_count=12,
+        history_start=None,
+        history_end=None,
+        history_rows=0,
+        created_at=dt.datetime(2026, 4, 1, tzinfo=dt.UTC),
+        namespace="stale",
+    )
+    monkeypatch.setattr(report_runtime, "find_latest_tuning_artifact", lambda **_kwargs: stale)
+    assert report_runtime._compatible_global_artifact(base, reference_datetime=dt.datetime(2026, 5, 2, tzinfo=dt.UTC), ttl_days=10, enabled=True) is None
 
 
 def test_prepare_report_params_is_noop_when_tuning_disabled():
@@ -340,3 +485,89 @@ def test_prepare_report_params_backfills_short_history_before_overlay(monkeypatc
     assert calls == {"load": 2, "backfill": 1}
     assert "TuShare backfill 已补 2 个交易日" in result.reason
     assert result.params["strategy_matrix"]["aggregate"]["buy_threshold"] == 0.62
+
+
+def test_yaml_patch_emit_does_not_modify_yaml(tmp_path):
+    params = load_params()
+    base_yaml = tmp_path / "stock_edge_v2.2.yaml"
+    import yaml
+
+    base_yaml.write_text(yaml.safe_dump(params, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    artifact = TuningArtifact(
+        ts_code="__GLOBAL__",
+        as_of_trade_date=dt.date(2026, 4, 30),
+        kind="global_preset",
+        base_param_hash=params_hash(params),
+        overlay={"aggregate.buy_threshold": 0.63, "t0.max_size_pct_of_base": 25.0},
+        objective_score=0.22,
+        metrics={"objective_version": "stock_edge_5_10_20_v1"},
+        candidate_count=12,
+        history_start=dt.date(2024, 1, 1),
+        history_end=dt.date(2026, 4, 30),
+        history_rows=1000,
+        created_at=dt.datetime(2026, 5, 5, tzinfo=dt.UTC),
+        namespace="stock_edge/global_preset/top/20260430",
+    )
+    artifact_path = write_tuning_artifact(artifact, root=tmp_path)
+    before = base_yaml.read_text(encoding="utf-8")
+    patch = build_promotion_patch(artifact_path, base_yaml)
+    yaml_path, md_path = emit_promotion_patch(patch, output_dir=tmp_path / "patch")
+
+    assert yaml_path.exists()
+    assert md_path.exists()
+    assert base_yaml.read_text(encoding="utf-8") == before
+    assert any(change["parameter"] == "aggregate.buy_threshold" for change in patch.changes)
+    assert all(change["parameter"] != "t0.max_size_pct_of_base" for change in patch.changes)
+
+
+def test_promote_apply_generates_backup_and_never_accepts_single_overlay(tmp_path):
+    params = load_params()
+    base_yaml = tmp_path / "stock_edge_v2.2.yaml"
+    import yaml
+
+    base_yaml.write_text(yaml.safe_dump(params, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    artifact = TuningArtifact(
+        ts_code="__GLOBAL__",
+        as_of_trade_date=dt.date(2026, 4, 30),
+        kind="global_preset",
+        base_param_hash=params_hash(params),
+        overlay={"aggregate.buy_threshold": 0.63},
+        objective_score=0.22,
+        metrics={"objective_version": "stock_edge_5_10_20_v1"},
+        candidate_count=12,
+        history_start=dt.date(2024, 1, 1),
+        history_end=dt.date(2026, 4, 30),
+        history_rows=1000,
+        created_at=dt.datetime(2026, 5, 5, tzinfo=dt.UTC),
+        namespace="stock_edge/global_preset/top/20260430",
+    )
+    artifact_path = write_tuning_artifact(artifact, root=tmp_path)
+    target, backup = apply_promotion_patch(artifact_path, base_yaml, backup=True)
+
+    assert target == base_yaml
+    assert backup is not None and backup.exists()
+    promoted = yaml.safe_load(base_yaml.read_text(encoding="utf-8"))
+    assert promoted["strategy_matrix"]["aggregate"]["buy_threshold"] == 0.63
+
+    single = TuningArtifact(
+        ts_code="300042.SZ",
+        as_of_trade_date=dt.date(2026, 4, 30),
+        kind="pre_report_overlay",
+        base_param_hash=params_hash(params),
+        overlay={"aggregate.buy_threshold": 0.70},
+        objective_score=0.42,
+        metrics={},
+        candidate_count=4,
+        history_start=None,
+        history_end=None,
+        history_rows=0,
+        created_at=dt.datetime(2026, 5, 5, tzinfo=dt.UTC),
+        namespace="stock_edge/tuning/300042_SZ/20260430",
+    )
+    single_path = write_tuning_artifact(single, root=tmp_path)
+    try:
+        build_promotion_patch(single_path, base_yaml)
+    except ValueError as exc:
+        assert "global_preset" in str(exc)
+    else:
+        raise AssertionError("single-stock overlay must not be promotable")

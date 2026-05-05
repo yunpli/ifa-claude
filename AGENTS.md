@@ -35,7 +35,8 @@
 - **最新 handover（调参重点）**：`docs/stock_edge_v2_2_tuning_handover_2026_05_05.md` 已记录 2026-05-05 的数据补足、全局 preset、单股 overlay、artifact 路径、报告落库校验和下一轮 review 清单。下一位 agent 接手 Stock Edge 调参前必须先读这个文件。
 - **提交状态**：Stock Edge v2.2 三周期主实现已 commit/push 到 `origin/main`，commit `5a578a6` (`Implement Stock Edge v2.2 decision layer`)。handover 文档为后续补充提交。
 - **调参机制口径**：当前调参不会自动改写 `ifa/families/stock/params/stock_edge_v2.2.yaml`。YAML 是 baseline 和搜索边界；全局 preset / 单股 overlay 的最优参数写到 `/Users/neoclaw/claude/ifaenv/models/stock/tuning/**/*.json`，报告运行时通过 `apply_param_overlay()` 叠加 JSON overlay。
-- **调参 review 必看风险**：`pre_report_tuning.py` 文档说单股 overlay 从最新 global preset 出发，但当前 `prepare_report_params()` 只自动查/生成单股 `pre_report_overlay`，还没有先读取 `global_preset/__GLOBAL__` 做两层叠加；此外 optimizer/objectives 的 metrics 仍有 `40d` 遗留字段，下一轮应重构为 5/10/20 horizon-specific objective。
+- **调参 review 历史风险（已修）**：此前 `prepare_report_params()` 没有先读取 `global_preset/__GLOBAL__`，optimizer/objectives 也有 `40d` 主 objective 遗留；这些已在 2026-05-05 调参治理修正中处理。下一轮 review 重点转为：global preset 是否应晋升 YAML baseline、objective 权重是否经过 OOS 验证、是否需要更强搜索器/校准器。
+- **2026-05-05 调参治理修正**：已补 `docs/stock_edge_v2_2_tuning_architecture_review.md`、`docs/stock_edge_v2_2_5_10_20_objective_refactor.md`、`docs/stock_edge_v2_2_global_preset_promotion.md`、`docs/stock_edge_v2_2_strategy_tuning_coverage.md`、`docs/stock_edge_v2_2_tuning_runtime_handoff.md`。当前 global preset 兼容时会先叠加，single overlay 再覆盖；objective 主路径改为 `stock_edge_5_10_20_v1`，40d 只做 legacy audit；新增 `scripts/stock_edge_promote_global_preset.py` 用于 emit/apply 可审计 YAML patch，默认不静默修改 YAML。
 - **产品命名**：原 `stock intel` 改为 **Stock Edge（个股作战室）**；代码继续复用 `ifa/families/stock/**`，不要新建平行 `stockedge` package。
 - **输出目录**：报告、调参 artifact、分钟线 parquet 等运行输出统一落到 `/Users/neoclaw/claude/ifaenv/`，不要污染 repo。手动报告路径形态为 `/Users/neoclaw/claude/ifaenv/out/<run_mode>/<YYYYMMDD>/stock_edge/`。
 - **as-of 规则**：交易日北京时间 15:00 前用 T-1，15:00 后用当天；非交易日用最近已完成交易日。

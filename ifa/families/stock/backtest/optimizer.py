@@ -10,14 +10,15 @@ import datetime as dt
 import hashlib
 import math
 import random
+import time
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 
 from ifa.families.stock.params import params_hash
 
-from .objectives import PredictionObjectiveInputs, continuous_overlay_bounds, score_prediction_objective
+from .objectives import build_composite_objective, continuous_overlay_bounds, score_prediction_objective
 from .tuning_artifact import TuningArtifact
 
 
@@ -28,6 +29,8 @@ def fit_pre_report_overlay(
     as_of_trade_date: dt.date,
     base_params: Mapping[str, Any],
     max_candidates: int = 64,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+    progress_every: int = 10,
 ) -> TuningArtifact:
     """Tune a bounded continuous parameter overlay for one stock.
 
@@ -42,6 +45,8 @@ def fit_pre_report_overlay(
         base_params=base_params,
         seed=f"{ts_code}:{as_of_trade_date:%Y%m%d}:overlay",
         max_candidates=max_candidates,
+        on_progress=on_progress,
+        progress_every=progress_every,
     )
     return TuningArtifact(
         ts_code=ts_code,
@@ -57,6 +62,7 @@ def fit_pre_report_overlay(
         history_rows=len(frame),
         created_at=dt.datetime.now(dt.timezone.utc),
         namespace=f"stock_edge/tuning/{ts_code.replace('.', '_')}/{as_of_trade_date:%Y%m%d}",
+        objective_version=str(metrics.get("objective_version", "stock_edge_5_10_20_v1")),
     )
 
 
@@ -67,6 +73,8 @@ def fit_global_preset(
     base_params: Mapping[str, Any],
     universe: str = "top_liquidity_500",
     max_candidates: int = 96,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+    progress_every: int = 10,
 ) -> TuningArtifact:
     """Tune a shared global preset across a stock universe."""
     cleaned = {
@@ -79,12 +87,15 @@ def fit_global_preset(
         base_params=base_params,
         seed=f"{universe}:{as_of_date:%Y%m%d}:global",
         max_candidates=max_candidates,
+        on_progress=on_progress,
+        progress_every=progress_every,
     )
     rows = sum(len(frame) for frame in cleaned.values())
     starts = [frame["trade_date"].iloc[0] for frame in cleaned.values() if not frame.empty]
     ends = [frame["trade_date"].iloc[-1] for frame in cleaned.values() if not frame.empty]
     metrics = dict(metrics)
-    metrics["stock_count"] = len(cleaned)
+    metrics["input_stock_count"] = len(cleaned)
+    metrics["stock_count"] = sum(1 for frame in cleaned.values() if len(frame) >= 80)
     return TuningArtifact(
         ts_code="__GLOBAL__",
         as_of_trade_date=as_of_date,
@@ -99,6 +110,7 @@ def fit_global_preset(
         history_rows=rows,
         created_at=dt.datetime.now(dt.timezone.utc),
         namespace=f"stock_edge/global_preset/{universe}/{as_of_date:%Y%m%d}",
+        objective_version=str(metrics.get("objective_version", "stock_edge_5_10_20_v1")),
     )
 
 
@@ -108,6 +120,8 @@ def _search_overlay(
     base_params: Mapping[str, Any],
     seed: str,
     max_candidates: int,
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+    progress_every: int = 10,
 ) -> tuple[dict[str, Any], dict[str, Any], float, int]:
     valid_frames = {k: v for k, v in frames.items() if len(v) >= 80}
     if not valid_frames:
@@ -117,14 +131,27 @@ def _search_overlay(
     best_metrics: dict[str, Any] = {}
     best_score = -999.0
     candidates = _candidate_overlays(base_params, seed=seed, max_candidates=max_candidates)
-    for overlay in candidates:
+    started = time.monotonic()
+    total = len(candidates)
+    for idx, overlay in enumerate(candidates, start=1):
         metrics = _evaluate_overlay(valid_frames, overlay, base_params)
-        weights = dict(base_params.get("tuning", {}).get("objective", {}).get("weights", {}))
-        score = score_prediction_objective(PredictionObjectiveInputs(**metrics["objective_inputs"]), weights=weights)
+        weights = dict(base_params.get("tuning", {}).get("objective", {}).get("composite_weights", {}))
+        score = score_prediction_objective(metrics, weights=weights)
         if score > best_score:
             best_overlay = overlay
             best_metrics = metrics
             best_score = score
+        if on_progress and (idx == 1 or idx == total or idx % max(1, progress_every) == 0):
+            elapsed = time.monotonic() - started
+            eta = elapsed / idx * max(total - idx, 0) if idx else 0.0
+            on_progress({
+                "candidate": idx,
+                "total": total,
+                "score": score,
+                "best_score": best_score,
+                "elapsed_seconds": round(elapsed, 2),
+                "eta_seconds": round(eta, 2),
+            })
     return best_overlay, best_metrics, best_score, len(candidates)
 
 
@@ -215,19 +242,15 @@ def _evaluate_overlay(
     overlay: Mapping[str, Any],
     base_params: Mapping[str, Any],
 ) -> dict[str, Any]:
-    hit_count = 0
     signal_count = 0
     fill_count = 0
-    clean_fill_count = 0
-    expected_returns: list[float] = []
-    drawdowns: list[float] = []
-    reward_risks: list[float] = []
-    stop_first_count = 0
     predicted_scores: list[float] = []
+    horizon_stats = {5: _empty_horizon_stats(), 10: _empty_horizon_stats(), 20: _empty_horizon_stats()}
+    legacy_40d = _empty_legacy_stats()
 
     for frame in frames.values():
         enriched = _features(frame, overlay, base_params)
-        for idx in range(60, len(enriched) - 40):
+        for idx in range(60, len(enriched) - 21):
             row = enriched.iloc[idx]
             score = float(row["candidate_score"])
             buy_threshold = float(_overlay_value(overlay, base_params, "aggregate.buy_threshold"))
@@ -242,76 +265,231 @@ def _evaluate_overlay(
                 continue
             fill_count += 1
             entry = entry_high
-            future = enriched.iloc[fill_idx + 1 : fill_idx + 41]
-            if future.empty or entry <= 0:
+            if entry <= 0:
                 predicted_scores.append(score)
                 continue
-            max_high = float(future["high"].max())
-            min_low = float(future["low"].min())
-            final_close = float(future.iloc[-1]["close"])
-            target_return = float(_overlay_value(overlay, base_params, "risk.right_tail_target_pct")) / 100.0
-            stop_distance = float(_overlay_value(overlay, base_params, "risk.max_stop_distance_pct")) / 100.0
-            target_price = entry * (1.0 + target_return)
-            stop_price = entry * (1.0 - stop_distance)
-            event = _first_path_event(future, target_price=target_price, stop_price=stop_price)
-            hit_target = event == "target"
-            hit_stop = event == "stop"
-
-            hit_count += int(hit_target)
-            expected_returns.append(final_close / entry - 1.0)
-            drawdowns.append(max(0.0, 1.0 - min_low / entry))
-            reward_risks.append(max(0.0, (max_high / entry - 1.0) / max(0.03, stop_distance)))
-            stop_first_count += int(hit_stop)
-            clean_fill_count += int(event != "stop")
+            stop_distance = float(_overlay_value(overlay, base_params, "risk.max_stop_distance_pct") or 10.0) / 100.0
+            for horizon in (5, 10, 20):
+                future = enriched.iloc[fill_idx + 1 : fill_idx + 1 + horizon]
+                _update_horizon_stats(
+                    horizon_stats[horizon],
+                    future,
+                    entry=entry,
+                    stop_distance=stop_distance,
+                    target_return=_target_return_for_horizon(horizon, overlay, base_params),
+                )
+            future_40 = enriched.iloc[fill_idx + 1 : fill_idx + 41]
+            _update_legacy_40d(legacy_40d, future_40, entry=entry, stop_distance=stop_distance, overlay=overlay, base_params=base_params)
             predicted_scores.append(score)
 
     if signal_count == 0:
-        objective = {
-            "hit_target_40d_quality": 0.0,
-            "expected_return_40d": 0.0,
-            "entry_fill_quality": 0.0,
-            "reward_risk": 0.0,
-            "calibration_quality": 0.0,
-            "expected_drawdown": 1.0,
-            "stop_first_rate": 1.0,
-            "turnover_liquidity_penalty": 1.0,
-        }
-        return {"sample_count": 0, "fill_rate_5d": 0.0, "clean_fill_rate_5d": 0.0, "objective_inputs": objective}
+        empty_objective = build_composite_objective(
+            _empty_horizon_objective(),
+            _empty_horizon_objective(),
+            _empty_horizon_objective(),
+            calibration_quality=0.0,
+            turnover_liquidity_penalty=1.0,
+        )
+        return {"sample_count": 0, "fill_rate_5d": 0.0, **empty_objective, "legacy_40d_audit": {}}
 
-    hit_rate = hit_count / signal_count
-    filled_denominator = max(1, fill_count)
     fill_rate = fill_count / signal_count
-    clean_fill_rate = clean_fill_count / signal_count
-    avg_return = sum(expected_returns) / filled_denominator
-    avg_drawdown = sum(drawdowns) / filled_denominator
-    avg_reward_risk = sum(reward_risks) / filled_denominator
-    stop_first_rate = stop_first_count / signal_count
-    sample_factor = min(1.0, math.sqrt(signal_count / 40.0))
-    mean_pred = sum(predicted_scores) / signal_count
-    calibration_quality = max(0.0, 1.0 - abs(mean_pred - hit_rate) / 0.75)
+    sample_factor = min(1.0, math.sqrt(signal_count / 60.0))
+    objective_5d = _horizon_objective(horizon_stats[5], signal_count=signal_count, fill_rate=fill_rate, sample_factor=sample_factor, horizon=5)
+    objective_10d = _horizon_objective(horizon_stats[10], signal_count=signal_count, fill_rate=fill_rate, sample_factor=sample_factor, horizon=10)
+    objective_20d = _horizon_objective(horizon_stats[20], signal_count=signal_count, fill_rate=fill_rate, sample_factor=sample_factor, horizon=20)
+    mean_pred = sum(predicted_scores) / max(1, len(predicted_scores))
+    avg_positive = (
+        objective_5d["positive_return_rate"] +
+        objective_10d["positive_return_rate"] +
+        objective_20d["positive_return_rate"]
+    ) / 3.0
+    calibration_quality = max(0.0, 1.0 - abs(mean_pred - avg_positive) / 0.75)
     trade_rate = signal_count / max(1, sum(max(0, len(f) - 100) for f in frames.values()))
     turnover_penalty = max(0.0, min(1.0, trade_rate / 0.35))
-
-    objective = {
-        "hit_target_40d_quality": _clip(hit_rate * sample_factor, 0.0, 1.0),
-        "expected_return_40d": _clip((avg_return + 0.15) / 0.65, 0.0, 1.0),
-        "entry_fill_quality": _clip((0.65 * clean_fill_rate + 0.35 * fill_rate) * sample_factor, 0.0, 1.0),
-        "reward_risk": _clip(avg_reward_risk / 3.0, 0.0, 1.0),
-        "calibration_quality": _clip(calibration_quality, 0.0, 1.0),
-        "expected_drawdown": _clip(avg_drawdown / 0.25, 0.0, 1.0),
-        "stop_first_rate": _clip(stop_first_rate, 0.0, 1.0),
-        "turnover_liquidity_penalty": turnover_penalty,
-    }
+    objective_payload = build_composite_objective(
+        objective_5d,
+        objective_10d,
+        objective_20d,
+        calibration_quality=_clip(calibration_quality, 0.0, 1.0),
+        turnover_liquidity_penalty=turnover_penalty,
+        strategy_decay_penalty=0.0,
+        weights=dict(base_params.get("tuning", {}).get("objective", {}).get("composite_weights", {})),
+    )
     return {
         "sample_count": signal_count,
         "fill_rate_5d": round(fill_rate, 6),
-        "clean_fill_rate_5d": round(clean_fill_rate, 6),
-        "hit_40d_rate": round(hit_rate, 6),
-        "avg_return_40d": round(avg_return, 6),
-        "avg_drawdown_40d": round(avg_drawdown, 6),
-        "stop_first_rate": round(stop_first_rate, 6),
         "trade_rate": round(trade_rate, 6),
-        "objective_inputs": objective,
+        **objective_payload,
+        "legacy_40d_audit": _legacy_40d_metrics(legacy_40d),
+    }
+
+
+def _empty_horizon_stats() -> dict[str, Any]:
+    return {
+        "count": 0,
+        "positive": 0,
+        "target_first": 0,
+        "stop_first": 0,
+        "returns": [],
+        "drawdowns": [],
+        "mfe": [],
+        "mae": [],
+        "reward_risks": [],
+    }
+
+
+def _empty_legacy_stats() -> dict[str, Any]:
+    return {"count": 0, "target": 0, "stop": 0, "returns": [], "drawdowns": []}
+
+
+def _empty_horizon_objective() -> dict[str, float]:
+    return {
+        "positive_return_rate": 0.0,
+        "target_first_rate": 0.0,
+        "stop_first_rate": 1.0,
+        "avg_return": 0.0,
+        "median_return": 0.0,
+        "avg_drawdown": 1.0,
+        "mfe_mae_ratio": 0.0,
+        "positive_return_quality": 0.0,
+        "target_first_quality": 0.0,
+        "entry_fill_quality": 0.0,
+        "reward_risk": 0.0,
+        "risk_adjusted_return": 0.0,
+        "drawdown_penalty": 1.0,
+        "stop_first_penalty": 1.0,
+        "liquidity_penalty": 1.0,
+        "chase_failure_penalty": 1.0,
+        "overheat_penalty": 0.0,
+        "decay_penalty": 0.0,
+        "auxiliary_penalty": 0.0,
+    }
+
+
+def _target_return_for_horizon(horizon: int, overlay: Mapping[str, Any], base_params: Mapping[str, Any]) -> float:
+    legacy_target = float(_overlay_value(overlay, base_params, "risk.right_tail_target_pct") or 25.0) / 100.0
+    defaults = {5: 0.05, 10: 0.08, 20: min(0.20, max(0.12, legacy_target * 0.55))}
+    return defaults[horizon]
+
+
+def _update_horizon_stats(
+    stats: dict[str, Any],
+    future: pd.DataFrame,
+    *,
+    entry: float,
+    stop_distance: float,
+    target_return: float,
+) -> None:
+    if future.empty or entry <= 0:
+        return
+    final_close = float(future.iloc[-1]["close"])
+    max_high = float(future["high"].max())
+    min_low = float(future["low"].min())
+    target_price = entry * (1.0 + target_return)
+    stop_price = entry * (1.0 - stop_distance)
+    event = _first_path_event(future, target_price=target_price, stop_price=stop_price)
+    ret = final_close / entry - 1.0
+    drawdown = max(0.0, 1.0 - min_low / entry)
+    mfe = max(0.0, max_high / entry - 1.0)
+    mae = max(0.0, 1.0 - min_low / entry)
+    stats["count"] += 1
+    stats["positive"] += int(ret > 0)
+    stats["target_first"] += int(event == "target")
+    stats["stop_first"] += int(event == "stop")
+    stats["returns"].append(ret)
+    stats["drawdowns"].append(drawdown)
+    stats["mfe"].append(mfe)
+    stats["mae"].append(mae)
+    stats["reward_risks"].append(mfe / max(0.03, mae, stop_distance))
+
+
+def _horizon_objective(
+    stats: Mapping[str, Any],
+    *,
+    signal_count: int,
+    fill_rate: float,
+    sample_factor: float,
+    horizon: int,
+) -> dict[str, float]:
+    count = int(stats.get("count") or 0)
+    if count <= 0:
+        return _empty_horizon_objective()
+    returns = list(stats.get("returns") or [])
+    drawdowns = list(stats.get("drawdowns") or [])
+    reward_risks = list(stats.get("reward_risks") or [])
+    mfe = list(stats.get("mfe") or [])
+    mae = list(stats.get("mae") or [])
+    positive_rate = float(stats.get("positive") or 0) / max(1, count)
+    target_first_rate = float(stats.get("target_first") or 0) / max(1, count)
+    stop_first_rate = float(stats.get("stop_first") or 0) / max(1, count)
+    avg_return = sum(returns) / max(1, len(returns))
+    median_return = float(pd.Series(returns).median()) if returns else 0.0
+    avg_drawdown = sum(drawdowns) / max(1, len(drawdowns))
+    avg_reward_risk = sum(reward_risks) / max(1, len(reward_risks))
+    avg_mfe = sum(mfe) / max(1, len(mfe))
+    avg_mae = sum(mae) / max(1, len(mae))
+    return_scale = {5: 0.12, 10: 0.18, 20: 0.28}[horizon]
+    drawdown_scale = {5: 0.10, 10: 0.14, 20: 0.20}[horizon]
+    chase_failure = max(0.0, 1.0 - fill_rate)
+    liquidity_penalty = max(0.0, min(1.0, signal_count / 20000.0))
+    return {
+        "positive_return_rate": round(positive_rate, 6),
+        "target_first_rate": round(target_first_rate, 6),
+        "stop_first_rate": round(stop_first_rate, 6),
+        "avg_return": round(avg_return, 6),
+        "median_return": round(median_return, 6),
+        "avg_drawdown": round(avg_drawdown, 6),
+        "avg_mfe": round(avg_mfe, 6),
+        "avg_mae": round(avg_mae, 6),
+        "mfe_mae_ratio": round(avg_mfe / max(0.01, avg_mae), 6),
+        "positive_return_quality": _clip(positive_rate * sample_factor, 0.0, 1.0),
+        "target_first_quality": _clip(target_first_rate * sample_factor, 0.0, 1.0),
+        "entry_fill_quality": _clip(fill_rate * sample_factor, 0.0, 1.0),
+        "reward_risk": _clip(avg_reward_risk / 3.0, 0.0, 1.0),
+        "risk_adjusted_return": _clip((avg_return + return_scale / 2.0) / (return_scale * 1.5), 0.0, 1.0),
+        "drawdown_penalty": _clip(avg_drawdown / drawdown_scale, 0.0, 1.0),
+        "stop_first_penalty": _clip(stop_first_rate, 0.0, 1.0),
+        "liquidity_penalty": round(liquidity_penalty, 6),
+        "chase_failure_penalty": round(chase_failure, 6),
+        "overheat_penalty": _clip(max(0.0, avg_return - return_scale) / max(0.01, return_scale), 0.0, 1.0),
+        "decay_penalty": 0.0,
+        "auxiliary_penalty": 0.0,
+    }
+
+
+def _update_legacy_40d(
+    stats: dict[str, Any],
+    future: pd.DataFrame,
+    *,
+    entry: float,
+    stop_distance: float,
+    overlay: Mapping[str, Any],
+    base_params: Mapping[str, Any],
+) -> None:
+    if future.empty or entry <= 0:
+        return
+    target_return = float(_overlay_value(overlay, base_params, "risk.right_tail_target_pct") or 25.0) / 100.0
+    target_price = entry * (1.0 + target_return)
+    stop_price = entry * (1.0 - stop_distance)
+    event = _first_path_event(future, target_price=target_price, stop_price=stop_price)
+    stats["count"] += 1
+    stats["target"] += int(event == "target")
+    stats["stop"] += int(event == "stop")
+    stats["returns"].append(float(future.iloc[-1]["close"]) / entry - 1.0)
+    stats["drawdowns"].append(max(0.0, 1.0 - float(future["low"].min()) / entry))
+
+
+def _legacy_40d_metrics(stats: Mapping[str, Any]) -> dict[str, float | str]:
+    count = int(stats.get("count") or 0)
+    returns = list(stats.get("returns") or [])
+    drawdowns = list(stats.get("drawdowns") or [])
+    return {
+        "role": "legacy_audit_only_not_main_objective",
+        "sample_count": count,
+        "hit_target_40d_rate": round(float(stats.get("target") or 0) / max(1, count), 6),
+        "stop_first_40d_rate": round(float(stats.get("stop") or 0) / max(1, count), 6),
+        "avg_return_40d": round(sum(returns) / max(1, len(returns)), 6),
+        "avg_drawdown_40d": round(sum(drawdowns) / max(1, len(drawdowns)), 6),
     }
 
 

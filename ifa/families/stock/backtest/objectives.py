@@ -1,76 +1,170 @@
 """Objective functions for Stock Edge parameter tuning.
 
-The objective is intentionally separate from the report builder. Weekend global
-preset training and pre-report per-stock overlay tuning should optimize the
-same prediction-execution target without changing report code.
+The production Stock Edge v2.2 objective is horizon-specific. The main score
+optimizes 5/10/20 trading-day executable decisions; legacy 40d right-tail
+statistics may be emitted for audit, but they must not contribute to the main
+objective.
 """
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from typing import Any, Mapping
+
+OBJECTIVE_VERSION = "stock_edge_5_10_20_v1"
+
+
+@dataclass(frozen=True)
+class HorizonObjectiveInputs:
+    """Normalized metrics for one horizon.
+
+    Quality fields use roughly ``[0, 1]`` where higher is better. Penalty fields
+    also use ``[0, 1]`` where higher is worse.
+    """
+
+    positive_return_quality: float
+    target_first_quality: float
+    entry_fill_quality: float
+    reward_risk: float
+    risk_adjusted_return: float
+    drawdown_penalty: float
+    stop_first_penalty: float
+    liquidity_penalty: float
+    chase_failure_penalty: float = 0.0
+    overheat_penalty: float = 0.0
+    decay_penalty: float = 0.0
+    auxiliary_penalty: float = 0.0
+
+    def to_dict(self) -> dict[str, float]:
+        return asdict(self)
 
 
 @dataclass(frozen=True)
 class PredictionObjectiveInputs:
-    """Normalized metrics for one candidate parameter set.
+    """Three-horizon objective inputs for a candidate parameter overlay."""
 
-    All fields are continuous and should be scaled to roughly ``[0, 1]`` before
-    scoring, except penalties which also use ``[0, 1]`` where higher is worse.
-    The caller is responsible for computing the metrics from replay labels.
-    """
+    objective_5d: HorizonObjectiveInputs
+    objective_10d: HorizonObjectiveInputs
+    objective_20d: HorizonObjectiveInputs
+    calibration_quality: float = 0.0
+    turnover_liquidity_penalty: float = 0.0
+    strategy_decay_penalty: float = 0.0
 
-    hit_target_40d_quality: float
-    expected_return_40d: float
-    entry_fill_quality: float
-    reward_risk: float
-    calibration_quality: float
-    expected_drawdown: float
-    stop_first_rate: float
-    turnover_liquidity_penalty: float
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "objective_version": OBJECTIVE_VERSION,
+            "objective_5d": self.objective_5d.to_dict(),
+            "objective_10d": self.objective_10d.to_dict(),
+            "objective_20d": self.objective_20d.to_dict(),
+            "composite_objective": {
+                "calibration_quality": self.calibration_quality,
+                "turnover_liquidity_penalty": self.turnover_liquidity_penalty,
+                "strategy_decay_penalty": self.strategy_decay_penalty,
+            },
+        }
 
-    def to_dict(self) -> dict:
-        return asdict(self)
 
+DEFAULT_HORIZON_WEIGHTS: dict[str, float] = {
+    "positive_return_quality": 0.20,
+    "target_first_quality": 0.18,
+    "entry_fill_quality": 0.12,
+    "reward_risk": 0.16,
+    "risk_adjusted_return": 0.16,
+    "drawdown_penalty": -0.16,
+    "stop_first_penalty": -0.12,
+    "liquidity_penalty": -0.05,
+    "chase_failure_penalty": -0.05,
+    "overheat_penalty": -0.04,
+    "decay_penalty": -0.04,
+    "auxiliary_penalty": -0.03,
+}
 
-DEFAULT_OBJECTIVE_WEIGHTS: dict[str, float] = {
-    "hit_target_40d_quality": 0.30,
-    "expected_return_40d": 0.20,
-    "entry_fill_quality": 0.15,
-    "reward_risk": 0.15,
-    "calibration_quality": 0.10,
-    "expected_drawdown": -0.15,
-    "stop_first_rate": -0.10,
+DEFAULT_COMPOSITE_WEIGHTS: dict[str, float] = {
+    "horizon_5d": 0.34,
+    "horizon_10d": 0.33,
+    "horizon_20d": 0.33,
+    "calibration_quality": 0.08,
     "turnover_liquidity_penalty": -0.05,
+    "strategy_decay_penalty": -0.04,
 }
 
 
-def score_prediction_objective(
-    metrics: PredictionObjectiveInputs,
+def score_horizon_objective(
+    metrics: HorizonObjectiveInputs | Mapping[str, Any],
     *,
-    weights: dict[str, float] | None = None,
+    weights: Mapping[str, float] | None = None,
 ) -> float:
-    """Score a tuning candidate by prediction-execution quality.
-
-    This is not a raw return maximizer. It rewards a candidate only when it
-    improves the final executable prediction: target hit quality, expected
-    return, fill feasibility, reward/risk, and probability calibration.
-    Drawdown, stop-first behavior, and liquidity/turnover costs are explicit
-    penalties.
-    """
-    w = {**DEFAULT_OBJECTIVE_WEIGHTS, **(weights or {})}
-    data = metrics.to_dict()
+    data = metrics.to_dict() if isinstance(metrics, HorizonObjectiveInputs) else dict(metrics)
+    w = {**DEFAULT_HORIZON_WEIGHTS, **dict(weights or {})}
     score = 0.0
     for key, weight in w.items():
-        score += float(weight) * _clip(float(data.get(key, 0.0)), 0.0, 1.0)
+        score += float(weight) * _clip(float(data.get(key, 0.0) or 0.0), 0.0, 1.0)
     return round(score, 6)
 
 
-def continuous_overlay_bounds() -> dict[str, tuple[float, float]]:
-    """Return first-pass continuous parameter bounds for overlay search.
+def score_prediction_objective(
+    metrics: PredictionObjectiveInputs | Mapping[str, Any],
+    *,
+    weights: Mapping[str, float] | None = None,
+) -> float:
+    """Score a tuning candidate by 5/10/20 decision quality.
 
-    The optimizer should search inside these ranges without introducing hard
-    discrete branches. These are deliberately conservative; single-stock tuning
-    should personalize around the global preset, not rewrite the strategy.
+    The return value is a composite signal-quality score, not a calibrated
+    probability. Legacy 40d audit metrics are intentionally ignored here.
     """
+    data = metrics.to_dict() if isinstance(metrics, PredictionObjectiveInputs) else dict(metrics)
+    composite = dict(data.get("composite_objective") or {})
+    if "score" in composite:
+        return round(float(composite["score"]), 6)
+
+    cw = {**DEFAULT_COMPOSITE_WEIGHTS, **dict(weights or {})}
+    horizon_scores = {
+        "horizon_5d": score_horizon_objective(data.get("objective_5d") or {}),
+        "horizon_10d": score_horizon_objective(data.get("objective_10d") or {}),
+        "horizon_20d": score_horizon_objective(data.get("objective_20d") or {}),
+    }
+    score = 0.0
+    for key, value in horizon_scores.items():
+        score += float(cw.get(key, 0.0)) * value
+    score += float(cw.get("calibration_quality", 0.0)) * _clip(float(composite.get("calibration_quality", 0.0) or 0.0), 0.0, 1.0)
+    score += float(cw.get("turnover_liquidity_penalty", 0.0)) * _clip(float(composite.get("turnover_liquidity_penalty", 0.0) or 0.0), 0.0, 1.0)
+    score += float(cw.get("strategy_decay_penalty", 0.0)) * _clip(float(composite.get("strategy_decay_penalty", 0.0) or 0.0), 0.0, 1.0)
+    return round(score, 6)
+
+
+def build_composite_objective(
+    objective_5d: Mapping[str, Any],
+    objective_10d: Mapping[str, Any],
+    objective_20d: Mapping[str, Any],
+    *,
+    calibration_quality: float,
+    turnover_liquidity_penalty: float,
+    strategy_decay_penalty: float = 0.0,
+    weights: Mapping[str, float] | None = None,
+) -> dict[str, Any]:
+    """Return the artifact-ready composite objective block."""
+    payload = {
+        "objective_version": OBJECTIVE_VERSION,
+        "objective_5d": dict(objective_5d),
+        "objective_10d": dict(objective_10d),
+        "objective_20d": dict(objective_20d),
+        "composite_objective": {
+            "calibration_quality": round(calibration_quality, 6),
+            "turnover_liquidity_penalty": round(turnover_liquidity_penalty, 6),
+            "strategy_decay_penalty": round(strategy_decay_penalty, 6),
+        },
+    }
+    score = score_prediction_objective(payload, weights=weights)
+    payload["composite_objective"]["score"] = score
+    payload["composite_objective"]["horizon_scores"] = {
+        "5d": score_horizon_objective(objective_5d),
+        "10d": score_horizon_objective(objective_10d),
+        "20d": score_horizon_objective(objective_20d),
+    }
+    return payload
+
+
+def continuous_overlay_bounds() -> dict[str, tuple[float, float]]:
+    """Return first-pass continuous parameter bounds for overlay search."""
     return {
         "aggregate.raw_edge_scale": (0.25, 0.85),
         "aggregate.buy_threshold": (0.58, 0.78),
@@ -105,7 +199,7 @@ def continuous_overlay_bounds() -> dict[str, tuple[float, float]]:
         "signal_weights.conformal_return_band": (0.20, 1.60),
         "signal_weights.stop_first_classifier": (0.20, 1.80),
         "signal_weights.isotonic_score_calibrator": (0.20, 1.60),
-        "signal_weights.right_tail_meta_gbm": (0.20, 1.80),
+        "signal_weights.right_tail_meta_gbm": (0.00, 1.20),
         "signal_weights.temporal_fusion_sequence_ranker": (0.20, 1.80),
         "signal_weights.target_stop_survival_model": (0.20, 1.80),
         "signal_weights.stop_loss_hazard_model": (0.20, 1.80),
@@ -133,7 +227,7 @@ def continuous_overlay_bounds() -> dict[str, tuple[float, float]]:
         "signal_weights.auction_imbalance_proxy": (0.00, 1.20),
         "risk.max_entry_distance_from_support_pct": (3.0, 14.0),
         "risk.max_stop_distance_pct": (6.0, 18.0),
-        "risk.right_tail_target_pct": (20.0, 60.0),
+        "risk.right_tail_target_pct": (12.0, 35.0),
         "t0.max_size_pct_of_base": (5.0, 30.0),
     }
 
