@@ -63,11 +63,56 @@
     </p>
   </section>
 
-  {# ── §01 Tone card — 今日体制 ─────────────────────── #}
-  <section class="ifa-section">
+  {# ── §01 今日快览 Dashboard ────────────────────────── #}
+  {% set db = report.dashboard %}
+  <section class="ifa-section ifa-dashboard">
     <header class="ifa-section__head">
       <span class="ifa-section__num">§01</span>
-      <h2 class="ifa-section__title">今日市场体制</h2>
+      <h2 class="ifa-section__title">今日快览</h2>
+    </header>
+    <div class="ifa-dash-grid">
+      <div class="ifa-dash-card">
+        <div class="ifa-dash-card__label">市场体制</div>
+        <div class="ifa-dash-card__value {% if db.regime_confidence and db.regime_confidence >= 0.7 %}ifa-dash-card__value--high{% elif db.regime_confidence and db.regime_confidence >= 0.5 %}ifa-dash-card__value--mid{% else %}ifa-dash-card__value--low{% endif %}">
+          {{ db.regime | regime_label }}
+        </div>
+        <div class="ifa-dash-card__sub">置信度 {{ '%.2f' | format(db.regime_confidence) if db.regime_confidence is not none else '-' }}</div>
+      </div>
+      <div class="ifa-dash-card">
+        <div class="ifa-dash-card__label">今日观察池</div>
+        <div class="ifa-dash-card__value">
+          <span style="color:var(--up);">{{ db.tier_a_count }}</span> <span style="font-size:14px; font-weight:400;">高优先级</span>
+          &nbsp;/&nbsp;
+          <span style="color:var(--accent);">{{ db.tier_b_count }}</span> <span style="font-size:14px; font-weight:400;">次优先级</span>
+        </div>
+        <div class="ifa-dash-card__sub">Tier A · Tier B 标的数</div>
+      </div>
+      <div class="ifa-dash-card">
+        <div class="ifa-dash-card__label">主导策略族</div>
+        <div class="ifa-dash-card__value" style="font-size:18px;">
+          {% if db.top_family %}{{ db.top_family.name }}{% else %}—{% endif %}
+        </div>
+        <div class="ifa-dash-card__sub">
+          {% if db.top_family %}今日命中 {{ db.top_family.n }} 只{% else %}无数据{% endif %}
+        </div>
+      </div>
+      <div class="ifa-dash-card">
+        <div class="ifa-dash-card__label">历史胜率（T+10 ≥+5%）</div>
+        <div class="ifa-dash-card__value {% if db.win_rate_pct is not none %}{% if db.win_rate_pct >= 30 %}ifa-dash-card__value--high{% elif db.win_rate_pct >= 20 %}ifa-dash-card__value--mid{% else %}ifa-dash-card__value--low{% endif %}{% endif %}">
+          {% if db.win_rate_pct is not none %}{{ db.win_rate_pct }}%{% else %}—{% endif %}
+        </div>
+        <div class="ifa-dash-card__sub">
+          {% if db.n_settled_t10 %}近期 {{ db.n_settled_t10 }} 次已结算{% else %}暂无已结算数据{% endif %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# ── §02 市场环境 — 体制 + 结构 ──────────────────── #}
+  <section class="ifa-section">
+    <header class="ifa-section__head">
+      <span class="ifa-section__num">§02</span>
+      <h2 class="ifa-section__title">市场环境</h2>
     </header>
     <div class="ifa-tone">
       <span class="ifa-tone__pill" data-tone="{{ ov.regime | regime_tone }}">{{ ov.regime | regime_tone }}</span>
@@ -305,6 +350,20 @@
     </section>
 
   {% elif s.type == 'narrative' %}
+    {% if s.folded %}
+    <details class="ifa-llm-note" style="margin:8px 0 16px;">
+      <summary style="cursor:pointer; padding:6px 14px; background:var(--paper-tint); border:1px solid var(--rule); border-radius:4px; font-size:12.5px; color:var(--ink-2); font-weight:500; user-select:none; list-style:none;">
+        ▸ 算法解读 — {{ s.title.split(' ', 1)[1] if ' ' in s.title else s.title }}
+      </summary>
+      <div class="ifa-tone" style="border-left-color: var(--accent-2); margin-top:8px;">
+        {% for para in s.body.split('\n') %}
+          {% if para.strip() %}
+          <p class="ifa-tone__summary" style="margin-bottom: 10px;">{{ para }}</p>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </details>
+    {% else %}
     <section class="ifa-section">
       <header class="ifa-section__head">
         <span class="ifa-section__num">{{ s.title.split(' ')[0] }}</span>
@@ -318,6 +377,7 @@
         {% endfor %}
       </div>
     </section>
+    {% endif %}
 
   {% elif s.type == 'sector_flow_gate' %}
     <section class="ifa-section">
@@ -430,9 +490,9 @@
     </section>
 
   {% elif s.type == 'tier_list' %}
-    {% set tier_pill = {'A': ('重点 · 高 conviction', 'var(--up)', 'var(--up-soft)'),
-                         'B': ('候选 · 中等信心', 'var(--accent)', 'var(--accent-soft)'),
-                         'C': ('观察 · 留意', 'var(--ink-muted)', 'var(--rule-soft)')} %}
+    {% set tier_pill = {'A': ('高优先级观察 · 系统优先级 A', 'var(--up)', 'var(--up-soft)'),
+                         'B': ('次优先级观察 · 系统优先级 B', 'var(--accent)', 'var(--accent-soft)'),
+                         'C': ('观察留意', 'var(--ink-muted)', 'var(--rule-soft)')} %}
     {% set tier_default_show = {'A': 5, 'B': 5, 'C': 0} %}
     {% set show_n = tier_default_show.get(s.tier, 5) %}
     <section class="ifa-section">
@@ -470,11 +530,11 @@
             {% if c.rec_price_stock %}
               {% set rp = c.rec_price_stock %}
               <div style="margin-top:6px; padding:6px 8px; background:var(--paper-tint); border-left:3px solid var(--accent); font-size:11.5px; line-height:1.55; color:var(--ink-2);">
-                <b style="color:var(--ink-1);">建议挂单</b>
+                <b style="color:var(--ink-1);">入池观察价区</b>
                 <span style="color:var(--up); font-weight:600;">¥{{ '%.2f'|format(rp.entry) }}</span>
-                · 止损 <span style="color:var(--down); font-weight:600;">¥{{ '%.2f'|format(rp.stop) }}</span>
+                · 技术失效位 <span style="color:var(--down); font-weight:600;">¥{{ '%.2f'|format(rp.stop) }}</span>
                 <span style="color:var(--ink-muted);">({{ '%.1f'|format((rp.stop/rp.entry - 1)*100) }}%)</span>
-                · 目标 <span style="color:var(--up); font-weight:600;">¥{{ '%.2f'|format(rp.target) }}</span>
+                · T+15 观察目标区 <span style="color:var(--up); font-weight:600;">¥{{ '%.2f'|format(rp.target) }}</span>
                 <span style="color:var(--ink-muted);">(+{{ '%.1f'|format((rp.target/rp.entry - 1)*100) }}%)</span>
                 · R:R <b>{{ '%.2f'|format(rp.rr) }}</b>
               </div>
@@ -490,8 +550,8 @@
             <th style="width:11%">代码</th>
             <th style="width:14%">名称</th>
             <th style="width:9%; text-align:right">综合分</th>
-            <th style="width:11%">星级</th>
-            <th>触发策略组合</th>
+            <th style="width:11%">系统优先级</th>
+            <th>技术特征组合</th>
           </tr>
         </thead>
         <tbody>
@@ -512,8 +572,8 @@
               <th style="width:11%">代码</th>
               <th style="width:14%">名称</th>
               <th style="width:9%; text-align:right">综合分</th>
-              <th style="width:11%">星级</th>
-              <th>触发策略组合</th>
+              <th style="width:11%">系统优先级</th>
+              <th>技术特征组合</th>
             </tr>
           </thead>
           {% endif %}
@@ -617,11 +677,11 @@
             {% if c.rec_price_stock %}
               {% set rp = c.rec_price_stock %}
               <div style="margin-top:6px; padding:6px 8px; background:var(--paper-tint); border-left:3px solid var(--accent); font-size:11.5px; line-height:1.55; color:var(--ink-2);">
-                <b style="color:var(--ink-1);">建议挂单</b>
+                <b style="color:var(--ink-1);">入池观察价区</b>
                 <span style="color:var(--up); font-weight:600;">¥{{ '%.2f'|format(rp.entry) }}</span>
-                · 止损 <span style="color:var(--down); font-weight:600;">¥{{ '%.2f'|format(rp.stop) }}</span>
+                · 技术失效位 <span style="color:var(--down); font-weight:600;">¥{{ '%.2f'|format(rp.stop) }}</span>
                 <span style="color:var(--ink-muted);">({{ '%.1f'|format((rp.stop/rp.entry - 1)*100) }}%)</span>
-                · 目标 <span style="color:var(--up); font-weight:600;">¥{{ '%.2f'|format(rp.target) }}</span>
+                · T+15 观察目标区 <span style="color:var(--up); font-weight:600;">¥{{ '%.2f'|format(rp.target) }}</span>
                 <span style="color:var(--ink-muted);">(+{{ '%.1f'|format((rp.target/rp.entry - 1)*100) }}%)</span>
                 · R:R <b>{{ '%.2f'|format(rp.rr) }}</b>
               </div>
@@ -636,8 +696,8 @@
             <th style="width:11%">代码</th>
             <th style="width:14%">名称</th>
             <th style="width:9%; text-align:right">综合分</th>
-            <th style="width:11%">星级</th>
-            <th>触发策略组合</th>
+            <th style="width:11%">系统优先级</th>
+            <th>技术特征组合</th>
           </tr>
         </thead>
         <tbody>
@@ -664,8 +724,8 @@
   {% elif s.type == 'family_grid' %}
     <section class="ifa-section">
       <header class="ifa-section__head">
-        <span class="ifa-section__num">§07</span>
-        <h2 class="ifa-section__title">候选股池（按策略族）</h2>
+        <span class="ifa-section__num">{{ s.title.split(' ')[0] }}</span>
+        <h2 class="ifa-section__title">{{ s.title.split(' ', 1)[1] if ' ' in s.title else s.title }}</h2>
       </header>
       <table class="ifa-panel">
         <thead>
@@ -697,11 +757,11 @@
     <section class="ifa-section">
       <header class="ifa-section__head">
         <span class="ifa-section__num">§08</span>
-        <h2 class="ifa-section__title">历史重点池关注</h2>
+        <h2 class="ifa-section__title">历史高优先级观察池追踪</h2>
       </header>
       <p class="ifa-section__intro">
-        过去 {{ s.window_days }} 个交易日 Tier A（重点池）选股的实际表现追踪 — 仅观察、不止盈止损。
-        每条记录显示当天进入重点池后的 T+1 / T+3 / T+5 / T+10 实际收益（已结算的展示，未到期显示 -）。
+        过去 {{ s.window_days }} 个交易日 Tier A（高优先级观察池）选股的实际表现追踪 — 仅观察、不止盈止损。
+        每条记录显示当天进入高优先级观察池后的 T+1 / T+3 / T+5 / T+10 实际收益（已结算的展示，未到期显示 -）。
       </p>
       {% if s.cold_start_hint %}
       <div class="ifa-tone" style="border-left-color: var(--accent-2);">
@@ -724,10 +784,10 @@
         <div><span style="color:var(--ink-muted);">总观察</span> <b>{{ sm.n_total }}</b> 次</div>
         <div><span style="color:var(--ink-muted);">T+10 已结算</span> <b>{{ sm.n_settled_t10 }}</b> 次</div>
         {% if sm.n_settled_t10 > 0 %}
-        <div><span style="color:var(--ink-muted);">达标 ≥+5%</span>
+        <div><span style="color:var(--ink-muted);">期间最大涨幅 ≥+5%</span>
           <b style="color:var(--up);">{{ sm.win_count }}</b>
           ({{ '%.0f' | format(100 * sm.win_count / sm.n_settled_t10) }}%)</div>
-        <div><span style="color:var(--ink-muted);">正收益</span>
+        <div><span style="color:var(--ink-muted);">当前累计为正</span>
           <b style="color:var(--up);">{{ sm.pos_count }}</b>
           ({{ '%.0f' | format(100 * sm.pos_count / sm.n_settled_t10) }}%)</div>
         <div><span style="color:var(--ink-muted);">均收益 T+10</span>
@@ -738,11 +798,11 @@
       {% macro hist_thead() %}
         <thead>
           <tr>
-            <th style="width:8%">推荐日</th>
-            <th style="width:9%">星级</th>
+            <th style="width:8%">入池日期</th>
+            <th style="width:9%">系统优先级</th>
             <th style="width:10%">代码</th>
             <th style="width:13%">名称</th>
-            <th style="width:8%; text-align:right">推荐价</th>
+            <th style="width:8%; text-align:right">入池参考价</th>
             <th style="width:18%">15 日累计走势</th>
             <th style="width:9%; text-align:right">当前累计</th>
             <th style="width:9%; text-align:right">期间峰值</th>
@@ -799,6 +859,83 @@
       </details>
       {% endif %}
       {% endif %}
+
+      {# ── Setup 滚动边际（merged from §10）──────────────── #}
+      {% if s.metrics_rows %}
+      <details style="margin-top:18px;">
+        <summary style="cursor:pointer; padding:8px 14px; background:var(--paper-tint); border:1px solid var(--rule); border-radius:4px; font-size:12.5px; color:var(--ink-2); font-weight:500; user-select:none;">
+          ▸ Setup 滚动边际统计（近 60d / 250d 胜率与盈亏比）
+        </summary>
+        <div style="margin-top:8px;">
+        <p class="ifa-section__intro" style="font-size:11.5px;">每个策略基于近 60 日 / 250 日 T+10 实际表现；衰减 = 60d 胜率 − 250d 胜率（负值表示策略边际正在退化）。</p>
+        <div style="overflow-x:auto;">
+        <table class="ifa-panel">
+          <thead><tr>
+            <th>策略</th>
+            <th style="text-align:right">样本</th>
+            <th style="text-align:right">胜率（近60日）</th>
+            <th style="text-align:right">平均T+10收益（近60日）</th>
+            <th style="text-align:right">盈亏比</th>
+            <th style="text-align:right">胜率 250d</th>
+            <th style="text-align:right">趋势变化（60d vs 250d，pp）</th>
+          </tr></thead>
+          <tbody>
+          {% for r in s.metrics_rows %}
+          <tr>
+            <td><div class="ifa-panel__indicator">{{ r.setup_name | setup_label }}</div></td>
+            <td class="ifa-panel__value">{{ r.n if r.n is not none else '-' }}</td>
+            <td class="ifa-panel__value {% if r.winrate_60d is not none %}{% if r.winrate_60d >= 30 %}ifa-winrate-high{% elif r.winrate_60d >= 25 %}ifa-winrate-mid{% else %}ifa-winrate-low{% endif %}{% endif %}">
+              {% if r.winrate_60d is not none %}{{ '%.1f' | format(r.winrate_60d) }}%{% else %}-{% endif %}
+            </td>
+            <td class="ifa-panel__value {% if r.avg_return_60d is not none %}{% if r.avg_return_60d >= 0 %}ifa-panel__delta--up{% else %}ifa-panel__delta--down{% endif %}{% endif %}">
+              {% if r.avg_return_60d is not none %}{{ '%+.2f' | format(r.avg_return_60d) }}%{% else %}-{% endif %}
+            </td>
+            <td class="ifa-panel__value">{% if r.pl_ratio is not none %}{{ '%.2f' | format(r.pl_ratio) }}{% else %}-{% endif %}</td>
+            <td class="ifa-panel__value">{% if r.winrate_250d is not none %}{{ '%.1f' | format(r.winrate_250d) }}%{% else %}-{% endif %}</td>
+            <td class="ifa-panel__value {% if r.decay is not none %}{% if r.decay >= 0 %}ifa-panel__delta--up{% else %}ifa-panel__delta--down{% endif %}{% endif %}">
+              {% if r.decay is not none %}{{ '%+.1f' | format(r.decay) }}{% else %}-{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+        </div>
+      </details>
+      {% endif %}
+
+      {# ── 近 5 日表现归因（merged from §11）──────────────── #}
+      {% if s.attribution_rows %}
+      <details style="margin-top:8px;">
+        <summary style="cursor:pointer; padding:8px 14px; background:var(--paper-tint); border:1px solid var(--rule); border-radius:4px; font-size:12.5px; color:var(--ink-2); font-weight:500; user-select:none;">
+          ▸ 近 5 日 Setup 表现归因（窗口 {{ s.attribution_window_start }} 起）
+        </summary>
+        <div style="margin-top:8px;">
+        <table class="ifa-panel">
+          <thead><tr>
+            <th>策略</th>
+            <th style="text-align:right">样本</th>
+            <th style="text-align:right">胜率</th>
+            <th style="text-align:right">平均T+1收益</th>
+          </tr></thead>
+          <tbody>
+          {% for r in s.attribution_rows %}
+          <tr>
+            <td><div class="ifa-panel__indicator">{{ r.setup_name | setup_label }}</div></td>
+            <td class="ifa-panel__value">{{ r.n }}</td>
+            <td class="ifa-panel__value {% if r.win_rate is not none %}{% if r.win_rate >= 30 %}ifa-winrate-high{% elif r.win_rate >= 25 %}ifa-winrate-mid{% else %}ifa-winrate-low{% endif %}{% endif %}">
+              {% if r.win_rate is not none %}{{ '%.1f' | format(r.win_rate) }}%{% else %}-{% endif %}
+            </td>
+            <td class="ifa-panel__value {% if r.avg_return_pct is not none %}{% if r.avg_return_pct >= 0 %}ifa-panel__delta--up{% else %}ifa-panel__delta--down{% endif %}{% endif %}">
+              {% if r.avg_return_pct is not none %}{{ '%+.2f' | format(r.avg_return_pct) }}%{% else %}-{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        </div>
+      </details>
+      {% endif %}
     </section>
 
   {% elif s.type == 'verification' %}
@@ -813,10 +950,10 @@
       <div style="margin-bottom:14px; display:flex; gap:18px; flex-wrap:wrap;">
         {% for status, n in s.summary.items() %}
         <div style="font-size:13.5px;">
-          {% if status == 'confirmed' %}<span style="color:var(--up); font-weight:600;">达标 (≥+5%)</span>
-          {% elif status == 'partial' %}<span style="color:var(--up);">部分达标 (+2~+5%)</span>
-          {% elif status == 'invalidated' %}<span style="color:var(--down); font-weight:600;">失败 (≤-3%)</span>
-          {% else %}<span style="color:var(--ink-soft);">观望 (-3%~+2%)</span>{% endif %}
+          {% if status == 'confirmed' %}<span style="color:var(--up); font-weight:600;">验证成功 (≥+5%)</span>
+          {% elif status == 'partial' %}<span style="color:var(--up);">部分验证 (+2~+5%)</span>
+          {% elif status == 'invalidated' %}<span style="color:var(--down); font-weight:600;">技术失效 (≤-3%)</span>
+          {% else %}<span style="color:var(--ink-soft);">观察中 (-3%~+2%)</span>{% endif %}
           <b>{{ n }}</b>
         </div>
         {% endfor %}
@@ -849,10 +986,10 @@
             {% if c.return_pct is not none %}{{ '%+.2f' | format(c.return_pct) }}%{% else %}-{% endif %}
           </td>
           <td>
-            {% if c.status == 'confirmed' %}<span style="color:var(--up); font-weight:600;">达标</span>
-            {% elif c.status == 'partial' %}<span style="color:var(--up);">部分达标</span>
-            {% elif c.status == 'invalidated' %}<span style="color:var(--down); font-weight:600;">失败</span>
-            {% elif c.status == 'timeout' %}<span style="color:var(--ink-soft);">观望</span>
+            {% if c.status == 'confirmed' %}<span style="color:var(--up); font-weight:600;">验证成功</span>
+            {% elif c.status == 'partial' %}<span style="color:var(--up);">部分验证</span>
+            {% elif c.status == 'invalidated' %}<span style="color:var(--down); font-weight:600;">技术失效</span>
+            {% elif c.status == 'timeout' %}<span style="color:var(--ink-soft);">观察中</span>
             {% else %}-{% endif %}
           </td>
         </tr>
@@ -884,8 +1021,8 @@
   {% elif s.type == 'metrics_table' %}
     <section class="ifa-section">
       <header class="ifa-section__head">
-        <span class="ifa-section__num">§10</span>
-        <h2 class="ifa-section__title">策略边际滚动统计</h2>
+        <span class="ifa-section__num">{{ s.title.split(' ')[0] }}</span>
+        <h2 class="ifa-section__title">{{ s.title.split(' ', 1)[1] if ' ' in s.title else s.title }}</h2>
       </header>
       <p class="ifa-section__intro">每个策略基于近 60 日 / 250 日 T+10 实际表现的胜率与盈亏比；衰减 = 60d 胜率 - 250d 胜率（负值表示该策略边际正在退化）。</p>
       {% if s.rows %}
@@ -945,8 +1082,8 @@
   {% elif s.type == 'attribution' %}
     <section class="ifa-section">
       <header class="ifa-section__head">
-        <span class="ifa-section__num">§11</span>
-        <h2 class="ifa-section__title">近期表现归因</h2>
+        <span class="ifa-section__num">{{ s.title.split(' ')[0] }}</span>
+        <h2 class="ifa-section__title">{{ s.title.split(' ', 1)[1] if ' ' in s.title else s.title }}</h2>
       </header>
       <p class="ifa-section__intro">窗口 <b>{{ s.window_start }}</b> → 今日，按 T+1 实际收益分组各策略的表现。</p>
       {% if s.rows %}
@@ -993,8 +1130,8 @@
   {% elif s.type == 'risk_scan' %}
     <section class="ifa-section">
       <header class="ifa-section__head">
-        <span class="ifa-section__num">§13</span>
-        <h2 class="ifa-section__title">风险扫描</h2>
+        <span class="ifa-section__num">{{ s.title.split(' ')[0] }}</span>
+        <h2 class="ifa-section__title">{{ s.title.split(' ', 1)[1] if ' ' in s.title else s.title }}</h2>
       </header>
 
       {# M10 P1.8 — composite red/yellow/green risk dashboard #}
@@ -1124,16 +1261,83 @@
       {% endif %}
     </section>
 
+  {% elif s.type == 'appendix' %}
+    <section class="ifa-section">
+      <header class="ifa-section__head">
+        <span class="ifa-section__num">§11</span>
+        <h2 class="ifa-section__title">方法说明 &amp; 术语表</h2>
+      </header>
+      <details class="ifa-llm-note" style="margin-top:8px;">
+        <summary style="cursor:pointer; padding:8px 14px; background:var(--paper-tint); border:1px solid var(--rule); border-radius:4px; font-size:13px; color:var(--ink-2); font-weight:600; user-select:none; list-style:none;">
+          📎 展开完整方法说明 &amp; 术语表
+        </summary>
+        <div style="margin-top:12px; font-size:12.5px; line-height:1.75; color:var(--ink-2);">
+          <h3 style="font-size:13.5px; margin:16px 0 6px;">Setup 策略代码对照表</h3>
+          <table class="ifa-panel" style="font-size:12px;">
+            <thead><tr><th>代码</th><th>中文名</th><th>族</th><th>性质</th></tr></thead>
+            <tbody>
+            {% for acode, aname, afam, anature in [
+              ('T1_BREAKOUT','突破启动','T 趋势','做多'),('T2_PULLBACK_RESUME','回踩续涨','T 趋势','做多'),('T3_ACCELERATION','加速冲刺','T 趋势','做多'),
+              ('P1_MA20_PULLBACK','20日线回踩','P 回踩','做多'),('P2_GAP_FILL','缺口回补','P 回踩','做多'),('P3_TIGHT_CONSOLIDATION','紧密整理','P 回踩','做多'),
+              ('R1_DOUBLE_BOTTOM','双底反转','R 反转','做多'),('R2_HS_BOTTOM','头肩底','R 反转','做多'),('R3_HAMMER','锤子线','R 反转','做多'),
+              ('F1_FLAG','旗形整理','F 形态','做多'),('F2_TRIANGLE','三角收敛','F 形态','做多'),('F3_RECTANGLE','矩形整理','F 形态','做多'),
+              ('V1_VOL_PRICE_UP','量价齐升','V 量价','做多'),('V2_QUIET_COIL','缩量蓄势','V 量价','做多'),
+              ('S1_SECTOR_RESONANCE','板块共振','S 板块','做多'),('S2_LEADER_FOLLOWTHROUGH','龙头跟风','S 板块','做多'),('S3_LAGGARD_CATCHUP','落后补涨','S 板块','做多'),
+              ('C1_CHIP_CONCENTRATED','筹码集中','C 筹码','做多'),('C2_CHIP_LOOSE','筹码松动','C 筹码','警示'),
+              ('O1_INST_PERSISTENT_BUY','机构连续抢筹','O 主力资金','做多'),('O2_LHB_INST_BUY','龙虎榜机构净买入','O 主力资金','做多'),('O3_LIMIT_SEAL_STRENGTH','涨停封单强度','O 主力资金','做多'),
+              ('D1_DOUBLE_TOP','双顶反转','D 顶部反转','警示'),('D2_HS_TOP','头肩顶','D 顶部反转','警示'),('D3_SHOOTING_STAR','流星线','D 顶部反转','警示'),
+              ('Z1_ZSCORE_EXTREME','极端Z-score','Z 统计','做多'),('Z2_OVERSOLD_REBOUND','超卖反弹','Z 统计','做多'),
+              ('E1_EVENT_CATALYST','事件催化','E 事件','做多')
+            ] %}
+            <tr>
+              <td><code style="font-size:11px;">{{ acode }}</code></td>
+              <td><b>{{ aname }}</b></td>
+              <td><span class="ifa-panel__period">{{ afam }}</span></td>
+              <td style="color:{% if anature == '警示' %}var(--down){% else %}var(--up){% endif %}; font-size:11.5px;">{{ anature }}</td>
+            </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+
+          <h3 style="font-size:13.5px; margin:20px 0 6px;">关键术语定义</h3>
+          <table class="ifa-panel" style="font-size:12px;">
+            <thead><tr><th style="width:25%">术语</th><th>定义</th></tr></thead>
+            <tbody>
+              <tr><td><b>系统评分</b></td><td>0–99.999 分，由 ranker 综合技术形态分 × 体制权重 × 板块相位权重计算，Tier A 为当日最高10只。</td></tr>
+              <tr><td><b>系统优先级 A / B</b></td><td>Tier A = 当日系统评分前 10 只；Tier B = 第 11–30 只。仅代表当日技术面得分排序，不代表推荐买入。</td></tr>
+              <tr><td><b>胜率</b></td><td>T+10 实际涨幅 ≥ +5% 的标的数 ÷ 全部已结算（T+10 已到期）标的数。</td></tr>
+              <tr><td><b>盈亏比</b></td><td>平均正收益 ÷ |平均负收益|（T+10 口径）。</td></tr>
+              <tr><td><b>趋势变化（60d vs 250d，pp）</b></td><td>60日胜率 − 250日胜率，负值表示策略近期边际退化。</td></tr>
+              <tr><td><b>T+N 收益</b></td><td>第 N 个交易日收盘价相对入池当日收盘价的涨跌幅（非含权）。</td></tr>
+              <tr><td><b>入池观察价区</b></td><td>系统推荐的技术观察参考价位（基于 ATR），不构成交易指令。</td></tr>
+              <tr><td><b>技术失效位</b></td><td>若价格下破该位置，形态结构失效，观察意义终止。</td></tr>
+              <tr><td><b>T+15 观察目标区</b></td><td>基于 ATR × k_target=3.0 的 15 个交易日内技术形态预期上限区间。</td></tr>
+              <tr><td><b>体制</b></td><td>由 9 个量化规则识别当日市场状态（趋势延续 / 区间震荡 / 情绪高潮 / 顶部派发等），影响各 setup 的权重。</td></tr>
+            </tbody>
+          </table>
+
+          <h3 style="font-size:13.5px; margin:20px 0 6px;">数据口径说明</h3>
+          <ul style="margin:0; padding-left:20px; font-size:12px;">
+            <li>行情数据来源：TuShare Pro（万得同源），申万二级行业分类（2021年版）。</li>
+            <li>资金流数据：SmartMoney 模块聚合 SW L2 板块超大单 + 大单净流入。</li>
+            <li>T+N 收益均为收盘价计算，不含分红复权（短期摆动影响可忽略）。</li>
+            <li>所有历史回测均为 walk-forward（滚动前向），无前视偏差。</li>
+          </ul>
+        </div>
+      </details>
+    </section>
+
   {% elif s.type == 'disclaimer' %}
     <section class="ifa-section">
       <header class="ifa-section__head">
-        <span class="ifa-section__num">§16</span>
-        <h2 class="ifa-section__title">免责声明 / Disclaimer</h2>
+        <span class="ifa-section__num">{{ s.title.split(' ')[0] }}</span>
+        <h2 class="ifa-section__title">{{ s.title.split(' ', 1)[1] if ' ' in s.title else s.title }}</h2>
       </header>
       <div style="font-size:12.5px; color:var(--ink-2); line-height:1.7;">
         {% for p in s.paragraphs_zh %}
         <p style="margin: 0 0 10px 0;">{{ p }}</p>
         {% endfor %}
+        <p style="margin: 0 0 10px 0; font-weight:600;">候选标的经算法筛选，不代表应买入或持有。</p>
         <hr style="border:none; border-top:1px dashed var(--rule); margin:16px 0;">
         <div style="font-style:italic; color:var(--ink-muted);">
           {% for p in s.paragraphs_en %}

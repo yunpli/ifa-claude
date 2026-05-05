@@ -14,5 +14,6 @@ The builder is rules-only. LLM commentary is opt-in via report/llm_aug.py
 """
 from ifa.families.research.report.builder import ResearchReport, build_research_report
 from ifa.families.research.report.markdown import render_markdown
+from ifa.families.research.report.service import EnsuredResearchReport, ensure_research_report
 
-__all__ = ["ResearchReport", "build_research_report", "render_markdown"]
+__all__ = ["EnsuredResearchReport", "ResearchReport", "build_research_report", "ensure_research_report", "render_markdown"]

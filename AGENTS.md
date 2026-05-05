@@ -30,6 +30,21 @@
 - **Research 持久化原则**：所有从历史季报/年报/研报 PDF 解析或派生出的财报因子，必须落到本地数据库后再组合生成报告。Canonical 长期记忆使用 PostgreSQL `research.period_factor_decomposition`（分期五维拆解）与 `research.pdf_extract_cache`（研报 PDF 摘要缓存）；DuckDB 只用于本地 scratch / ad hoc OLAP，不作为 Research 基本面权威存储。Stock Intel / TA 侧需要基本面 lineup 时调用 `ifa.families.research.memory.load_fundamental_lineup(...)`，不要解析 HTML。
 - **Research 报告资产复用**：同一股票、同一 `analysis_type`、同一 `tier`、同一最新财报期已经有成功生成的报告时，默认从 `research.report_runs` 取 `output_html_path` / `scope_json.md_path` 直接列给用户，不重新生成；manual / production 只是输出目录不同，不作为强制重算边界。需要强制重跑时 CLI 用 `--fresh`。Stock Intel 若需要财报底稿，应先查 `find_reusable_report(...)`；没有则同步触发对应 quick/deep 生成，再通过 `load_fundamental_lineup(...)` 取结构化基本面。
 
+### Stock Edge / 个股作战室当前实现记录（Codex 2026-05-05）
+
+- **产品命名**：原 `stock intel` 改为 **Stock Edge（个股作战室）**；代码继续复用 `ifa/families/stock/**`，不要新建平行 `stockedge` package。
+- **输出目录**：报告、调参 artifact、分钟线 parquet 等运行输出统一落到 `/Users/neoclaw/claude/ifaenv/`，不要污染 repo。手动报告路径形态为 `/Users/neoclaw/claude/ifaenv/out/<run_mode>/<YYYYMMDD>/stock_edge/`。
+- **as-of 规则**：交易日北京时间 15:00 前用 T-1，15:00 后用当天；非交易日用最近已完成交易日。
+- **默认调参**：默认报告会先走 `prepare_report_params()`；若 10 天 TTL 内已有兼容单股 overlay 则复用，否则做单股 pre-report overlay，再生成报告。周末全市场/top-liquidity preset 与单股 overlay 都是独立 script/CLI，可被外部系统单独调用。
+- **当前策略数**：`IMPLEMENTED_STRATEGIES` 已到 85 个；其中 84 个进入策略矩阵打分，1 个为报告层 `scenario_tree_llm`。覆盖规则/统计/TA/SmartMoney/Research/ML/DL(Kronos)/LLM cache/execution。新增重点模块包括 `historical_replay_edge`、`target_stop_replay`、`entry_fill_replay`、`liquidity_slippage`、`t0_uplift`、`flow_persistence_decay`、`analog_kronos_nearest_neighbors`、`kronos_path_cluster_transition`、`right_tail_meta_gbm`、`temporal_fusion_sequence_ranker`、`target_stop_survival_model`、`stop_loss_hazard_model`、`gap_risk_open_model`、`multi_horizon_target_classifier`、`target_ladder_probability_model`、`path_shape_mixture_model`、`mfe_mae_surface_model`、`forward_entry_timing_model`、`entry_price_surface_model`、`regime_adaptive_weight_model`、`peer_financial_alpha_model`、`limit_up_event_path_model`、`position_sizing_model`、`pullback_rebound_classifier`、`squeeze_breakout_classifier`、`fundamental_price_dislocation_model`、`model_stack_blender`、`event_catalyst_llm`、`fundamental_contradiction_llm`、`scenario_tree_llm`。
+- **预测核心**：报告不是固定“40 天 50%”，而是同时评估 15d/+20%、25d/+30%、40d/+50%，输出今日是否可买、买入价、未来 5 日条件买点、目标价、止损、目标/止损先触发概率、平均触达天数、仓位建议。
+- **场景树**：报告新增“预测执行场景树”，把今日执行/今日等待/未来5日买点/失效路径拆成可证伪条件，每条路径必须显示触发条件、动作、买入带、目标、失效价和观察信号。数值只来自结构化模型；任何 LLM 表述压缩必须用项目工具 `ifa.core.llm.LLMClient`，不得改写价格、概率、止损。
+- **Research deep 前置依赖**：Stock Edge 默认在最终计划生成前调用 `ensure_stock_edge_research_prefetch()`，确保目标股 + 最多 4 个 SW L2 可见龙头都有 `annual deep` 与 `quarterly deep`。已有 `research.report_runs` 成功资产则复用，缺失才通过 `ifa.families.research.report.service.ensure_research_report()` 生成；生成/复用后重新加载 snapshot，让 `research.memory.load_fundamental_lineup()` 消费最新持久化因子。目标股 deep 可用项目 `LLMClient` 且有 timeout；同行 deep 默认 rules-only，避免多个同行 narrative 调用阻塞交易执行卡。
+- **同板块对比主轴**：同板块/同行对比主要看财务报表与 Research deep 结构化因子，包括 ROE、营收增速、CFO/NI、资产负债率、估值分位；市值和 5/10/15 日涨跌幅只作为辅助交易定位，不作为主排序。
+- **T+0 约束**：A 股 T+0 只能用于有底仓；`t0_uplift` 可评估日内高抛低吸增益，但 executable T+0 plan 仍必须检查 `has_base_position`。
+- **参数治理**：新增策略参数必须 YAML 化，当前主配置为 `ifa/families/stock/params/stock_edge_v2.2.yaml`；不要硬编码离散档位作为生产逻辑。
+- **当前验证**：`uv run pytest tests/stock` 通过 61 条；编译命令 `uv run python -m compileall -q ifa/families/stock ifa/cli/stock.py tests/stock` 通过。最新 manual deep 朗科科技报告：`/Users/neoclaw/claude/ifaenv/out/manual/20260430/stock_edge/CN_stock_edge_300042_SZ_20260430_225208.html`；桌面/移动 QA 截图在同目录 `qa/` 下，Playwright 检查 `scrollWidth == innerWidth`，场景树/免责声明/目标股标记、同板块财务对照主图、财务分表、财报-价格错配模型、多目标周期模型、未来5日择时模型、回踩反弹模型、收敛突破模型、目标/止损生存模型、模型融合器均存在，用户侧“数据新鲜度”不存在。
+
 ---
 
 ## 项目概览

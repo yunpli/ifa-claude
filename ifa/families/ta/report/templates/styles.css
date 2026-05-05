@@ -674,9 +674,72 @@ details[open] > summary[data-collapse-text]::after {
   .ifa-positioning__grid { grid-template-columns: 1fr; }
 }
 
+/* ── §01 Dashboard ─────────────────────────────────────────────────── */
+.ifa-dash-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-top: 12px;
+}
+.ifa-dash-card {
+  background: var(--paper-tint, #f6f8fa);
+  border: 1px solid var(--rule, #d0d7de);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.ifa-dash-card__label {
+  font-size: 11.5px;
+  color: var(--ink-muted, #6e7681);
+  font-weight: 500;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ifa-dash-card__value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink-1, #24292f);
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+.ifa-dash-card__value--high { color: var(--up, #1a7f37); }
+.ifa-dash-card__value--mid  { color: #9a6700; }
+.ifa-dash-card__value--low  { color: var(--down, #cf222e); }
+.ifa-dash-card__sub {
+  font-size: 11.5px;
+  color: var(--ink-muted, #6e7681);
+}
+
+/* ── Winrate colour coding ─────────────────────────────────────────── */
+.ifa-winrate-high { color: var(--up, #1a7f37); font-weight: 600; }
+.ifa-winrate-mid  { color: #9a6700; font-weight: 600; }
+.ifa-winrate-low  { color: var(--down, #cf222e); font-weight: 600; }
+
+/* ── LLM folded note ───────────────────────────────────────────────── */
+.ifa-llm-note summary::-webkit-details-marker { display: none; }
+.ifa-llm-note summary:hover { background: var(--rule-soft, #eaeef2); }
+
+/* ── KPI chips: no internal wrap ──────────────────────────────────── */
+.ifa-panel__kpi { white-space: nowrap; }
+
+/* ── Wide tables: horizontal scroll on mobile ─────────────────────── */
+.ifa-table-scroll { overflow-x: auto; }
+
+/* ── Mobile layout ─────────────────────────────────────────────────── */
+@media (max-width: 720px) {
+  .ifa-dash-grid { grid-template-columns: repeat(2, 1fr); }
+  .ifa-dash-card__value { font-size: 18px; }
+  .ifa-banner__title { font-size: 1.3em; }
+  table.ifa-panel { display: block; overflow-x: auto; }
+}
+
 /* ── Print ─────────────────────────────────────────────────────────── */
 @media print {
   body { background: white; }
   .ifa-page { box-shadow: none; padding: 12mm 15mm; max-width: 100%; }
   .ifa-section { page-break-inside: avoid; }
+  details { display: block !important; }
+  summary { display: none !important; }
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }

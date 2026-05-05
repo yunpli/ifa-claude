@@ -1,0 +1,1028 @@
+version: stock_edge_v2.2
+
+runtime:
+  default_lookback_days: 7
+  run_mode: manual
+  timezone: Asia/Shanghai
+  market_close_cutoff: "15:00"
+
+data:
+  technical_lookback_days: 360
+  local_first: true
+  tushare_backfill_on_missing: true
+
+research_prefetch:
+  enabled: true
+  include_target: true
+  include_sector_leaders: true
+  max_sector_peers: 4
+  analysis_types: [annual, quarterly]
+  tier: deep
+  reuse: true
+  llm_for_target: true
+  llm_for_sector_peers: false
+  llm_timeout_seconds: 45.0
+  fail_soft: true
+
+intraday:
+  enabled: optional
+  default_window_days: 30
+  backfill_on_missing: true
+  sweep:
+    5min_days: 30
+    30min_days: 60
+    60min_days: 90
+  full_market_backfill: false
+
+tuning:
+  enabled: true
+  mode: global_preset_plus_pre_report_overlay
+  global_preset:
+    enabled: true
+    universe: top_liquidity_500
+    refresh_schedule: weekly_weekend
+    min_stocks: 300
+    max_stocks: 800
+    backfill_short_history: true
+    max_backfill_stocks: 50
+    artifact_ttl_days: 10
+    max_candidates: 96
+  pre_report_overlay:
+    enabled: true
+    backfill_on_short_history: true
+    ttl_days: 10
+    min_history_rows: 360
+    max_history_rows: 900
+    max_runtime_seconds: 900
+    max_candidates: 64
+    search_space: continuous
+    base_from: latest_global_preset
+  per_stock_ttl_days: 10
+  min_history_rows: 360
+  max_history_rows: 900
+  max_runtime_seconds: 900
+  long_windows: [60, 180, 360]
+  offline_validation:
+    purpose: promotion_and_governance_not_report_time_tuning
+    train_days: 90
+    validation_days: 60
+    embargo_days: 5
+  objectives:
+    hit_50pct_40d: 0.35
+    avg_return_40d: 0.20
+    max_drawdown: -0.20
+    stop_first_rate: -0.15
+    fill_rate: 0.05
+    turnover_penalty: -0.05
+  objective:
+    weights:
+      hit_target_40d_quality: 0.30
+      expected_return_40d: 0.20
+      entry_fill_quality: 0.15
+      reward_risk: 0.15
+      calibration_quality: 0.10
+      expected_drawdown: -0.15
+      stop_first_rate: -0.10
+      turnover_liquidity_penalty: -0.05
+  search_bounds:
+    aggregate.raw_edge_scale: [0.25, 0.85]
+    aggregate.buy_threshold: [0.58, 0.78]
+    aggregate.watch_threshold: [0.42, 0.60]
+    smooth_scoring.support_distance_mid_pct: [3.0, 12.0]
+    smooth_scoring.support_distance_scale_pct: [1.0, 8.0]
+    smooth_scoring.breakout_distance_scale_pct: [2.0, 12.0]
+    smooth_scoring.momentum_center_pct: [0.0, 12.0]
+    smooth_scoring.momentum_width_pct: [3.0, 18.0]
+    smooth_scoring.stock_moneyflow_scale_wan: [2000.0, 50000.0]
+    smooth_scoring.sector_flow_scale_wan: [100000.0, 1500000.0]
+    cluster_weights.trend_breakout: [0.30, 1.80]
+    cluster_weights.pullback_continuation: [0.30, 1.80]
+    cluster_weights.reversal_mean_reversion: [0.20, 1.50]
+    cluster_weights.order_flow_smart_money: [0.30, 2.00]
+    cluster_weights.sw_l2_sector_leadership: [0.30, 2.00]
+    cluster_weights.fundamentals_quality: [0.20, 1.50]
+    cluster_weights.model_ensemble: [0.20, 2.00]
+    cluster_weights.intraday_t0_execution: [0.00, 1.20]
+    cluster_weights.risk_warning: [0.40, 1.80]
+    signal_weights.trend_quality_r2: [0.30, 1.80]
+    signal_weights.volume_price_divergence: [0.30, 1.80]
+    signal_weights.candle_reversal_structure: [0.30, 1.60]
+    signal_weights.gap_risk_open_model: [0.20, 1.70]
+    signal_weights.regime_adaptive_weight_model: [0.20, 1.60]
+    signal_weights.limit_up_event_path_model: [0.00, 1.50]
+    signal_weights.peer_financial_alpha_model: [0.20, 1.70]
+    signal_weights.position_sizing_model: [0.20, 1.50]
+    signal_weights.strategy_validation_decay: [0.20, 1.60]
+    signal_weights.quantile_return_forecaster: [0.20, 1.80]
+    signal_weights.entry_fill_classifier: [0.20, 1.60]
+    signal_weights.conformal_return_band: [0.20, 1.60]
+    signal_weights.stop_first_classifier: [0.20, 1.80]
+    signal_weights.isotonic_score_calibrator: [0.20, 1.60]
+    signal_weights.right_tail_meta_gbm: [0.20, 1.80]
+    signal_weights.temporal_fusion_sequence_ranker: [0.20, 1.80]
+    signal_weights.target_stop_survival_model: [0.20, 1.80]
+    signal_weights.stop_loss_hazard_model: [0.20, 1.80]
+    signal_weights.multi_horizon_target_classifier: [0.20, 1.80]
+    signal_weights.target_ladder_probability_model: [0.20, 1.80]
+    signal_weights.path_shape_mixture_model: [0.20, 1.70]
+    signal_weights.mfe_mae_surface_model: [0.20, 1.80]
+    signal_weights.forward_entry_timing_model: [0.20, 1.60]
+    signal_weights.entry_price_surface_model: [0.20, 1.70]
+    signal_weights.pullback_rebound_classifier: [0.20, 1.70]
+    signal_weights.squeeze_breakout_classifier: [0.20, 1.70]
+    signal_weights.model_stack_blender: [0.20, 1.80]
+    signal_weights.analog_kronos_nearest_neighbors: [0.20, 1.80]
+    signal_weights.kronos_path_cluster_transition: [0.20, 1.80]
+    signal_weights.peer_research_auto_trigger: [0.00, 1.20]
+    signal_weights.hierarchical_sector_shrinkage: [0.20, 1.60]
+    signal_weights.northbound_regime: [0.20, 1.50]
+    signal_weights.market_margin_impulse: [0.20, 1.50]
+    signal_weights.block_trade_pressure: [0.00, 1.30]
+    signal_weights.event_catalyst_llm: [0.00, 1.40]
+    signal_weights.fundamental_contradiction_llm: [0.00, 1.40]
+    signal_weights.fundamental_price_dislocation_model: [0.20, 1.70]
+    signal_weights.sector_diffusion_breadth: [0.20, 1.80]
+    signal_weights.volume_profile_support: [0.00, 1.20]
+    signal_weights.vwap_reclaim_execution: [0.00, 1.20]
+    signal_weights.auction_imbalance_proxy: [0.00, 1.20]
+    risk.max_entry_distance_from_support_pct: [3.0, 14.0]
+    risk.max_stop_distance_pct: [6.0, 18.0]
+    risk.right_tail_target_pct: [20.0, 60.0]
+    t0.max_size_pct_of_base: [5.0, 30.0]
+
+model:
+  mode: rule_baseline
+  ab_switching: false
+  versions:
+    right_tail: prediction_surface_v1
+    quantile_forecaster: heuristic_v0
+    stop_first: heuristic_v0
+    t0: heuristic_v0
+
+prediction_surface:
+  model_version: prediction_surface_v1
+  calibrated: false
+  probability_floor: 0.01
+  probability_ceiling: 0.62
+  hit_50:
+    intercept: -2.85
+    edge_coef: 2.10
+    trend_coef: 0.45
+    pullback_coef: 0.30
+    order_flow_coef: 0.42
+    sector_coef: 0.38
+    model_coef: 0.45
+    fundamental_coef: 0.18
+    risk_penalty_coef: 1.25
+  hit_30:
+    lift_from_hit_50: 0.11
+    edge_lift: 0.08
+  hit_20:
+    lift_from_hit_30: 0.13
+    edge_lift: 0.10
+  opportunities:
+    tactical_15d_20:
+      label: "战术目标"
+      horizon_days: 15
+      return_pct: 20.0
+      probability_base: hit_20
+      horizon_multiplier: 0.72
+      edge_multiplier: 0.10
+      min_probability: 0.18
+    swing_25d_30:
+      label: "波段目标"
+      horizon_days: 25
+      return_pct: 30.0
+      probability_base: hit_30
+      horizon_multiplier: 0.82
+      edge_multiplier: 0.08
+      min_probability: 0.14
+    right_tail_40d_50:
+      label: "右尾目标"
+      horizon_days: 40
+      return_pct: 50.0
+      probability_base: hit_50
+      horizon_multiplier: 1.00
+      edge_multiplier: 0.00
+      min_probability: 0.08
+  stop_first:
+    intercept: -0.65
+    edge_coef: -1.15
+    risk_coef: 1.35
+    volatility_coef: 0.25
+  entry_fill:
+    intercept: 0.35
+    edge_coef: 0.55
+    distance_coef: -0.08
+    pullback_coef: 0.35
+  return_quantiles:
+    p10_floor: -0.16
+    p10_stop_multiplier: -0.75
+    p50_base: 0.04
+    p50_edge_coef: 0.22
+    p90_base: 0.18
+    p90_edge_coef: 0.45
+    p90_hit50_coef: 0.30
+  expected_return:
+    hit20_weight: 0.10
+    hit30_weight: 0.10
+    hit50_weight: 0.22
+    stop_penalty: 0.12
+    base: -0.02
+  expected_drawdown:
+    base: 0.16
+    edge_coef: -0.06
+    risk_coef: 0.06
+    stop_floor: 0.04
+
+strategy_matrix:
+  model_version: heuristic_v0
+  aggregate:
+    base_score: 0.50
+    raw_edge_scale: 0.50
+    buy_threshold: 0.68
+    watch_threshold: 0.50
+  smooth_scoring:
+    display_neutral_band: 0.08
+    support_distance_mid_pct: 8.0
+    support_distance_scale_pct: 3.0
+    support_score_amplitude: 0.65
+    breakout_distance_scale_pct: 6.0
+    breakout_score_amplitude: 0.45
+    momentum_center_pct: 6.0
+    momentum_width_pct: 8.0
+    momentum_overheat_center_pct: 20.0
+    momentum_overheat_scale_pct: 4.0
+    momentum_weak_center_pct: -5.0
+    momentum_weak_scale_pct: 4.0
+    ta_winrate_center_pct: 25.0
+    ta_winrate_scale_pct: 8.0
+    ta_decay_center_pp: -5.0
+    ta_decay_scale_pp: 8.0
+    sector_score_center: 0.50
+    sector_score_scale: 0.18
+    stock_moneyflow_scale_wan: 10000.0
+    sector_flow_scale_wan: 500000.0
+  cluster_weights:
+    trend_breakout: 1.00
+    pullback_continuation: 0.95
+    reversal_mean_reversion: 0.85
+    order_flow_smart_money: 1.05
+    sw_l2_sector_leadership: 1.10
+    fundamentals_quality: 0.80
+    model_ensemble: 0.90
+    intraday_t0_execution: 0.40
+    risk_warning: 1.15
+  signal_weights:
+    trend_following: 1.15
+    support_pullback: 1.05
+    breakout_pressure: 0.85
+    momentum_5d: 0.95
+    volume_confirmation: 0.85
+    volatility_structure: 0.80
+    liquidity_slippage: 0.85
+    moneyflow_7d: 1.05
+    orderflow_mix: 0.90
+    northbound_regime: 0.50
+    market_margin_impulse: 0.48
+    block_trade_pressure: 0.45
+    event_catalyst_llm: 0.50
+    lhb_institution_hotmoney_divergence: 0.62
+    flow_persistence_decay: 0.85
+    limit_up_microstructure: 0.58
+    limit_up_event_path_model: 0.56
+    smartmoney_sw_l2: 1.10
+    regime_adaptive_weight_model: 0.54
+    same_sector_leadership: 0.90
+    daily_basic_style: 0.70
+    peer_leader_fundamental_spread: 0.75
+    peer_financial_alpha_model: 0.68
+    fundamental_lineup: 0.80
+    range_position: 0.70
+    volatility_contraction: 0.70
+    drawdown_recovery: 0.65
+    gap_risk: 0.70
+    gap_risk_open_model: 0.58
+    auction_imbalance_proxy: 0.48
+    trend_quality_r2: 0.78
+    candle_reversal_structure: 0.72
+    volume_price_divergence: 0.72
+    historical_replay_edge: 0.85
+    target_stop_replay: 0.80
+    entry_fill_replay: 0.75
+    entry_fill_classifier: 0.58
+    quantile_return_forecaster: 0.62
+    conformal_return_band: 0.50
+    stop_first_classifier: 0.58
+    isotonic_score_calibrator: 0.58
+    right_tail_meta_gbm: 0.74
+    temporal_fusion_sequence_ranker: 0.70
+    target_stop_survival_model: 0.70
+    stop_loss_hazard_model: 0.64
+    multi_horizon_target_classifier: 0.68
+    target_ladder_probability_model: 0.66
+    path_shape_mixture_model: 0.64
+    mfe_mae_surface_model: 0.66
+    position_sizing_model: 0.46
+    forward_entry_timing_model: 0.60
+    entry_price_surface_model: 0.64
+    pullback_rebound_classifier: 0.62
+    squeeze_breakout_classifier: 0.62
+    model_stack_blender: 0.64
+    peer_relative_momentum: 0.85
+    hierarchical_sector_shrinkage: 0.52
+    sector_diffusion_breadth: 0.88
+    smartmoney_sector_ml: 0.95
+    ningbo_active_ml: 0.85
+    kronos_pattern: 0.70
+    analog_kronos_nearest_neighbors: 0.78
+    kronos_path_cluster_transition: 0.68
+    peer_research_auto_trigger: 0.40
+    fundamental_contradiction_llm: 0.52
+    fundamental_price_dislocation_model: 0.66
+    strategy_validation_decay: 0.72
+    llm_regime_cache: 0.60
+    llm_counterfactual_cache: 0.60
+    intraday_profile: 0.40
+    volume_profile_support: 0.48
+    vwap_reclaim_execution: 0.48
+    t0_uplift: 0.45
+  ta_family_weights:
+    T: 0.95
+    P: 0.90
+    R: 0.85
+    F: 0.85
+    V: 0.90
+    S: 1.05
+    C: 0.85
+    O: 1.05
+    Z: 0.80
+    E: 0.75
+    D: 1.15
+  context_gates:
+    market_regime:
+      risk_on:
+        trend_breakout: 1.15
+        sw_l2_sector_leadership: 1.10
+      range_bound:
+        pullback_continuation: 1.10
+        reversal_mean_reversion: 1.15
+      risk_off:
+        risk_warning: 1.25
+        trend_breakout: 0.70
+    sw_l2_phase:
+      acceleration:
+        trend_breakout: 1.10
+        sw_l2_sector_leadership: 1.15
+      diffusion:
+        pullback_continuation: 1.05
+      climax:
+        risk_warning: 1.20
+        trend_breakout: 0.80
+      retreat:
+        risk_warning: 1.30
+        trend_breakout: 0.65
+  historical_replay:
+    enabled: true
+    min_history_rows: 120
+    min_analogs: 8
+    max_analogs: 24
+    candidate_pool: 96
+    similarity_scale: 2.5
+    stop_distance_pct: 12.0
+    features:
+      ret_5:
+        weight: 1.00
+        scale: 0.08
+      ret_20:
+        weight: 1.10
+        scale: 0.18
+      range_pos:
+        weight: 0.85
+        scale: 0.28
+      drawdown_20:
+        weight: 0.70
+        scale: 0.18
+      amount_ratio:
+        weight: 0.45
+        scale: 1.00
+    targets:
+      tactical_15d_20:
+        horizon_days: 15
+        return_pct: 20.0
+      swing_25d_30:
+        horizon_days: 25
+        return_pct: 30.0
+      right_tail_40d_50:
+        horizon_days: 40
+        return_pct: 50.0
+  target_stop_replay:
+    enabled: true
+    min_history_rows: 120
+    min_samples: 40
+    warmup_rows: 60
+    recency_halflife_rows: 180.0
+    stop_distance_pct: 12.0
+    targets:
+      tactical_15d_20:
+        horizon_days: 15
+        return_pct: 20.0
+      swing_25d_30:
+        horizon_days: 25
+        return_pct: 30.0
+      right_tail_40d_50:
+        horizon_days: 40
+        return_pct: 50.0
+  path_forecast:
+    enabled: true
+    min_history_rows: 140
+    min_samples: 40
+    warmup_rows: 60
+    recency_halflife_rows: 180.0
+    stop_distance_pct: 12.0
+    targets:
+      tactical_15d_20:
+        horizon_days: 15
+        return_pct: 20.0
+      swing_25d_30:
+        horizon_days: 25
+        return_pct: 30.0
+      right_tail_40d_50:
+        horizon_days: 40
+        return_pct: 50.0
+  auction_imbalance_proxy:
+    gap_chase_threshold_pct: 5.0
+  hierarchical_sector_shrinkage:
+    min_full_weight_rows: 360
+  entry_fill_replay:
+    enabled: true
+    min_history_rows: 120
+    min_samples: 20
+    horizon_days: 5
+    support_window: 20
+    atr_window: 14
+    entry_low_support_multiplier: 0.995
+    entry_high_atr_multiplier: 0.35
+    stop_atr_multiplier: 0.80
+    clean_fill_weight: 0.70
+    fill_rate_weight: 0.30
+    stop_penalty_weight: 0.80
+  entry_fill_classifier:
+    enabled: true
+    min_history_rows: 120
+    min_samples: 20
+    horizon_days: 5
+    support_window: 20
+    atr_window: 14
+    entry_low_support_multiplier: 0.995
+    entry_high_atr_multiplier: 0.35
+    stop_atr_multiplier: 0.80
+  isotonic_score_calibrator:
+    enabled: true
+    horizon_bars: 40
+    target_pct: 30.0
+    min_samples: 60
+    bins: 5
+  right_tail_meta_gbm:
+    enabled: true
+    horizon_bars: 40
+    target_pct: 30.0
+    min_samples: 140
+    train_fraction: 0.72
+    max_iter: 80
+    learning_rate: 0.06
+    max_leaf_nodes: 15
+    l2_regularization: 0.04
+  temporal_fusion_sequence_ranker:
+    enabled: true
+    horizon_bars: 40
+    target_pct: 30.0
+    min_samples: 160
+    train_fraction: 0.72
+    hidden_layer_sizes: [12, 6]
+    alpha: 0.004
+    max_iter: 180
+  target_stop_survival_model:
+    enabled: true
+    horizon_bars: 40
+    target_pct: 30.0
+    stop_pct: 10.0
+    min_samples: 150
+    train_fraction: 0.72
+    n_estimators: 96
+    max_depth: 5
+    min_samples_leaf: 8
+  multi_horizon_target_classifier:
+    enabled: true
+    min_samples: 130
+    train_fraction: 0.72
+    max_iter: 70
+    learning_rate: 0.055
+    max_leaf_nodes: 13
+    l2_regularization: 0.05
+    scenarios:
+      - key: tactical_15d_20
+        label: 15日/+20%
+        horizon_bars: 15
+        target_pct: 20.0
+      - key: swing_25d_30
+        label: 25日/+30%
+        horizon_bars: 25
+        target_pct: 30.0
+      - key: right_tail_40d_50
+        label: 40日/+50%
+        horizon_bars: 40
+        target_pct: 50.0
+  stop_loss_hazard_model:
+    enabled: true
+    horizon_bars: 20
+    target_pct: 20.0
+    stop_pct: 10.0
+    min_samples: 140
+    train_fraction: 0.72
+    n_estimators: 128
+    max_depth: 6
+    min_samples_leaf: 8
+  gap_risk_open_model:
+    enabled: true
+    adverse_gap_threshold_pct: 3.0
+    min_samples: 140
+    train_fraction: 0.72
+    n_estimators: 128
+    max_depth: 6
+    min_samples_leaf: 8
+  target_ladder_probability_model:
+    enabled: true
+    min_samples: 130
+    train_fraction: 0.72
+    max_iter: 72
+    learning_rate: 0.055
+    max_leaf_nodes: 13
+    l2_regularization: 0.05
+    stop_pct: 10.0
+    scenarios:
+      - key: tactical_15d_20
+        label: 15日/+20%
+        horizon_bars: 15
+        target_pct: 20.0
+      - key: swing_25d_30
+        label: 25日/+30%
+        horizon_bars: 25
+        target_pct: 30.0
+      - key: right_tail_40d_50
+        label: 40日/+50%
+        horizon_bars: 40
+        target_pct: 50.0
+  path_shape_mixture_model:
+    enabled: true
+    horizon_bars: 25
+    target_pct: 25.0
+    stop_pct: 10.0
+    min_samples: 150
+    n_components: 5
+    reg_covar: 0.0002
+    covariance_type: diag
+  mfe_mae_surface_model:
+    enabled: true
+    horizon_bars: 25
+    target_pct: 25.0
+    stop_pct: 10.0
+    min_samples: 150
+    train_fraction: 0.72
+    max_iter: 80
+    learning_rate: 0.055
+    max_leaf_nodes: 13
+    l2_regularization: 0.05
+  regime_adaptive_weight_model:
+    enabled: true
+  peer_financial_alpha_model:
+    enabled: true
+    price_lag_alpha_scale: 0.55
+    alpha_pct_scale: 18.0
+  limit_up_event_path_model:
+    enabled: true
+    density_full_events: 4.0
+    open_times_bad: 5.0
+    limit_pct_reference: 10.0
+  position_sizing_model:
+    enabled: true
+    min_fraction: 0.0
+    max_fraction: 0.35
+    base_fraction: 0.10
+    edge_scale: 0.34
+    probability_scale: 0.18
+    risk_penalty: 0.28
+    stop_probability_penalty: 0.22
+    min_probability_to_size: 0.38
+    watch_fraction_cap: 0.05
+    full_liquidity_amount: 2000000.0
+  forward_entry_timing_model:
+    enabled: true
+    entry_window_bars: 5
+    horizon_bars: 25
+    target_pct: 25.0
+    stop_pct: 10.0
+    pullback_pct: 4.0
+    min_samples: 140
+    train_fraction: 0.72
+    n_estimators: 120
+    max_depth: 5
+    min_samples_leaf: 8
+  entry_price_surface_model:
+    enabled: true
+    entry_window_bars: 5
+    horizon_bars: 25
+    target_pct: 25.0
+    stop_pct: 10.0
+    pullback_pct: 4.0
+    breakout_buffer_pct: 1.2
+    fill_miss_penalty: 0.18
+    delay_penalty_per_bar: 0.012
+    stop_penalty_mult: 1.15
+    min_samples: 150
+    train_fraction: 0.72
+    n_estimators: 140
+    max_depth: 6
+    min_samples_leaf: 8
+  pullback_rebound_classifier:
+    enabled: true
+    horizon_bars: 20
+    target_pct: 18.0
+    stop_pct: 10.0
+    min_samples: 130
+    train_fraction: 0.72
+    n_estimators: 120
+    max_depth: 5
+    min_samples_leaf: 8
+  squeeze_breakout_classifier:
+    enabled: true
+    horizon_bars: 25
+    target_pct: 22.0
+    min_samples: 130
+    train_fraction: 0.72
+    max_iter: 80
+    learning_rate: 0.055
+    max_leaf_nodes: 13
+    l2_regularization: 0.05
+  model_stack_blender:
+    enabled: true
+    min_sources: 3
+    right_tail_base_probability: 0.24
+    source_weights:
+      right_tail_meta_gbm: 1.20
+      temporal_fusion_sequence_ranker: 1.15
+      target_stop_survival_model: 1.20
+      stop_loss_hazard_model: 0.90
+      multi_horizon_target_classifier: 1.20
+      target_ladder_probability_model: 1.15
+      path_shape_mixture_model: 1.00
+      mfe_mae_surface_model: 1.15
+      gap_risk_open_model: 0.75
+      limit_up_event_path_model: 0.75
+      peer_financial_alpha_model: 0.95
+      position_sizing_model: 0.80
+      forward_entry_timing_model: 0.85
+      entry_price_surface_model: 1.00
+      pullback_rebound_classifier: 0.95
+      squeeze_breakout_classifier: 0.95
+      historical_replay_edge: 1.00
+      target_stop_replay: 1.05
+      entry_fill_classifier: 0.70
+      analog_kronos_nearest_neighbors: 1.00
+      kronos_path_cluster_transition: 1.00
+  price_action:
+    enabled: true
+    min_rows: 40
+    trend_lookback: 60
+    good_trend_slope_20d_pct: 12.0
+    bad_trend_slope_20d_pct: -8.0
+    overheat_slope_20d_pct: 35.0
+    reversal_context_days: 20
+    candle_amplitude: 0.42
+    divergence_lookback: 10
+  sector_diffusion:
+    enabled: true
+    flow_acceleration_scale_pct: 80.0
+    crowding_center: 0.72
+  liquidity_slippage:
+    enabled: true
+    avg_amount_window: 20
+    good_avg_amount_yuan: 300000000
+    min_avg_amount_yuan: 50000000
+    participation_rate: 0.01
+    base_slippage_bps: 8.0
+    slippage_scale_bps: 35.0
+    turnover_low_pct: 0.5
+    turnover_high_pct: 18.0
+    volatility_penalty_scale_pct: 8.0
+  flow_persistence:
+    enabled: true
+    window_days: 10
+    min_rows: 5
+    recency_decay: 0.82
+    net_scale_wan: 12000.0
+  peer_fundamental_spread:
+    enabled: true
+    min_peers: 3
+    financial_weight: 0.58
+    valuation_weight: 0.16
+    research_coverage_weight: 0.12
+    size_weight: 0.08
+    momentum_weight: 0.06
+    valuation_log_scale: 0.65
+    full_research_items: 18.0
+  fundamental_price_dislocation_model:
+    enabled: true
+    min_factor_count: 4
+  intraday_profile:
+    enabled: true
+    min_rows: 40
+    vwap_support_band_pct: 3.0
+    vwap_pressure_band_pct: 4.0
+    concentration_good: 0.42
+    concentration_crowded: 0.70
+    close_vwap_scale_pct: 4.0
+  vwap_execution:
+    enabled: true
+    min_rows: 40
+    min_days: 3
+    close_vwap_scale_pct: 4.0
+  strategy_validation_decay:
+    enabled: true
+    winrate_center_pct: 25.0
+    winrate_scale_pct: 10.0
+    combined_score_scale: 0.45
+    decay_center_pp: -5.0
+    decay_scale_pp: 10.0
+  t0_uplift:
+    enabled: true
+    min_intraday_days: 3
+    min_bars_per_day: 20
+    min_daily_days: 20
+    daily_window: 30
+    roundtrip_cost_pct: 0.18
+    success_range_pct: 3.0
+    success_capture_pct: 1.2
+    good_uplift_pct: 1.5
+    good_range_pct: 3.5
+
+decision_layer:
+  common:
+    probability_display:
+      show_uncalibrated_warning: true
+      uncalibrated_warning: "当前概率估计未经过 5/10/20 三周期正式校准，不能当作确定性上涨概率。"
+    score_to_label:
+      buy: 0.70
+      watch: 0.55
+      wait: 0.45
+      avoid: 0.38
+    risk_level_mapping:
+      medium_pressure: 0.18
+      high_pressure: 0.38
+      extreme_pressure: 0.70
+      medium_risk_score: 0.48
+      high_risk_score: 0.38
+      extreme_score: 0.25
+    confidence_mapping:
+      high_score: 0.68
+      high_min_active: 5
+      high_max_risk: 2
+      conflict_low: 0.70
+    conflict_thresholds:
+      strong_cross_horizon_score_gap: 0.18
+      opposing_signal_pressure: 0.35
+    vetoes:
+      liquidity_min_avg_amount_yuan: 50000000.0
+      max_slippage_bps: 45.0
+    regime_gates:
+      market_bad_multiplier: 0.72
+      sector_bad_multiplier: 0.78
+    degraded_rules:
+      allow_partial: true
+      min_required_sources_ok: 2.0
+  horizons:
+    5d:
+      enabled: true
+      score_type: execution_score
+      score_explanation: "短线执行分衡量入场、追高、跳空、分时承接、流动性与止损空间，不是上涨概率。"
+      base_score: 0.50
+      raw_edge_scale: 0.50
+      max_display_signals: 5
+      max_audit_signals: 12
+      thresholds:
+        buy: 0.70
+        watch: 0.55
+        wait: 0.45
+        avoid: 0.38
+        reduce: 0.42
+        sell: 0.30
+      weights:
+        entry_fill_replay: 1.18
+        entry_fill_classifier: 1.12
+        forward_entry_timing_model: 1.15
+        entry_price_surface_model: 1.18
+        support_pullback: 1.10
+        momentum_5d: 0.92
+        moneyflow_7d: 1.00
+        orderflow_mix: 1.05
+        limit_up_microstructure: 0.82
+        limit_up_event_path_model: 0.82
+        lhb_institution_hotmoney_divergence: 0.76
+        intraday_profile: 1.05
+        volume_profile_support: 0.95
+        vwap_reclaim_execution: 1.08
+        liquidity_slippage: 1.10
+        gap_risk_open_model: 1.12
+        stop_first_classifier: 1.05
+        risk_penalty_weight: 1.00
+      risk:
+        veto_pressure: 0.75
+        degraded_pressure: 0.45
+        medium_pressure: 0.18
+        high_pressure: 0.38
+        extreme_pressure: 0.70
+        medium_risk_score: 0.48
+        high_risk_score: 0.38
+        extreme_score: 0.25
+      price_rules:
+        atr_fallback_pct: 0.030
+        fallback_support_pct: 0.050
+        fallback_resistance_pct: 0.080
+        entry_low_atr: -0.20
+        entry_high_atr: 0.35
+        max_entry_vs_close: 1.025
+        stop_atr: 0.80
+        first_target_pct: 6.00
+        target_low_pct: 5.00
+        target_high_pct: 10.00
+        chase_resistance_atr: 0.20
+        chase_atr: 0.90
+      t0:
+        requires_base_position: true
+        max_size_pct_of_base: 20.0
+    10d:
+      enabled: true
+      score_type: swing_score
+      score_explanation: "短波段综合分衡量资金持续、板块扩散、同行强弱和目标/止损路径，不是确定性概率。"
+      base_score: 0.50
+      raw_edge_scale: 0.48
+      max_display_signals: 5
+      max_audit_signals: 12
+      thresholds:
+        buy: 0.68
+        watch: 0.54
+        wait: 0.44
+        avoid: 0.36
+        reduce: 0.41
+        sell: 0.29
+      weights:
+        trend_following: 1.08
+        support_pullback: 0.96
+        breakout_pressure: 0.96
+        volume_confirmation: 0.86
+        trend_quality_r2: 0.92
+        volume_price_divergence: 0.80
+        moneyflow_7d: 1.02
+        orderflow_mix: 0.98
+        flow_persistence_decay: 1.06
+        smartmoney_sw_l2: 1.00
+        sector_diffusion_breadth: 1.02
+        same_sector_leadership: 0.94
+        peer_relative_momentum: 0.96
+        target_stop_replay: 1.04
+        target_stop_survival_model: 1.05
+        path_shape_mixture_model: 0.96
+        mfe_mae_surface_model: 1.00
+        pullback_rebound_classifier: 0.92
+        squeeze_breakout_classifier: 0.92
+        kronos_path_cluster_transition: 0.94
+        strategy_validation_decay: 1.00
+        regime_adaptive_weight_model: 0.82
+        risk_penalty_weight: 1.00
+      risk:
+        veto_pressure: 0.70
+        degraded_pressure: 0.36
+        medium_pressure: 0.18
+        high_pressure: 0.38
+        extreme_pressure: 0.70
+        medium_risk_score: 0.47
+        high_risk_score: 0.37
+        extreme_score: 0.24
+      price_rules:
+        atr_fallback_pct: 0.030
+        fallback_support_pct: 0.060
+        fallback_resistance_pct: 0.110
+        entry_low_atr: -0.10
+        entry_high_atr: 0.55
+        max_entry_vs_close: 1.035
+        stop_atr: 1.10
+        first_target_pct: 10.00
+        target_low_pct: 8.00
+        target_high_pct: 16.00
+        chase_resistance_atr: 0.22
+        chase_atr: 1.30
+    20d:
+      enabled: true
+      score_type: position_score
+      score_explanation: "20日波段评分衡量趋势质量、板块顺风、目标/止损、MFE/MAE 与仓位适配，不是长期投资评级。"
+      base_score: 0.50
+      raw_edge_scale: 0.46
+      max_display_signals: 5
+      max_audit_signals: 12
+      thresholds:
+        buy: 0.66
+        watch: 0.53
+        wait: 0.43
+        avoid: 0.35
+        reduce: 0.40
+        sell: 0.28
+      weights:
+        trend_following: 1.08
+        trend_quality_r2: 1.04
+        range_position: 0.88
+        drawdown_recovery: 0.86
+        smartmoney_sw_l2: 1.06
+        sector_diffusion_breadth: 1.02
+        same_sector_leadership: 0.94
+        peer_relative_momentum: 0.96
+        target_stop_replay: 1.05
+        quantile_return_forecaster: 1.06
+        conformal_return_band: 0.96
+        right_tail_meta_gbm: 0.74
+        target_stop_survival_model: 1.05
+        multi_horizon_target_classifier: 0.88
+        target_ladder_probability_model: 0.88
+        mfe_mae_surface_model: 1.05
+        position_sizing_model: 0.95
+        model_stack_blender: 1.02
+        smartmoney_sector_ml: 0.96
+        analog_kronos_nearest_neighbors: 0.96
+        kronos_path_cluster_transition: 0.98
+        temporal_fusion_sequence_ranker: 0.96
+        strategy_validation_decay: 1.02
+        regime_adaptive_weight_model: 0.88
+        fundamental_price_dislocation_model: 0.45
+        fundamental_contradiction_llm: 0.40
+        risk_penalty_weight: 1.00
+      risk:
+        veto_pressure: 0.66
+        degraded_pressure: 0.30
+        medium_pressure: 0.18
+        high_pressure: 0.38
+        extreme_pressure: 0.70
+        medium_risk_score: 0.46
+        high_risk_score: 0.36
+        extreme_score: 0.24
+      price_rules:
+        atr_fallback_pct: 0.032
+        fallback_support_pct: 0.070
+        fallback_resistance_pct: 0.140
+        entry_low_atr: 0.00
+        entry_high_atr: 0.75
+        max_entry_vs_close: 1.045
+        stop_atr: 1.35
+        first_target_pct: 14.00
+        target_low_pct: 12.00
+        target_high_pct: 24.00
+        chase_resistance_atr: 0.25
+        chase_atr: 1.80
+
+cache:
+  enabled: true
+  ttl_days: 1
+  fresh_bypass: true
+
+risk:
+  holding_window_days: [20, 40]
+  right_tail_target_pct: 50.0
+  max_entry_distance_from_support_pct: 8.0
+  max_stop_distance_pct: 12.0
+  min_reward_risk: 1.5
+  min_avg_amount_yuan: 50000000
+
+position_sizing:
+  enabled: true
+  min_buy_fraction: 0.10
+  max_buy_fraction: 0.35
+  max_watch_fraction: 0.00
+  max_loss_budget_fraction: 0.025
+  expected_value_scale: 0.18
+  stop_probability_penalty: 0.60
+  drawdown_penalty: 0.40
+  low_confidence_multiplier: 0.65
+  medium_confidence_multiplier: 0.85
+  high_confidence_multiplier: 1.00
+
+t0:
+  enabled: true
+  requires_base_position: true
+  max_size_pct_of_base: 20.0
+
+report:
+  output_family: stock_edge
+  output_root_policy: settings.output_root
+  output_layout: "<IFA_OUTPUT_ROOT>/<run_mode>/<YYYYMMDD>/stock_edge/"
+  render_html: true
+  render_markdown: true
+  visual_qa_screenshots: false
+  screenshots_are_test_artifacts: true

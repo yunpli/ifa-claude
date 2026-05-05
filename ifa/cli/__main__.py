@@ -35,6 +35,10 @@ app.add_typer(research_app, name="research")
 from ifa.cli.ta import app as ta_app  # noqa: E402
 app.add_typer(ta_app, name="ta")
 
+# Stock Edge family — single-stock trade plan
+from ifa.cli.stock import app as stock_app  # noqa: E402
+app.add_typer(stock_app, name="stock")
+
 
 if __name__ == "__main__":
     app()

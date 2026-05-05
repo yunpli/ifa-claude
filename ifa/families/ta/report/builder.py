@@ -43,22 +43,24 @@ def build_evening_report(engine: Engine, on_date: date,
     methodology = _section_methodology()
     sector_flow_gate = _section_sector_flow_gate(engine, on_date)
     strategy_spotlight = _section_strategy_spotlight(engine, on_date)
-    # M10 P0.3: Tier A=10, Tier B=20, Tier C dropped from HTML rendering
-    # (still in DB for analytics). expanded_count=5: first 5 expanded by default.
-    tier_a = _section_tier(engine, on_date, tier="A", title="§04 重点池 (Tier A)",
+    tier_a = _section_tier(engine, on_date, tier="A", title="§05 高优先级观察池 Tier A",
                             cap=10, expanded=5)
-    tier_b = _section_tier(engine, on_date, tier="B", title="§05 候选池 (Tier B)",
+    tier_b = _section_tier(engine, on_date, tier="B", title="§06 次优先级观察池 Tier B",
                             cap=20, expanded=5)
-    s5 = _section_stars(engine, on_date, star_filter=5, title="§03 五星级候选")    # legacy fallback
-    s4 = _section_stars(engine, on_date, star_filter=4, title="§04 四星级候选")
     fam = _section_candidates_by_family(engine, on_date)
+    risk = _section_risk_scan(engine, on_date)
+    # §08 = merged: history_watch + metrics + attribution
     verify = _section_verification(engine, on_date)
     metrics = _section_metrics(engine, on_date)
     attribution = _section_attribution(engine, on_date)
-    risk = _section_risk_scan(engine, on_date)
-    # hypotheses section removed — redundant with §04 Tier A picks
+    verify["metrics_rows"] = metrics.get("rows", [])
+    verify["attribution_rows"] = attribution.get("rows", [])
+    verify["attribution_window_start"] = attribution.get("window_start")
     disclaimer = _section_disclaimer()
 
+    # §00 positioning (static, in template)
+    # §01 tone card (from overview — rendered statically in template)
+    # §02 market env (index_panel + market_state)
     sections.extend([overview, index_panel, market_state])
     if augmenter is not None:
         narrative = augmenter.regime_explainer(
@@ -68,20 +70,19 @@ def build_evening_report(engine: Engine, on_date: date,
         )
         if narrative:
             sections.append({"type": "narrative", "title": "§02-N 体制解读",
-                             "body": narrative})
-    sections.append(sector_flow_gate)             # §04 — macro filter, before Tier A/B
-    sections.extend([tier_a, tier_b, strategy_spotlight])
-    # NOTE: §14 hypotheses removed — redundant with §04 重点池 (same picks)
+                             "body": narrative, "folded": True})
+    sections.append(fam)             # §03 候选结构总览 — before candidates
+    sections.append(sector_flow_gate)  # §04 SmartMoney 板块资金闸门
+    sections.extend([tier_a, tier_b])  # §05 / §06
     if augmenter is not None:
         narrative = augmenter.candidate_narrator(
             top5=[c for c in tier_a.get("candidates", [])][:5],
             top4=[c for c in tier_b.get("candidates", [])][:5],
         )
         if narrative:
-            sections.append({"type": "narrative", "title": "§06-N 重点池解读",
-                             "body": narrative})
-    # M10 P0.4: §13 风险扫描 → BEFORE §11 表现归因 (red flags first).
-    sections.extend([fam, verify, metrics, risk, attribution])
+            sections.append({"type": "narrative", "title": "§06-N 高优先级观察池解读",
+                             "body": narrative, "folded": True})
+    sections.append(risk)   # §07 风险扫描 — before history
     if augmenter is not None:
         narrative = augmenter.strategy_review(
             attribution_rows=attribution.get("rows", []),
@@ -90,15 +91,39 @@ def build_evening_report(engine: Engine, on_date: date,
             climax_warning=risk.get("climax_warning"),
         )
         if narrative:
-            sections.append({"type": "narrative", "title": "§13-N 策略评论",
-                             "body": narrative})
-    # Methodology block placed at the end (before disclaimer) so the
-    # actionable picks lead the report and the "how it works" explainer
-    # is reference material readers can scroll to.
+            sections.append({"type": "narrative", "title": "§07-N 策略评论",
+                             "body": narrative, "folded": True})
+    sections.append(verify)         # §08 历史观察池表现 (merged: history+metrics+attribution)
+    sections.append(strategy_spotlight)  # §09 今日主导策略族
+    sections.append({"type": "appendix"})   # §11 Appendix — rendered statically
     sections.append(methodology)
     sections.append(disclaimer)
 
-    # Banner-level fields (consumed by template header)
+    # Dashboard summary (§01 快览卡片)
+    tier_a_count = len(tier_a.get("candidates", []))
+    tier_b_count = len(tier_b.get("candidates", []))
+    top_family = None
+    if fam.get("families"):
+        try:
+            top_fam = max(fam["families"].items(), key=lambda kv: kv[1]["n"])
+            top_family = {"name": top_fam[0], "n": top_fam[1]["n"]}
+        except (ValueError, KeyError):
+            pass
+    v_sum = verify.get("summary", {})
+    win_rate_pct = (
+        round(100 * v_sum["win_count"] / v_sum["n_settled_t10"])
+        if v_sum.get("n_settled_t10") else None
+    )
+    dashboard = {
+        "regime": overview.get("regime"),
+        "regime_confidence": overview.get("regime_confidence"),
+        "tier_a_count": tier_a_count,
+        "tier_b_count": tier_b_count,
+        "top_family": top_family,
+        "n_settled_t10": v_sum.get("n_settled_t10"),
+        "win_rate_pct": win_rate_pct,
+    }
+
     from ifa.config import get_settings
     settings = get_settings()
 
@@ -110,7 +135,8 @@ def build_evening_report(engine: Engine, on_date: date,
         "template_version": "ta-v2.2",
         "slot": "evening",
         "run_mode": settings.run_mode.value,
-        "overview": overview,    # banner consumes this directly (regime hero)
+        "overview": overview,
+        "dashboard": dashboard,
         "sections": sections,
     }
 
@@ -327,7 +353,7 @@ def _section_strategy_spotlight(engine: Engine, on_date: date) -> dict:
     families = {fam: setups for fam, setups in families.items() if setups}
     return {
         "type": "strategy_spotlight",
-        "title": "§07 单策略聚光灯（按族折叠，仅显示今日有候选的策略）",
+        "title": "§09 今日主导策略族",
         "families": families,
         "n_active_setups": sum(len(s) for s in families.values()),
         "n_total_setups": 28,
@@ -412,7 +438,7 @@ def _section_verification(engine: Engine, on_date: date) -> dict:
     if not days:
         return {
             "type": "history_watch",
-            "title": "§08 历史重点池关注",
+            "title": "§08 历史高优先级观察池追踪",
             "window_days": 0,
             "rows": [],
             "cold_start_hint": True,
@@ -487,7 +513,7 @@ def _section_verification(engine: Engine, on_date: date) -> dict:
     if not rows:
         return {
             "type": "history_watch",
-            "title": "§08 历史重点池关注",
+            "title": "§08 历史高优先级观察池追踪",
             "window_days": len(days),
             "rows": [],
             "cold_start_hint": True,
@@ -546,7 +572,7 @@ def _section_verification(engine: Engine, on_date: date) -> dict:
 
     return {
         "type": "history_watch",
-        "title": "§08 历史重点池关注",
+        "title": "§08 历史高优先级观察池追踪",
         "window_days": len(days),
         "rows": out_rows,
         "cold_start_hint": False,
@@ -793,7 +819,7 @@ def _section_candidates_by_family(engine: Engine, on_date: date) -> dict:
         families[fam]["top"] += int(top) if top is not None else 0
     return {
         "type": "family_grid",
-        "title": "§07 候选股池（按 Setup 族）",
+        "title": "§03 候选结构总览",
         "families": families,
     }
 
@@ -955,7 +981,7 @@ def _section_risk_scan(engine: Engine, on_date: date) -> dict:
 
     return {
         "type": "risk_scan",
-        "title": "§13 风险扫描",
+        "title": "§07 风险扫描",
         "risk_light": light,                           # 'red' / 'yellow' / 'green'
         "risk_light_zh": light_zh,
         "risk_light_msg": light_msg,
@@ -1016,7 +1042,7 @@ def _section_disclaimer() -> dict:
     )
     return {
         "type": "disclaimer",
-        "title": "§16 免责声明 / Disclaimer",
+        "title": "§12 免责声明 / Disclaimer",
         "paragraphs_zh": DISCLAIMER_PARAGRAPHS_ZH,
         "paragraphs_en": DISCLAIMER_PARAGRAPHS_EN,
     }

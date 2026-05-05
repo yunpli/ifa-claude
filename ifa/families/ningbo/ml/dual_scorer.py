@@ -107,14 +107,15 @@ def _ensemble_predict(
 
 def build_inference_features(
     engine: Engine, candidates_df: pd.DataFrame, rec_date: dt.date,
-) -> np.ndarray:
+) -> pd.DataFrame:
     """Build the feature matrix for a single rec_date inference.
 
     candidates_df columns: ts_code, strategy, confidence_score, rec_signal_meta, rec_price
-    Returns an (n, len(FEATURE_COLUMNS)) numpy array.
+    Returns an (n, len(FEATURE_COLUMNS)) DataFrame. Keeping feature names at
+    inference avoids LightGBM/sklearn warnings for models trained on DataFrames.
     """
     if candidates_df.empty:
-        return np.zeros((0, len(FEATURE_COLUMNS)))
+        return pd.DataFrame(columns=FEATURE_COLUMNS)
 
     feat_rows: list[dict] = []
     for r in candidates_df.itertuples(index=False):
@@ -167,7 +168,7 @@ def build_inference_features(
     feat_df["strategy"] = candidates_df["strategy"].values
     feat_df = _add_cross_sectional_v2(feat_df)
 
-    return feat_df[FEATURE_COLUMNS].values
+    return feat_df[FEATURE_COLUMNS]
 
 
 def score_with_active_models(

@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>个股作战室 — {{ report.ts_code }}</title>
+<style>{{ inline_css }}</style>
+</head>
+<body>
+<article class="stock-edge-page ifa-page">
+
+  <header class="banner ifa-banner">
+    <div class="banner__brand ifa-banner__brand">Lindenwood Management LLC · iFA 个股作战室 v2.2</div>
+    <h1 class="banner__title ifa-banner__title">个股作战室 — {{ report.ts_code }}</h1>
+    <div class="banner__subtitle ifa-banner__subtitle">单股交易计划 · 证据优先 · 本地数据快照</div>
+    <div class="banner__meta ifa-banner__meta">
+      <span><strong>分析模式</strong> {{ report.mode_label }}</span>
+      <span><strong>交易日</strong> {{ report.as_of_trade_date }}</span>
+      <span><strong>数据截止</strong> {{ report.data_cutoff_at_bjt }}</span>
+      <span><strong>参数</strong> {{ report.param_hash }}</span>
+      <span class="run-mode ifa-run-mode-badge ifa-run-mode-badge--{{ report.run_mode }} run-mode--{{ report.run_mode }}">
+        {% if report.run_mode == 'test' %}测试{% elif report.run_mode == 'manual' %}手动{% else %}生产{% endif %}
+      </span>
+    </div>
+  </header>
+
+  {% set plan = report.plan %}
+  {% set prob = plan.probability %}
+  {% set dl = report.decision_layer %}
+  {% set d5 = dl.decision_5d %}
+  <section class="stock-verdict stock-verdict--{{ d5.decision }}">
+    <div class="stock-verdict__action">{{ d5.user_facing_label }}</div>
+    <div class="stock-verdict__body">
+      <div class="stock-verdict__title">5 / 10 / 20 交易日三周期决策</div>
+      <div class="stock-verdict__sub">{{ d5.decision_summary }} · {{ d5.score_type }} {{ d5.score | fmt_score }} · {{ d5.probability_display_warning }}</div>
+    </div>
+  </section>
+
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">01</div><h2 class="ifa-section__title">三周期交易决策</h2></div>
+    <div class="decision-grid">
+      {% for d in [dl.decision_5d, dl.decision_10d, dl.decision_20d] %}
+      <div class="decision-card decision-card--{{ d.decision }}">
+        <div class="decision-card__head">
+          <div><span>{{ d.horizon_label }}</span><strong>{{ d.user_facing_label }}</strong></div>
+          <div class="decision-card__score">{{ d.score | fmt_score }}</div>
+        </div>
+        <div class="decision-card__meta">
+          <span>动作 {{ d.decision }}</span><span>风险 {{ d.risk_level }}</span><span>置信 {{ d.confidence_level }}</span>
+        </div>
+        <div class="decision-card__prices">
+          <div><span>买入区间</span><strong>{{ d.buy_zone.low | fmt_price }}-{{ d.buy_zone.high | fmt_price }}</strong></div>
+          <div><span>不追高</span><strong>{{ d.chase_warning_price | fmt_price }}</strong></div>
+          <div><span>止损/失效</span><strong>{{ d.stop_loss.price | fmt_price }}</strong></div>
+          <div><span>第一止盈</span><strong>{{ d.first_take_profit.low | fmt_price }}-{{ d.first_take_profit.high | fmt_price }}</strong></div>
+        </div>
+        <p class="decision-card__action">{{ d.suggested_action }}</p>
+        <div class="decision-card__signals">
+          <div><span>支持</span>{% for s in d.key_supporting_signals[:3] %}<em>{{ s.label }}</em>{% else %}<em>暂无强支持</em>{% endfor %}</div>
+          <div><span>风险</span>{% for s in d.key_risk_signals[:3] %}<em>{{ s.label }}</em>{% else %}<em>暂无强风险</em>{% endfor %}</div>
+        </div>
+        <p class="decision-card__warning">{{ d.probability_display_warning }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% set pred = report.prediction_context %}
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">02</div><h2 class="ifa-section__title">买卖时机执行辅助</h2></div>
+    <div class="prediction-hero">
+      <div>
+        <span>主路径</span>
+        <strong>{{ d5.user_facing_label }}</strong>
+        <small>{{ d5.score_type }} {{ d5.score | fmt_score }} · 风险 {{ d5.risk_level }} · {{ pred.probability_model }}</small>
+      </div>
+      <div>
+        <span>5日买入带</span>
+        <strong>{{ d5.buy_zone.low | fmt_price }}-{{ d5.buy_zone.high | fmt_price }}</strong>
+        <small>
+          止损 {{ d5.stop_loss.price | fmt_price }} · 不追高 {{ d5.chase_warning_price | fmt_price }}
+        </small>
+      </div>
+    </div>
+    <p class="narrative">本节只作为三周期决策的执行辅助；未校准概率不作为确定性上涨概率展示，旧概率面仅进入审计数据。</p>
+    <div class="prediction-grid">
+      {% for row in pred.next_5d %}
+      <div class="prediction-card">
+        <div class="prediction-card__head"><strong>{{ row.scenario }}</strong><span>{{ row.priority }}</span></div>
+        <div class="prediction-card__price">{{ row.entry_low | fmt_price }}-{{ row.entry_high | fmt_price }}</div>
+        <div class="prediction-card__note">止损 {{ row.stop_price | fmt_price }} · {{ row.condition }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="target-strip">
+      {% for t in pred.sell_targets %}
+      <div>
+        <span>{{ t.label }} · {{ t.return_pct | fmt_pct_raw }}{% if t.is_best %} · 推荐{% endif %}</span>
+        <strong>{{ t.price | fmt_price }}</strong>
+        <small>{{ t.rule }}{% if t.expected_value is not none %} · 期望值 {{ t.expected_value | fmt_pct }}{% endif %}</small>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% set scenario = report.scenario_tree %}
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">02A</div><h2 class="ifa-section__title">预测执行场景树</h2></div>
+    <p class="narrative">{{ scenario.summary }}</p>
+    <div class="scenario-grid">
+      {% for row in scenario.branches %}
+      <div class="scenario-card scenario-card--{{ row.key }}">
+        <div class="scenario-card__head"><strong>{{ row.label }}</strong><span>{{ row.probability_label }}</span></div>
+        <div class="scenario-card__body">
+          <div><span>触发条件</span><p>{{ row.condition }}</p></div>
+          <div><span>动作</span><p>{{ row.action }}</p></div>
+        </div>
+        <div class="scenario-card__prices">
+          <div><span>买入带</span><strong>{% if row.entry_low %}{{ row.entry_low | fmt_price }}-{{ row.entry_high | fmt_price }}{% else %}—{% endif %}</strong></div>
+          <div><span>目标</span><strong>{% if row.target_price %}{{ row.target_price | fmt_price }}{% else %}—{% endif %}</strong></div>
+          <div><span>失效</span><strong>{{ row.stop_price | fmt_price }}</strong></div>
+        </div>
+        <div class="scenario-card__watch">{{ row.watch }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <p class="narrative narrative--compact">{{ scenario.note }}</p>
+  </section>
+
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">03</div><h2 class="ifa-section__title">关键价位与技术图谱</h2></div>
+    <div class="chart-grid">
+      <div class="chart-card chart-card--wide">
+        <div class="chart-card__head"><strong>日线 K 线与均线</strong><span>红涨绿跌 · MA5 / MA20 / MA60 · 绿色支撑 / 红色压力</span></div>
+        {{ report.chart_context.daily_kline_svg | safe }}
+      </div>
+      <div class="chart-card">
+        <div class="chart-card__head"><strong>MACD</strong><span>趋势确认与背离观察</span></div>
+        {{ report.chart_context.macd_svg | safe }}
+      </div>
+      <div class="chart-card">
+        <div class="chart-card__head"><strong>5日动量</strong><span>短线惯性强弱</span></div>
+        {{ report.chart_context.momentum_svg | safe }}
+      </div>
+    </div>
+  </section>
+
+  {% set sm = report.strategy_matrix %}
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">04</div><h2 class="ifa-section__title">多策略矩阵</h2></div>
+    <div class="strategy-summary">
+      <div><span>矩阵总分</span><strong>{{ sm.aggregate_score | fmt_score }}</strong></div>
+      <div><span>正向策略</span><strong>{{ sm.positive_count }}</strong></div>
+      <div><span>负向策略</span><strong>{{ sm.negative_count }}</strong></div>
+      <div><span>TA 策略族</span><strong>{{ sm.covered_ta_families | length }}</strong></div>
+    </div>
+    {% if sm.cluster_plans %}
+    <div class="cluster-grid">
+      {% for c in sm.cluster_plans %}
+      <div class="cluster-card cluster-card--{{ c.action }}">
+        <div class="cluster-card__head"><strong>{{ c.cluster_label }}</strong><span>{{ c.action_label }} · 分数 {{ c.display_score | fmt_score }}</span></div>
+        <div class="cluster-card__prices">
+          <div><span>入场</span><strong>{% if c.entry_low %}{{ c.entry_low | fmt_price }}-{{ c.entry_high | fmt_price }}{% else %}—{% endif %}</strong></div>
+          <div><span>目标</span><strong>{{ c.target_price | fmt_price }}</strong></div>
+          <div><span>止损</span><strong>{{ c.stop_price | fmt_price }}</strong></div>
+        </div>
+        <div class="cluster-card__note">持仓 {{ c.holding_days }} 个交易日{% if c.target_return_pct %} · 目标收益 {{ c.target_return_pct | fmt_signed_pct_raw }}{% endif %}</div>
+        <div class="cluster-card__signals">{{ c.top_signals | join("、") }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="table-scroll">
+      <table class="factor-table">
+        <thead><tr><th>策略</th><th>族群</th><th>策略簇</th><th>算法</th><th class="num">分数</th><th>方向</th><th>证据</th></tr></thead>
+        <tbody>
+        {% for s in sm.signals %}
+          <tr>
+            <td>{{ s.name }}</td><td>{{ s.family }}</td><td>{{ s.cluster_label }}</td><td>{{ s.algorithm }}</td>
+            <td class="num {% if s.score > 0 %}delta-up{% elif s.score < 0 %}delta-down{% endif %}">{{ s.score | fmt_signed_score }}</td>
+            <td><span class="badge badge--{% if s.direction == 'positive' %}green{% elif s.direction == 'negative' %}red{% else %}yellow{% endif %}">{% if s.direction == 'positive' %}正向{% elif s.direction == 'negative' %}负向{% else %}中性{% endif %}</span></td>
+            <td>{{ s.evidence }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  {% set leaders = report.sector_leaders %}
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">05</div><h2 class="ifa-section__title">同板块财务对照</h2></div>
+    {% if leaders.available %}
+      <p class="narrative">同属 SW L2「{{ leaders.l2_name }}」的同行对比以财务报表和 Research deep 因子为主；目标股以加粗、黄底或黑色外圈标记。</p>
+      <p class="narrative">{{ leaders.fundamental_trigger_note }}</p>
+      {% if leaders.fundamentals.available %}
+      {% if leaders.charts.peer_fundamental_svg %}
+      <div class="chart-card chart-card--wide">
+        <div class="chart-card__head"><strong>同板块财务质量对比</strong><span>财报综合分 · 目标股黄底</span></div>
+        {{ leaders.charts.peer_fundamental_svg | safe }}
+      </div>
+      {% endif %}
+      <div class="table-scroll">
+        <table class="factor-table factor-table--compact">
+          <thead>
+            <tr>
+              <th>公司</th><th>代码</th><th class="num">财务分</th><th>年报期</th><th class="num">年ROE</th><th class="num">年营收YoY</th><th class="num">年CFO/NI</th><th class="num">年负债率</th>
+              <th>季报期</th><th class="num">季ROE</th><th class="num">季营收YoY</th><th class="num">季CFO/NI</th><th class="num">季负债率</th><th class="num">PE TTM</th><th class="num">PB</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for row in leaders.fundamentals.rows %}
+            <tr class="{% if row.is_target %}peer-row--target{% endif %}">
+              <td>{{ row.name or "—" }}{% if row.is_target %}（目标）{% endif %}</td><td>{{ row.ts_code }}</td><td class="num">{{ row.fundamental_score | fmt_score }}</td><td>{{ row.annual_period or "—" }}</td>
+              <td class="num {% if row.annual_roe and row.annual_roe >= 0 %}delta-up{% elif row.annual_roe and row.annual_roe < 0 %}delta-down{% endif %}">{{ row.annual_roe | fmt_signed_pct_raw }}</td>
+              <td class="num {% if row.annual_growth and row.annual_growth >= 0 %}delta-up{% elif row.annual_growth and row.annual_growth < 0 %}delta-down{% endif %}">{{ row.annual_growth | fmt_signed_pct_raw }}</td>
+              <td class="num">{{ row.annual_cfo_ni | fmt_score }}</td><td class="num">{{ row.annual_debt | fmt_pct_raw }}</td><td>{{ row.quarterly_period or "—" }}</td>
+              <td class="num {% if row.quarterly_roe and row.quarterly_roe >= 0 %}delta-up{% elif row.quarterly_roe and row.quarterly_roe < 0 %}delta-down{% endif %}">{{ row.quarterly_roe | fmt_signed_pct_raw }}</td>
+              <td class="num {% if row.quarterly_growth and row.quarterly_growth >= 0 %}delta-up{% elif row.quarterly_growth and row.quarterly_growth < 0 %}delta-down{% endif %}">{{ row.quarterly_growth | fmt_signed_pct_raw }}</td>
+              <td class="num">{{ row.quarterly_cfo_ni | fmt_score }}</td><td class="num">{{ row.quarterly_debt | fmt_pct_raw }}</td><td class="num">{{ row.pe_ttm | fmt_score }}</td><td class="num">{{ row.pb | fmt_score }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="narrative narrative--compact">{{ leaders.fundamentals.note }}</p>
+      {% else %}
+      <p class="narrative">本地尚未取得同板块年报/季报因子；已保留 Research deep 触发入口，生成后会自动进入本表。</p>
+      {% endif %}
+      <div class="chart-grid peer-chart-grid">
+        <div class="chart-card chart-card--wide">
+          <div class="chart-card__head"><strong>辅助：市值与5日涨跌幅</strong><span>非主排序依据</span></div>
+          {{ leaders.charts.peer_size_return_svg | safe }}
+        </div>
+        <div class="chart-card chart-card--wide">
+          <div class="chart-card__head"><strong>辅助：5/10/15日涨跌幅</strong><span>近期交易热度 · 目标股黄底</span></div>
+          {{ leaders.charts.peer_return_ladder_svg | safe }}
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table class="factor-table factor-table--compact">
+          <thead><tr><th>龙头类型</th><th class="num">排名</th><th>代码</th><th>名称</th><th class="num">指标</th><th class="num">5日</th><th class="num">10日</th><th class="num">15日</th><th>TA形态</th></tr></thead>
+          <tbody>
+          {% for row in leaders.rows %}
+            <tr class="{% if row.is_target %}peer-row--target{% endif %}">
+              <td>{{ row.category_label }}</td><td class="num">{{ row.rank }}</td><td>{{ row.ts_code }}</td><td>{{ row.name or "—" }}</td>
+              <td class="num">{{ row.metric_label }} {{ row.metric_value | fmt_score }}</td>
+              <td class="num {% if row.return_5d_pct and row.return_5d_pct >= 0 %}delta-up{% elif row.return_5d_pct and row.return_5d_pct < 0 %}delta-down{% endif %}">{{ row.return_5d_pct | fmt_signed_pct_raw }}</td>
+              <td class="num {% if row.return_10d_pct and row.return_10d_pct >= 0 %}delta-up{% elif row.return_10d_pct and row.return_10d_pct < 0 %}delta-down{% endif %}">{{ row.return_10d_pct | fmt_signed_pct_raw }}</td>
+              <td class="num {% if row.return_15d_pct and row.return_15d_pct >= 0 %}delta-up{% elif row.return_15d_pct and row.return_15d_pct < 0 %}delta-down{% endif %}">{{ row.return_15d_pct | fmt_signed_pct_raw }}</td>
+              <td>{{ row.setup_label or "—" }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="narrative">本地尚未取得 SW L2 同板块龙头对照数据。</div>
+    {% endif %}
+  </section>
+
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">06</div><h2 class="ifa-section__title">买入区间与失效条件</h2></div>
+    <div class="execution-band">
+      {% if plan.entry_zone %}
+      <div class="execution-band__row"><div class="execution-band__key">买入区间</div><div class="execution-band__value">{{ plan.entry_zone.low | fmt_price }} - {{ plan.entry_zone.high | fmt_price }}</div><div class="execution-band__note">{{ plan.entry_zone.reason }}</div></div>
+      {% else %}
+      <div class="execution-band__row"><div class="execution-band__key">买入区间</div><div class="execution-band__value muted">暂无可执行买点</div></div>
+      {% endif %}
+      {% if plan.stop %}
+      <div class="execution-band__row execution-band__row--risk"><div class="execution-band__key">止损 / 失效</div><div class="execution-band__value">{{ plan.stop.price | fmt_price }}</div><div class="execution-band__note">{{ plan.stop.reason }}</div></div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">07</div><h2 class="ifa-section__title">目标价格兼容审计</h2></div>
+    <p class="narrative">以下旧目标来自兼容 TradePlan，仅用于审计和回溯；用户主决策以 01 的 5 / 10 / 20 交易日对象为准。</p>
+    <div class="table-scroll">
+      <table class="factor-table"><thead><tr><th>目标</th><th class="num">价格</th><th>依据</th></tr></thead><tbody>
+      {% for t in plan.targets %}<tr><td>{{ t.label }}</td><td class="num">{{ t.price | fmt_price }}</td><td>{{ t.reason }}</td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+    <div class="prob-strip">
+      <div><span>先止损概率</span><strong>{{ prob.prob_stop_first | fmt_pct }}</strong></div>
+      <div><span>入场成交</span><strong>{{ prob.entry_fill_probability | fmt_pct }}</strong></div>
+      <div><span>校准状态</span><strong>{% if prob.calibrated %}已校准{% else %}规则基线{% endif %}</strong></div>
+      <div><span>展示规则</span><strong>非主决策</strong></div>
+    </div>
+  </section>
+
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">08</div><h2 class="ifa-section__title">T+0 底仓计划</h2></div>
+    {% if plan.t0_plan and plan.t0_plan.eligible %}
+      <div class="execution-band">
+        <div class="execution-band__row"><div class="execution-band__key">最大规模</div><div class="execution-band__value">底仓的 {{ "%.1f"|format(plan.t0_plan.max_size_pct_of_base) }}%</div></div>
+        <div class="execution-band__row"><div class="execution-band__key">高抛区间</div><div class="execution-band__value">{{ plan.t0_plan.sell_zone.low | fmt_price }} - {{ plan.t0_plan.sell_zone.high | fmt_price }}</div><div class="execution-band__note">{{ plan.t0_plan.sell_zone.reason }}</div></div>
+        <div class="execution-band__row"><div class="execution-band__key">回补区间</div><div class="execution-band__value">{{ plan.t0_plan.buyback_zone.low | fmt_price }} - {{ plan.t0_plan.buyback_zone.high | fmt_price }}</div><div class="execution-band__note">{{ plan.t0_plan.buyback_zone.reason }}</div></div>
+      </div>
+    {% else %}
+      <div class="narrative">无底仓或未启用 T+0 条件时，不输出日内高抛低吸操作计划。A 股不能裸 T+0。</div>
+    {% endif %}
+  </section>
+
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">09</div><h2 class="ifa-section__title">风控否决与证据</h2></div>
+    {% if plan.vetoes %}<ul class="risk-list">{% for v in plan.vetoes %}<li>{{ v }}</li>{% endfor %}</ul>{% else %}<div class="narrative">当前规则基线未触发硬性否决。后续仍需结合流动性、板块状态、公告风险和执行价格复核。</div>{% endif %}
+    <div class="table-scroll evidence-table">
+      <table class="factor-table"><thead><tr><th>证据</th><th>数值</th><th>来源</th><th>备注</th></tr></thead><tbody>
+      {% for e in plan.evidence %}<tr><td>{{ e.key }}</td><td>{{ e.value }}</td><td>{{ e.source }}</td><td>{{ e.note or "" }}</td></tr>{% endfor %}
+      </tbody></table>
+    </div>
+  </section>
+
+  {% set val = report.strategy_validation %}
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">10</div><h2 class="ifa-section__title">策略验证摘要</h2></div>
+    <p class="narrative">{{ val.scope_label }}；这些指标用于评估触发形态的历史边际，不等同于本股未来收益承诺。</p>
+    {% if val.available %}
+    <div class="table-scroll">
+      <table class="factor-table"><thead><tr><th>策略</th><th class="num">样本</th><th class="num">60日胜率</th><th class="num">60日均收益</th><th class="num">盈亏比</th><th class="num">250日胜率</th><th class="num">衰减</th></tr></thead><tbody>
+      {% for r in val.rows %}
+        <tr><td>{{ r.setup_name }}</td><td class="num">{{ r.triggers_count or "—" }}</td><td class="num">{{ r.winrate_60d | fmt_pct_raw }}</td><td class="num {% if r.avg_return_60d and r.avg_return_60d >= 0 %}delta-up{% elif r.avg_return_60d and r.avg_return_60d < 0 %}delta-down{% endif %}">{{ r.avg_return_60d | fmt_signed_pct_raw }}</td><td class="num">{{ r.pl_ratio_60d | fmt_score }}</td><td class="num">{{ r.winrate_250d | fmt_pct_raw }}</td><td class="num {% if r.decay_score and r.decay_score >= 0 %}delta-up{% elif r.decay_score and r.decay_score < 0 %}delta-down{% endif %}">{{ r.decay_score | fmt_signed_pct_raw }}</td></tr>
+      {% endfor %}
+      </tbody></table>
+    </div>
+    {% else %}
+      <div class="narrative">本地尚未取得该股触发策略对应的滚动验证指标，当前报告不展示胜率、收益率或回撤类结论。</div>
+    {% endif %}
+  </section>
+
+  <section class="ifa-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">11</div><h2 class="ifa-section__title">免责声明</h2></div>
+    <div class="narrative">本报告基于公开数据和本地结构化缓存生成，仅供信息参考，不构成投资建议。投资有风险，交易需独立判断。</div>
+  </section>
+
+</article>
+</body>
+</html>
