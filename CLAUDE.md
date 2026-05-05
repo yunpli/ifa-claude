@@ -2,6 +2,7 @@
 
 > **更新**: 2026-05-04 (M10 P0+P1+P2 完成,等 360d backfill)
 > **接手必读**: 📌 [`docs/ta-handover-2026-05-04.md`](docs/ta-handover-2026-05-04.md) — 完整接手 context;做了什么、回测结果、参数调优演进、还有什么没做。
+> **🎯 调参经验沉淀**: 📌 [`docs/ta-tuning-playbook.md`](docs/ta-tuning-playbook.md) — 10 条启发式规则 + iteration log,**任何调参前先读这里**避免重复死路。
 > **TA deep-dive**: [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md)
 > **TA tuning history**: [`docs/ta-tier-tuning-iteration-1.md`](docs/ta-tier-tuning-iteration-1.md) + [`docs/ta-tier-tuning-iteration-2.md`](docs/ta-tier-tuning-iteration-2.md)
 > **当前状态**: 30 setups / 11 families / 180d 验证 Tier A 跑赢 universe +0.67pp / Tier B +0.26pp。等用户 terminal 跑 `scripts/ta_backfill_360d.py` 后做最终 robust 验证。

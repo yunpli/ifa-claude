@@ -2,6 +2,7 @@
 
 > **更新**: 2026-05-05 (Claude session 收口,等 Codex 接手 360d 验证)
 > **接手必读**: 📌 [`docs/ta-handover-2026-05-04.md`](docs/ta-handover-2026-05-04.md) — Claude 写的完整 TA family handover,包括做了什么、回测结果、调参演进、还有什么没做。
+> **🎯 调参经验沉淀**: 📌 [`docs/ta-tuning-playbook.md`](docs/ta-tuning-playbook.md) — 10 条启发式规则 + iteration log,任何调参前先读。
 > **TA deep-dive**: [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md)
 > **当前状态**:
 > - TA M10 P0+P1+P2 (4 次调参 iteration) 已完成 + push,head commit `dc56965`
