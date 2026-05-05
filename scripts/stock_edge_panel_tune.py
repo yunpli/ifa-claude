@@ -428,12 +428,21 @@ def main() -> int:
             reject_dir=reject_dir,
             backup=True,
         )
-        if result["accepted"]:
-            print(f"\n  ✅ ACCEPTED — variant YAML written: {result['variant_path']}")
+        # T1.4 horizon-selective output
+        applied = result.get("horizons_applied") or []
+        kept = result.get("horizons_kept_baseline") or []
+        if result.get("variant_path"):
+            if applied and not kept:
+                print(f"\n  ✅ ACCEPTED ALL — variant YAML written: {result['variant_path']}")
+            elif applied:
+                print(f"\n  🟡 PARTIAL — horizon-selective variant written: {result['variant_path']}")
+                print(f"     ▸ applied:        {', '.join(applied)} (passed G4+G5+G9 per-horizon)")
+                print(f"     ▸ kept baseline:  {', '.join(kept)} (failed at least one per-horizon gate)")
             if result.get("backup_path"):
                 print(f"     backup: {result['backup_path']}")
         else:
-            print(f"\n  ⚠ REJECTED — reject report: {result.get('reject_path', '(no reject_dir)')}")
+            print(f"\n  ⚠ REJECTED — no horizon passes per-horizon gates")
+            print(f"     reject report: {result.get('reject_path', '(no reject_dir)')}")
 
     print(f"\n  total wall time: {panel_elapsed + search_elapsed:.1f}s")
     return 0

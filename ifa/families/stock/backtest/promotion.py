@@ -481,6 +481,60 @@ def evaluate_promotion_gates(
     )
 
 
+def derive_per_horizon_decisions(
+    decision: PromotionDecision,
+    *,
+    require_gates: tuple[str, ...] = ("G4", "G5", "G9"),
+) -> dict[str, bool]:
+    """Aggregate per-horizon pass/fail across the gates that publish per_horizon flags.
+
+    A horizon is promotable iff ALL gates in `require_gates` reported it pass.
+    If a gate didn't run (no per_horizon entry), it's neutral (counts as pass).
+
+    Default: G4 (regime-bucketed) + G5 (bootstrap CI) + G9 (K-fold consistency).
+    These are the per-horizon empirical-stability gates from T1.1/T1.2/T1.3.
+    """
+    horizons = ("5d", "10d", "20d")
+    gate_by_id = {g.gate_id: g for g in decision.gates}
+    out: dict[str, bool] = {}
+    for h in horizons:
+        passes = []
+        for gate_id in require_gates:
+            g = gate_by_id.get(gate_id)
+            if g is None or not g.per_horizon:
+                continue   # gate didn't run or doesn't expose per_horizon — neutral
+            passes.append(bool(g.per_horizon.get(h, False)))
+        out[h] = bool(passes) and all(passes)
+    return out
+
+
+def filter_overlay_by_horizons(
+    overlay: Mapping[str, Any],
+    promotable_horizons: Mapping[str, bool],
+) -> dict[str, Any]:
+    """Drop overlay keys for horizons that didn't pass per-horizon gates.
+
+    Only `decision_layer.horizons.<h>.*` keys are filtered. Other keys (legacy
+    signal_weights, cluster_weights, risk.*) pass through unchanged.
+
+    Returns the filtered overlay (only promotable-horizon weights remain).
+    """
+    out: dict[str, Any] = {}
+    for k, v in overlay.items():
+        is_horizon_key = False
+        for h, ok in promotable_horizons.items():
+            prefix = f"decision_layer.horizons.{h}."
+            if k.startswith(prefix):
+                is_horizon_key = True
+                if ok:
+                    out[k] = v
+                # else: drop — horizon not approved, baseline retained
+                break
+        if not is_horizon_key:
+            out[k] = v
+    return out
+
+
 def auto_promote_if_passing(
     decision: PromotionDecision,
     *,
@@ -489,31 +543,67 @@ def auto_promote_if_passing(
     variant_output: Path,
     reject_dir: Path | None = None,
     backup: bool = True,
+    horizon_selective: bool = True,
+    require_gates_for_horizon: tuple[str, ...] = ("G4", "G5", "G9"),
 ) -> dict[str, Any]:
     """If gates pass, write a YAML variant from base + overlay.
 
+    T1.4 horizon-selective promotion: when `horizon_selective=True`, only weights
+    for horizons that passed all per-horizon gates (G4 + G5 + G9 by default) are
+    written to the variant YAML. Other horizons keep baseline weights — this is
+    the production case where 20d alpha is real but 5d/10d aren't yet.
+
+    Decision rule:
+      - With horizon_selective=True: write variant if ANY horizon passes all
+        per-horizon gates. Only that horizon's weights apply; others kept baseline.
+      - With horizon_selective=False (legacy): write only if decision.accepted (all
+        top-level gates pass), apply ALL overlay keys.
+      - If nothing promotable: write reject report to reject_dir.
+
     Default: writes to `variant_output` path; does NOT overwrite the base YAML.
-    To replace baseline, caller must explicitly point variant_output at base_yaml.
-    On failure, writes a reject report to reject_dir if provided.
+    To replace baseline, caller must explicitly point variant_output at base_yaml
+    (then `backup=True` creates a `.bak_<timestamp>` copy first).
     """
+    promotable: dict[str, bool] = {}
+    if horizon_selective:
+        promotable = derive_per_horizon_decisions(decision, require_gates=require_gates_for_horizon)
     out: dict[str, Any] = {
         "accepted": decision.accepted,
         "decision": decision.to_dict(),
+        "promotable_horizons": dict(promotable),
+        "horizons_applied": [],
+        "horizons_kept_baseline": [],
         "variant_path": None,
         "reject_path": None,
         "backup_path": None,
     }
-    if not decision.accepted:
+
+    any_promotable = bool(promotable) and any(promotable.values())
+    if horizon_selective:
+        should_write = any_promotable
+    else:
+        should_write = decision.accepted
+
+    if not should_write:
         if reject_dir is not None:
             reject_dir.mkdir(parents=True, exist_ok=True)
             stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
             reject_path = reject_dir / f"rejected_{stamp}.json"
-            reject_path.write_text(json.dumps(out["decision"], ensure_ascii=False, indent=2), encoding="utf-8")
+            reject_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
             out["reject_path"] = str(reject_path)
         return out
 
+    if horizon_selective:
+        filtered_overlay = filter_overlay_by_horizons(candidate_overlay, promotable)
+        out["horizons_applied"] = sorted([h for h, ok in promotable.items() if ok])
+        out["horizons_kept_baseline"] = sorted([h for h, ok in promotable.items() if not ok])
+    else:
+        filtered_overlay = dict(candidate_overlay)
+        out["horizons_applied"] = ["5d", "10d", "20d"]
+        out["horizons_kept_baseline"] = []
+
     base_dict = _read_yaml(base_yaml)
-    promoted = apply_param_overlay(base_dict, dict(candidate_overlay))
+    promoted = apply_param_overlay(base_dict, filtered_overlay)
     backup_path: Path | None = None
     if variant_output == base_yaml and backup:
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
