@@ -31,6 +31,38 @@
 
   {% set ov = report.overview %}
 
+  {# ── §00 系统定位 — 防止误读关键 ─────────────────────── #}
+  <section class="ifa-section ifa-positioning">
+    <header class="ifa-section__head">
+      <span class="ifa-section__num">§00</span>
+      <h2 class="ifa-section__title">本报告是什么 · 不是什么</h2>
+    </header>
+    <div class="ifa-positioning__grid">
+      <div class="ifa-positioning__card ifa-positioning__card--is">
+        <h3>✓ 本报告是</h3>
+        <ul>
+          <li><strong>3 周 swing 选股器</strong>。每个候选股的目标持仓 ≤ 15 个交易日(约 3 周),由"止损 / 目标 / 时间到期"三重出场机制管理。</li>
+          <li><strong>单股目标 +6-9%</strong>(基于 ATR × k_target=3.0,约 2:1 R:R)。Tier A 历史表现:在同周期所有候选股中,T+15 平均收益领先 0.8-1.2pp。</li>
+          <li><strong>技术形态识别</strong>:基于 30 个量化技术 setup(突破/回踩/反转/形态/量价/板块共振/筹码/主力资金/顶部反转/统计极值/事件催化),叠加体制感知评分。</li>
+          <li><strong>Tier A/B 是相对排名</strong>:Tier A 是当日 ~3000 候选中得分最高的 ~10 只,代表"短期 setup 强度 + 板块共振 + 历史胜率"综合最优。</li>
+        </ul>
+      </div>
+      <div class="ifa-positioning__card ifa-positioning__card--isnt">
+        <h3>✗ 本报告不是</h3>
+        <ul>
+          <li><strong>不是长持高收益策略</strong>。任何"40 天 +50%"或"年化 100%"的预期都不在本系统设计目标内。要长持龙头/超级强势股,需另行使用基本面 + 趋势跟踪框架。</li>
+          <li><strong>不是个股推荐</strong>。Tier A/B 是统计排名,不是确定性买入信号。任何单只票都可能因突发事件 / 黑天鹅 / 流动性丧失而失败。</li>
+          <li><strong>不是大盘 alpha</strong>。"vs 平均"指的是 vs 同周期所有命中候选的均值,不是 vs 沪深 300。系统衡量的是"内部 selectivity edge"。</li>
+          <li><strong>不替代风控</strong>。建议仓位 ≤ 5%/单、≤ 30%/同板块,严格执行止损价。系统不预测个股暴雷或政策黑天鹅。</li>
+        </ul>
+      </div>
+    </div>
+    <p class="ifa-positioning__footer">
+      技术细节见 <code>docs/ta-strategy-deep-dive.md</code> · 调参与 alpha 来源见 <code>docs/ta-tuning-playbook.md</code>。
+      历史回测口径:T+15 平均实现收益(state machine: stop/target/time-exit),benchmark 为同窗口所有 filled 候选的等权平均。
+    </p>
+  </section>
+
   {# ── §01 Tone card — 今日体制 ─────────────────────── #}
   <section class="ifa-section">
     <header class="ifa-section__head">

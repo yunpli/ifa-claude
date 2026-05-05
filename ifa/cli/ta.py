@@ -435,6 +435,85 @@ def evening_report_cmd(
     console.print(f"[green]✓ MD[/]    {md_path}")
 
 
+@app.command("run")
+def run_cmd(
+    on_date: str = typer.Option(None, "--date", help="Trade date YYYY-MM-DD (default: today BJT)"),
+    skip_etl: bool = typer.Option(False, "--skip-etl", help="Skip TA daily ETL (data already pulled)"),
+    skip_track: bool = typer.Option(False, "--skip-track", help="Skip position tracking"),
+    llm: bool = typer.Option(False, "--llm/--no-llm", help="Add LLM narrative sections"),
+    output: str = typer.Option(None, "--output", help="Output dir override"),
+    slot: str = typer.Option("evening", "--slot"),
+) -> None:
+    """One-shot daily pipeline: ETL → scan → track → report.
+
+    Equivalent to running daily-etl + scan-candidates + track-candidates +
+    evening-report in sequence. Smartmoney ETL (separate family) must have
+    already run for the same date before calling this.
+
+    Example:
+        uv run python -m ifa.cli ta run --date 2026-05-05
+    """
+    from pathlib import Path
+    from ifa.core.tushare.client import TuShareClient
+    from ifa.families.ta.backtest.runner import _scan_and_persist_one_day
+    from ifa.families.ta.etl.runner import run_ta_daily_etls
+    from ifa.families.ta.setups.position_tracker import evaluate_for_date as _track
+
+    target = date.fromisoformat(on_date) if on_date else bjt_now().date()
+    engine = get_engine()
+    console.print(f"\n[bold]TA daily run — {target}[/]")
+
+    # Step 1 — TA-specific ETL (events, blacklist, factor_pro, cyq, suspend)
+    if not skip_etl:
+        console.print("[dim]Step 1/3  TA daily ETL...[/]")
+        client = TuShareClient()
+        out = run_ta_daily_etls(client, engine, trade_date=target)
+        for src, n in out.items():
+            marker = "[red]error[/]" if n < 0 else f"{n} rows"
+            console.print(f"  {src:<18} {marker}")
+    else:
+        console.print("[dim]Step 1/3  ETL skipped (--skip-etl)[/]")
+
+    # Step 2 — Scan candidates + rank + persist
+    console.print("[dim]Step 2/3  Scan + rank...[/]")
+    n_cands = _scan_and_persist_one_day(engine, target)
+    console.print(f"  candidates persisted: {n_cands}")
+
+    # Step 3 — Position tracking (update state machine for open positions)
+    if not skip_track:
+        console.print("[dim]Step 3/3  Position tracking...[/]")
+        n_pos = _track(engine, target, horizon=15, top_watchlist_only=False)
+        console.print(f"  positions evaluated: {n_pos}")
+    else:
+        console.print("[dim]Step 3/3  Tracking skipped (--skip-track)[/]")
+
+    # Step 4 — Generate report
+    console.print("[dim]Step 4/4  Generating report...[/]")
+    augmenter = None
+    if llm:
+        from ifa.families.ta.report.llm_aug import TALLMAugmenter
+        augmenter = TALLMAugmenter()
+    report = build_evening_report(engine, target, augmenter=augmenter)
+
+    if output is None:
+        from ifa.config import get_settings
+        from ifa.core.report.output import output_dir_for_family
+        out_dir = output_dir_for_family(get_settings(), "ta", target)
+    else:
+        out_dir = Path(output)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    stamp_date = target.strftime("%Y%m%d")
+    stamp_time = bjt_now().strftime("%H%M")
+    base = f"ifa_TA_{slot}_{stamp_date}_{stamp_time}"
+    html_path = out_dir / f"{base}.html"
+    md_path = out_dir / f"{base}.md"
+    html_path.write_text(render_html(report), encoding="utf-8")
+    md_path.write_text(render_markdown(report), encoding="utf-8")
+    console.print(f"\n[green]✓ HTML[/]  {html_path}")
+    console.print(f"[green]✓ MD[/]    {md_path}")
+
+
 @app.command("backfill-regime")
 def backfill_regime(
     start: str = typer.Option(..., "--start", help="Start date YYYY-MM-DD inclusive"),

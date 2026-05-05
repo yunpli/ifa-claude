@@ -636,6 +636,44 @@ details[open] > summary[data-collapse-text]::after {
   .ifa-matrix th:nth-child(3), .ifa-matrix td:nth-child(3) { display: none; }
 }
 
+/* ── §00 系统定位说明 — 防止误读 ──────────────────────────────────── */
+.ifa-positioning__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+.ifa-positioning__card {
+  border-radius: 8px;
+  padding: 16px 18px;
+  border: 1px solid var(--rule, #e5e7eb);
+}
+.ifa-positioning__card h3 {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.ifa-positioning__card ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.ifa-positioning__card li { margin-bottom: 6px; }
+.ifa-positioning__card--is { background: #f0fdf4; border-color: #bbf7d0; }
+.ifa-positioning__card--is h3 { color: #166534; }
+.ifa-positioning__card--isnt { background: #fef2f2; border-color: #fecaca; }
+.ifa-positioning__card--isnt h3 { color: #991b1b; }
+.ifa-positioning__footer {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--ink-muted, #6b7280);
+  font-style: italic;
+}
+@media (max-width: 720px) {
+  .ifa-positioning__grid { grid-template-columns: 1fr; }
+}
+
 /* ── Print ─────────────────────────────────────────────────────────── */
 @media print {
   body { background: white; }

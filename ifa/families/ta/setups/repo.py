@@ -55,6 +55,7 @@ def upsert_candidates(
         entry_close = ev.get("close")
         rec_price = compute_recommended_price(
             c.setup_name, entry_close, atr, evidence=ev,
+            regime=regime_at_gen,
         )
         if rec_price is not None:
             per_setup_price[(c.ts_code, c.setup_name)] = rec_price

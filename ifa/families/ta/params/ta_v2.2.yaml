@@ -101,9 +101,13 @@ version: 2.2.1
 # stop  = entry × (1 − k_stop × ATR%)         k_stop = 2.0 → -2 ATR
 # target= entry × (1 + k_target × ATR%)       k_target = 4.0 → +4 ATR → R:R 2:1
 recommended_price:
-  k_stop: 1.5      # iter5 baseline (iter6 tried 1.2, 360d alpha worsened, reverted)
-  k_target: 3.0    # iter5 baseline (iter6 tried 2.5, reverted)
+  k_stop: 1.5      # iter5 baseline (iter6 tried 1.2 → reverted; iter20 tried by_regime → reverted)
+  k_target: 3.0    # iter5 baseline (iter6 tried 2.5 → reverted; iter20 tried by_regime → reverted)
   # entry_offset_atr is per-setup-category in code (not tunable per-yaml).
+  # NOTE: by_regime hook exists in code (recommended_price.py::_yaml_k_stop/k_target)
+  # but NOT activated here — iter20 showed by_regime ATR hurts T+15 alpha (-0.20pp 60d,
+  # -0.28pp 180d). Root cause: k_target=4.0 in trend regime is too far for 15-day window;
+  # k_stop=1.2 in range regime cuts winners prematurely. Keep global uniform for now.
 
 # T+15 holding-period optimization weights for backtest objective.
 backtest_objective:

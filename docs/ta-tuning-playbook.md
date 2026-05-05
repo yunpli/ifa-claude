@@ -242,6 +242,17 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
 - **Sweet spot**: -50%。再降 (-75%) 反而退化(失去多族确认信号)。
 - **Speed**: 4 个 variant 共 ~2 分钟 fast_rerank ✓ (vs 100 min full re-scan)
 
+### iter20 (2026-05-04) ❌ REVERTED — by_regime ATR k_stop/k_target
+- **Hypothesis**: trend regime 宽止损(1.8/4.0)让赢家跑;range/cooldown 紧止损(1.2/2.5)快进快出。
+- **Code**: `recommended_price.py::_yaml_k_stop/k_target(regime=...)` 读 `recommended_price.by_regime`(hook 保留在代码里)。
+- **Result**:
+  - 60d A: +0.78pp(vs iter19 +0.98, **-0.20pp ❌**)
+  - 180d A: +0.90pp(vs +1.18, **-0.28pp ❌**)
+  - 360d A: +0.14pp(vs +0.13, +0.01pp wash)
+- **Decision**: ❌ REVERT yaml(by_regime 块移除)。代码 hook 保留供未来实验。
+- **Lesson**: **T+15 时间窗太短配宽目标**。k_target=4.0 在 trend regime 下目标价在 15 天内打不到,最终时间到期出场,realized return 反而低于 k_target=3.0。range 的 k_stop=1.2 也过早止损本可反弹的票。by_regime ATR 适合更长持仓系统(T+40+),不适合本系统。
+- **P4 新增**: ❌ by_regime ATR(T+15 窗口内会因目标太远 / 止损太紧而降 alpha)
+
 ### iter19 (2026-05-04) ✅ KEPT — Regime-aware fundamental filter (path C 首战)
 - **Hypothesis**: 全局 mv≥30亿 在 trend regime 下过滤掉了趋势市最猛的小中盘票。
   by_regime: trend/early_risk_on→20亿, sector_rotation→25亿, range/cooldown→30亿(原值),
@@ -313,6 +324,7 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
 
 ### P4 — 永远不做
 - ❌ 全局 k_stop / k_target 进一步紧(已证 360d 退化)
+- ❌ by_regime ATR k_stop/k_target(iter20 已证:T+15 窗口内目标太远/止损太紧 → 降 alpha)
 - ❌ Q3 factor range > ±20%(已证反向)
 - ❌ range_bound regime 试图调出 alpha(结构性黑洞)
 - ❌ 一次改 2+ 参数(无法归因)
@@ -330,6 +342,7 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
 | **iter5** | regime-aware concentration cap (trend 3→5) | +0.71pp | +0.06pp | ✅ 阶段最优 |
 | **iter13c** | **Bayesian resonance weights × 0.5** | **+0.84pp** | **+0.15pp** | ✅ KEPT(累积进 iter19) |
 | **iter19** | **regime-aware mv 门 (trend 20亿)** | **+0.98pp** (180d +1.18pp) | **+0.13pp** | **✅ 当前最优** |
+| iter20 | by_regime ATR k_stop/k_target | +0.78pp (-0.20) | +0.14pp | ❌ REVERTED |
 | iter6 | ATR k_stop 1.2 / k_target 2.5 | +0.96 | -0.44 | ❌ 60d 过拟合 |
 | iter7 | A_size 10→5 (Tier A_strict) | +0.57 | +0.08 | ❌ 反而变差 |
 | iter8 | mv門 30→20亿 (全局) | +0.93 | +0.01 | ❌ 360d 持平 + Tier B 退 |

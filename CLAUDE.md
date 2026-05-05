@@ -5,7 +5,7 @@
 > **🎯 调参经验沉淀**: 📌 [`docs/ta-tuning-playbook.md`](docs/ta-tuning-playbook.md) — 10 条启发式规则 + iteration log,**任何调参前先读这里**避免重复死路。
 > **TA deep-dive**: [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md)
 > **TA tuning history**: [`docs/ta-tier-tuning-iteration-1.md`](docs/ta-tier-tuning-iteration-1.md) + [`docs/ta-tier-tuning-iteration-2.md`](docs/ta-tier-tuning-iteration-2.md)
-> **当前状态**: 30 setups / 11 families / 180d 验证 Tier A 跑赢 universe +0.67pp / Tier B +0.26pp。等用户 terminal 跑 `scripts/ta_backfill_360d.py` 后做最终 robust 验证。
+> **当前状态**: 30 setups / 11 families / **调参封版 iter19** — 60d Tier A +0.98pp / 180d +1.18pp / 360d +0.13pp。`ta run --date $DATE` 一条命令跑全流程。TA 已收尾,下一步: SmartMoney B阶段。
 
 ---
 
@@ -527,15 +527,14 @@ uv run alembic current
 16. ✅ 覆盖率监控 + `ta coverage` CLI（按 setup 列出最近 N 天命中数,标记 starved/low_coverage）
 17. ✅ Tushare `fina_indicator` 调用脚手架（`ta.fina_indicator_quarterly` + ETL,等回填后 ROE 自动启用）
 
-**P2 调参（用户已要求 P2/P3 互换,即调参在前）**
-- ✅ **所有 28 setup 阈值 YAML 化** — `setups:` 段在 ta_v2.2.yaml,覆盖 ~50 个 gate
-  阈值;每个 setup 通过 `setup_param(name, key, default)` 读取(`setups/_params.py`)
-- ✅ Tushare `fina_indicator` 6 季度回填(45,501 行)→ ROE 4Q 检查激活
-- ✅ Jan-April events + blacklist + candidates 全量回填(78 d × 28 setup)
-- ✅ Position state machine 跑全 65 天(9,452 positions, fill rate 68.5%, 真实 T+15 信息率)
-- ✅ tune 脚本 `scripts/ta_setup_param_tune.py` 50+ axes + greedy 1-axis 搜索
-- ⏳ 跑 60-day backtest baseline + tune iteration → 冻结新 v2.2.x 参数
-- ⏳ Q8.1 setup 相关性去重(用历史命中矩阵)
+**P2 调参 ✅ 全部完成 — 封版 iter19**
+- ✅ 所有 28 setup 阈值 YAML 化
+- ✅ 360d walk-forward 验证完成
+- ✅ iter1-20 共 20 轮迭代,iter19 为最优 (regime-aware mv 门 trend 20亿)
+- ✅ fast_rerank 加速 (~50x for ranker-only changes)
+- ✅ `ta run --date $DATE` 一条命令全流程 (ETL+scan+track+report)
+- ✅ §00 系统定位说明加入 TA report 模板 (3周 swing 选股器，非长持策略)
+- 详细调参演进见 [`docs/ta-tuning-playbook.md`](docs/ta-tuning-playbook.md)
 
 **P3 装饰性历史回放**
 - ⏳ 4 月 SmartMoney compute backfill + 报告生成 + TA 报告生成

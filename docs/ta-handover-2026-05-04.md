@@ -1,7 +1,8 @@
 # TA Family Handover — 2026-05-04
 
-> **Status**: M10 P0+P1+P2 (iteration 4) 已完成 + push (commit `dc56965`)
-> **Pending**: 360d backfill 待用户 terminal 跑;之后 Codex 接手或 Claude resume.
+> **Status**: M10 P0+P1+P2 全部完成 + 调参至 iter20 封版 ✅
+> **当前最优参数**: iter19 (regime-aware mv 门) — 60d Tier A +0.98pp / 180d +1.18pp / 360d +0.13pp
+> **DB 状态**: candidates_daily 中 entry/stop/target 价格为 iter20 生成(by_regime ATR,已 REVERT yaml),下次 `ta run` 会自然覆盖。
 > **此文档**: 给接手的 developer (Codex / 其他 Claude) 完整 context。
 
 ---

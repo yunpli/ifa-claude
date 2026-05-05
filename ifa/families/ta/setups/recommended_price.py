@@ -27,13 +27,21 @@ K_STOP_DEFAULT = 2.0
 K_TARGET_DEFAULT = 4.0
 
 
-def _yaml_k_stop() -> float:
+def _yaml_k_stop(regime: str | None = None) -> float:
     p = load_params().get("recommended_price", {}) or {}
+    if regime:
+        by_regime = (p.get("by_regime") or {}).get(regime, {})
+        if "k_stop" in by_regime:
+            return float(by_regime["k_stop"])
     return float(p.get("k_stop", K_STOP_DEFAULT))
 
 
-def _yaml_k_target() -> float:
+def _yaml_k_target(regime: str | None = None) -> float:
     p = load_params().get("recommended_price", {}) or {}
+    if regime:
+        by_regime = (p.get("by_regime") or {}).get(regime, {})
+        if "k_target" in by_regime:
+            return float(by_regime["k_target"])
     return float(p.get("k_target", K_TARGET_DEFAULT))
 
 _BREAKOUT_SETUPS = {
@@ -94,6 +102,7 @@ def compute_recommended_price(
     evidence: dict | None = None,
     k_stop: float | None = None,
     k_target: float | None = None,
+    regime: str | None = None,
 ) -> RecommendedPrice | None:
     """Return entry/stop/target prices in 元 for a single setup hit.
 
@@ -105,9 +114,9 @@ def compute_recommended_price(
         return None
     # Read from yaml when not explicitly overridden.
     if k_stop is None:
-        k_stop = _yaml_k_stop()
+        k_stop = _yaml_k_stop(regime)
     if k_target is None:
-        k_target = _yaml_k_target()
+        k_target = _yaml_k_target(regime)
     offset = _entry_offset_atr(setup_name, evidence)
     entry = entry_close * (1.0 + offset * atr_pct_20d / 100.0)
     stop = entry * (1.0 - k_stop * atr_pct_20d / 100.0)
