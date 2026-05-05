@@ -37,3 +37,7 @@ htmlcov/
 catboost_info/
 tmp/
 tests/golden_set/reports/
+
+# Reports/outputs MUST go to ~/claude/ifaenv/out/<run_mode>/<YYYYMMDD>/<family>/
+# via ifa.core.report.output.output_dir_for_family() — never write to repo-local reports/.
+reports/

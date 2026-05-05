@@ -111,7 +111,7 @@ n=38, wr 仅 24%, avg 3%。单纯"机构净买入"信号噪声大。
 5. 写回 `ta_v2.2.yaml`
 
 **P3 装饰回放**:
-当前 4 月报告样本(reports/ta_evening_2026-04-28.html)已能展示完整新功能,
+当前 4 月报告样本(~/claude/ifaenv/out/<mode>/20260428/ta/ifa_TA_evening_20260428_*.html)已能展示完整新功能,
 不必再批量回放历史报告。
 
 ---
@@ -121,4 +121,4 @@ n=38, wr 仅 24%, avg 3%。单纯"机构净买入"信号噪声大。
 uv run python -m ifa.cli ta walk-forward --start 2026-04-01 --end 2026-04-14 --skip-scan
 ```
 
-**完整输出**: `reports/walk_forward_baseline_2026-04-01_to_04-14.txt`
+**完整输出**: `/tmp/walk_forward_baseline_2026-04-01_to_04-14.txt`

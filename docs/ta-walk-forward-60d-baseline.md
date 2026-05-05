@@ -92,4 +92,4 @@ uv run python scripts/ta_setup_param_tune.py \
 uv run python -m ifa.cli ta walk-forward --start 2026-01-15 --end 2026-04-14 --skip-scan
 ```
 
-**完整 raw 输出**: `reports/walk_forward_60d_2026-01-15_to_04-14.txt`
+**完整 raw 输出**: `/tmp/walk_forward_60d_2026-01-15_to_04-14.txt`
