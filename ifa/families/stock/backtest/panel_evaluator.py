@@ -478,6 +478,43 @@ def negative_weight_bounds_for_panel(
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Walk-forward CV split (Phase 5: OOS validation)
+# ──────────────────────────────────────────────────────────────────────────
+
+
+def walk_forward_split(
+    rows: Sequence[PanelRow],
+    *,
+    train_fraction: float = 0.5,
+    embargo_days: int = 10,
+) -> tuple[list[PanelRow], list[PanelRow]]:
+    """Chronological train/validation split with embargo.
+
+    Train = older half. Validation = newer half, but rows within `embargo_days`
+    of the train end are dropped (avoid leakage from rolling features).
+
+    Returns: (train_rows, validation_rows)
+    """
+    if not rows:
+        return [], []
+    sorted_rows = sorted(rows, key=lambda r: r.as_of_date)
+    distinct_dates = sorted({r.as_of_date for r in sorted_rows})
+    if len(distinct_dates) < 2:
+        # Can't split if only one date — return all as train, empty val
+        return list(sorted_rows), []
+    cut_idx = max(1, int(len(distinct_dates) * train_fraction))
+    train_end_date = distinct_dates[cut_idx - 1]
+    train_dates_set = set(distinct_dates[:cut_idx])
+    train_rows = [r for r in sorted_rows if r.as_of_date in train_dates_set]
+    val_rows = [
+        r for r in sorted_rows
+        if r.as_of_date not in train_dates_set
+        and (r.as_of_date - train_end_date).days >= embargo_days
+    ]
+    return train_rows, val_rows
+
+
+# ──────────────────────────────────────────────────────────────────────────
 
 
 def _apply_overlay(base_params: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:

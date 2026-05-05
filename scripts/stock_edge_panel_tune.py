@@ -32,6 +32,7 @@ from ifa.families.stock.backtest.optimizer import fit_global_preset_via_panel
 from ifa.families.stock.backtest.panel_evaluator import (
     evaluate_overlay_on_panel,
     panel_matrix_from_rows,
+    walk_forward_split,
 )
 from ifa.families.stock.backtest.promotion import auto_promote_if_passing, evaluate_promotion_gates
 from ifa.families.stock.backtest.replay_panel import build_replay_panel
@@ -100,6 +101,9 @@ def main() -> int:
     parser.add_argument("--auto-promote", action="store_true", help="Apply gates; if passed, write YAML variant")
     parser.add_argument("--variant-output", default=None, help="Where to write YAML variant (default: side-by-side .variant.yaml)")
     parser.add_argument("--base-yaml", default="ifa/families/stock/params/stock_edge_v2.2.yaml")
+    parser.add_argument("--oos", action="store_true", help="Walk-forward OOS: tune on older half, gate on newer half")
+    parser.add_argument("--train-fraction", type=float, default=0.5, help="OOS train fraction (default 0.5)")
+    parser.add_argument("--embargo-days", type=int, default=10, help="OOS embargo days between train end and val start (default 10)")
     args = parser.parse_args()
 
     engine = get_engine()
@@ -171,10 +175,25 @@ def main() -> int:
         print("ERROR: panel is empty; cannot tune", file=sys.stderr)
         return 3
 
+    # Walk-forward OOS split (Phase 5)
+    if args.oos:
+        train_rows, val_rows = walk_forward_split(
+            rows, train_fraction=args.train_fraction, embargo_days=args.embargo_days,
+        )
+        train_dates = sorted({r.as_of_date for r in train_rows})
+        val_dates = sorted({r.as_of_date for r in val_rows})
+        print(f"\n[OOS split] train={len(train_rows)} rows ({len(train_dates)} dates: {train_dates[0]}..{train_dates[-1]}) | val={len(val_rows)} rows ({len(val_dates)} dates: {val_dates[0] if val_dates else '-'}..{val_dates[-1] if val_dates else '-'}) | embargo={args.embargo_days}d")
+        if not val_rows:
+            print(f"      ERROR: validation set empty (panel only spans {len(set(r.as_of_date for r in rows))} dates with embargo {args.embargo_days}d). Cannot do OOS.", file=sys.stderr)
+            return 4
+        search_rows = train_rows
+    else:
+        search_rows = rows
+
     print(f"\n[4/4] Running search ({args.max_candidates} candidates × {args.n_iterations} iterations over decision_layer space)...")
     t0 = time.monotonic()
     artifact = fit_global_preset_via_panel(
-        rows,
+        search_rows,
         as_of_date=as_of,
         base_params=base,
         universe=f"{args.universe_id}_top{args.top}",
@@ -209,13 +228,49 @@ def main() -> int:
     else:
         print(f"\n  [dry-run] artifact NOT written")
 
+    # ── OOS validation (Phase 5) ──────────────────────────────
+    if args.oos:
+        print(f"\n=== OOS Validation (held-out {len(val_rows)} rows from {val_dates[0]}..{val_dates[-1]}) ===")
+        val_panel = panel_matrix_from_rows(val_rows)
+        train_panel = panel_matrix_from_rows(train_rows)
+        train_metrics_baseline = evaluate_overlay_on_panel(train_panel, {}, base)
+        train_metrics_tuned = artifact.metrics
+        val_metrics_baseline = evaluate_overlay_on_panel(val_panel, {}, base)
+        val_metrics_tuned = evaluate_overlay_on_panel(val_panel, artifact.overlay, base)
+
+        print(f"\n  {'Metric':30s}  {'Train base':>12s}  {'Train tuned':>12s}  {'Val base':>12s}  {'Val tuned':>12s}  {'Overfit':>10s}")
+        print(f"  {'-'*30}  {'-'*12}  {'-'*12}  {'-'*12}  {'-'*12}  {'-'*10}")
+        for h in (5, 10, 20):
+            tb = train_metrics_baseline[f'objective_{h}d']['rank_ic']
+            tt = train_metrics_tuned[f'objective_{h}d']['rank_ic']
+            vb = val_metrics_baseline[f'objective_{h}d']['rank_ic']
+            vt = val_metrics_tuned[f'objective_{h}d']['rank_ic']
+            train_lift = tt - tb
+            val_lift = vt - vb
+            overfit = train_lift - val_lift
+            mark = "✅" if vt > 0 and val_lift > 0 else ("⚠" if val_lift > 0 else "❌")
+            print(f"  {f'{h}d rank_ic':30s}  {tb:>+12.4f}  {tt:>+12.4f}  {vb:>+12.4f}  {vt:>+12.4f}  {overfit:>+10.4f} {mark}")
+        cb = train_metrics_baseline['composite_objective']['score']
+        ct = train_metrics_tuned['composite_objective']['score']
+        vcb = val_metrics_baseline['composite_objective']['score']
+        vct = val_metrics_tuned['composite_objective']['score']
+        print(f"  {'composite':30s}  {cb:>12.4f}  {ct:>12.4f}  {vcb:>12.4f}  {vct:>12.4f}  {(ct-cb)-(vct-vcb):>+10.4f}")
+        print(f"\n  Headline: VAL 10d lift = {val_metrics_tuned['objective_10d']['rank_ic'] - val_metrics_baseline['objective_10d']['rank_ic']:+.4f}, "
+              f"VAL 10d rank IC = {val_metrics_tuned['objective_10d']['rank_ic']:+.4f}")
+
     # ── Auto-promotion (Phase 4) ──────────────────────────────
     if args.auto_promote:
         print(f"\n=== Auto-Promotion Gates ===")
-        panel = panel_matrix_from_rows(rows)
-        baseline_metrics = evaluate_overlay_on_panel(panel, {}, base)
+        if args.oos:
+            print(f"      (Gating on VALIDATION set, not training)")
+            candidate_metrics_for_gate = val_metrics_tuned
+            baseline_metrics = val_metrics_baseline
+        else:
+            panel = panel_matrix_from_rows(rows)
+            baseline_metrics = evaluate_overlay_on_panel(panel, {}, base)
+            candidate_metrics_for_gate = artifact.metrics
         decision = evaluate_promotion_gates(
-            artifact.metrics, baseline_metrics, artifact.overlay,
+            candidate_metrics_for_gate, baseline_metrics, artifact.overlay,
         )
         for g in decision.gates:
             mark = "✓" if g.passed else "✗"
