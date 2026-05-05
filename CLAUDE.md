@@ -5,7 +5,7 @@
 > **🎯 调参经验沉淀**: 📌 [`docs/ta-tuning-playbook.md`](docs/ta-tuning-playbook.md) — 10 条启发式规则 + iteration log,**任何调参前先读这里**避免重复死路。
 > **TA deep-dive**: [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md)
 > **TA tuning history**: [`docs/ta-tier-tuning-iteration-1.md`](docs/ta-tier-tuning-iteration-1.md) + [`docs/ta-tier-tuning-iteration-2.md`](docs/ta-tier-tuning-iteration-2.md)
-> **当前状态**: 30 setups / 11 families / **调参封版 iter19** — 60d Tier A +0.98pp / 180d +1.18pp / 360d +0.13pp。`ta run --date $DATE` 一条命令跑全流程。TA 已收尾,下一步: SmartMoney B阶段。
+> **当前状态**: TA 调参封版 iter19 ✅ · SmartMoney **v2.1.3 已全部完成** (A+B+C 三阶段) ✅ · 两个 family 均可 `daily run` 生产。
 
 ---
 
@@ -37,17 +37,20 @@
 
 ---
 
-## 三阶段路线图
+## 三阶段路线图 — 全部完成 ✅ (v2.1.3, 2026-05-03)
 
 ```
-A 阶段（数据原料）✅      B 阶段（改配方）⬅ 当前    C 阶段（用新配方加工）
+A 阶段（数据原料）✅      B 阶段（改配方）✅           C 阶段（用新配方加工）✅
 ─────────────────────   ─────────────────────        ─────────────────────
-A1. SW 成员 ETL ✅      B1. sector_flow_sw_l2 ⬅ 起点  C1. 跑板块资金流聚合
-A2. 拉 SW 成员数据 ✅   B2. factors/flow.py            C2. 跑 compute（因子/状态/信号）
-A3. raw backfill  ✅    B3. factors/leader.py           C3. 训练回测 2021-2025
-A4. raw全覆盖    ✅     B4. data.py                    C4. 训练 RF + XGB 模型
-                         B5. transition_matrix          C5. OOS 验证 2025-2026
-                         B6. evening.py 重构            C6. 生成最终晚报
+A1. SW 成员 ETL ✅      B1. sector_flow_sw_l2 ✅      C1. 板块资金流聚合 ✅ (168K行)
+A2. 拉 SW 成员数据 ✅   B2. factors/flow.py ✅         C2. compute 全量回填 ✅ (1,288天)
+A3. raw backfill  ✅    B3. leader.py+candidate.py ✅  C3. 训练回测 2021-2025 ✅
+A4. raw全覆盖    ✅     B4. data.py ✅                 C4. RF+XGB v2026_05 ✅
+                         B5. transition_matrix ✅       C5. OOS 验证 2025-11~2026-04 ✅
+                         B6. evening.py E1-E14 ✅       C6. 报告生产就绪 ✅
+                         B7. LLM aug 6模块 ✅
+                         B8. 双模型 RF+XGB ✅
+                         B9. run-mode badge ✅
                          B7. LLM aug 集成
                          B8. ML §10 双模型
                          B9. run-mode badge
