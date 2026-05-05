@@ -8,6 +8,15 @@ ranker:
   winrate:
     floor_ratio: 0.4
     target_pct: 30
+  # iter13 — Bayesian resonance weights for 2nd/3rd/4th family contribution.
+  # Grid search: 25%/+0/-25%/-37.5%/-50%/-75% from default [0.08, 0.05, 0.03].
+  # Sweet spot: -50%. iter13c [0.04, 0.025, 0.015] gives:
+  #   60d Tier A +0.84pp (vs baseline +0.71, +0.13)
+  #   180d +0.95pp (~same as +0.96)
+  #   360d +0.15pp (vs +0.06, +0.09 — best so far)
+  # Insight: previously over-relied on cross-family resonance; reducing
+  # weight makes Tier A pick more on each setup's individual edge.
+  bayesian_resonance_weights: [0.04, 0.025, 0.015]
   tiers:
     a_size: 10        # iter5 baseline (iter7 tried 5, reverted: -0.14pp)
     b_size: 20

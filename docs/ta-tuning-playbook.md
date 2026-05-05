@@ -222,6 +222,26 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
   当前 ranker 的 stock_score 已经精准 — Tier A=10 是合理 size。
 - **Speed**: fast_rerank 28 秒(vs full re-scan 25 min)— **50x 提速** ✓
 
+### iter13 (2026-05-04) ✅ KEPT — Bayesian resonance weights -50%
+- **Hypothesis**: 当前 hardcoded [0.08, 0.05, 0.03] 可能过强,试 yaml 化 + grid search
+- **Code change**: `EXTRA_FAMILY_WEIGHTS` 改成读 `ranker.bayesian_resonance_weights`
+- **Grid search results** (4 个 variant, 各 ~30 sec via fast_rerank):
+
+| Variant | weights | 60d A | 180d A | **360d A** |
+|---|---|---|---|---|
+| baseline (iter5) | [0.08, 0.05, 0.03] | +0.71 | +0.96 | +0.06 |
+| iter13 (+25%) | [0.10, 0.06, 0.04] | +0.85 | +0.93 | -0.00 |
+| iter13b (-25%) | [0.06, 0.04, 0.02] | +0.70 | +0.91 | +0.13 |
+| **iter13c (-50%) ⭐** | **[0.04, 0.025, 0.015]** | **+0.84** | **+0.95** | **+0.15** |
+| iter13e (-37.5%) | [0.05, 0.03, 0.02] | +0.61 | +0.89 | +0.09 |
+| iter13d (-75%) | [0.02, 0.012, 0.008] | +0.50 | +0.65 | +0.04 |
+
+- **Decision**: ✅ KEEP iter13c — 三窗口同时 ≥ baseline,**360d Tier A 从 +0.06 提到 +0.15pp** (+0.09pp net)
+- **Lesson**: **过强的 cross-family resonance 让 Tier A 偏向"碰巧多族 hit"的票而非"单族强 conviction"票**。
+  减少 resonance 权重让 ranker 更尊重 single-setup edge。
+- **Sweet spot**: -50%。再降 (-75%) 反而退化(失去多族确认信号)。
+- **Speed**: 4 个 variant 共 ~2 分钟 fast_rerank ✓ (vs 100 min full re-scan)
+
 ### iter12 (2026-05-04) ❌ REVERTED — 全局集中度放松也无效
 - **Hypothesis**: 集中度进一步分散(全局 3→4)+ trend regime 更松(5→6)
 - **Change**: `tier_a_per_l2_max 3→4` + `by_regime.trend.a 5→6`
@@ -269,7 +289,8 @@ fast_rerank 只重 rank 不重 filter,所以**必须 full re-scan 还原 baselin
 |---|---|---|---|---|
 | baseline (P1 完成时) | — | -? | -1.35% (-0.24pp) | — |
 | iter1-iter4 (M10 P2 早期) | ATR + Q3 + Z3+R4 + regime sizes | +0.40pp | -0.07pp | KEPT |
-| **iter5** | **regime-aware concentration cap (trend 3→5)** | **+0.71pp** | **+0.06pp** | **✅ 最优** |
+| **iter5** | regime-aware concentration cap (trend 3→5) | +0.71pp | +0.06pp | ✅ 阶段最优 |
+| **iter13c** | **Bayesian resonance weights × 0.5** | **+0.84pp** | **+0.15pp** | **✅ 当前最优** |
 | iter6 | ATR k_stop 1.2 / k_target 2.5 | +0.96 | -0.44 | ❌ 60d 过拟合 |
 | iter7 | A_size 10→5 (Tier A_strict) | +0.57 | +0.08 | ❌ 反而变差 |
 | iter8 | mv門 30→20亿 (全局) | +0.93 | +0.01 | ❌ 360d 持平 + Tier B 退 |

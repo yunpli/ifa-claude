@@ -217,7 +217,11 @@ def rank(
         if status == "active":
             rec["any_active"] = True
 
-    EXTRA_FAMILY_WEIGHTS = [0.08, 0.05, 0.03]    # base weights for 2nd/3rd/4th
+    # M10 P2 — Bayesian resonance weights now yaml-driven.
+    # Default [0.08, 0.05, 0.03] preserved when yaml missing (backward-compat).
+    # Iter 13: testing [0.10, 0.06, 0.04] (slightly stronger resonance bonus).
+    EXTRA_FAMILY_WEIGHTS = rp.get("bayesian_resonance_weights",
+                                   [0.08, 0.05, 0.03])
     for ts_code, rec in by_stock.items():
         family_records = sorted(rec["family_best"].values(),
                                 key=lambda t: -t[0])
@@ -286,6 +290,23 @@ def rank(
     cap_a_per_l2 = conc.get("tier_a_per_l2_max", 99) if conc.get("enabled", False) else 99
     cap_b_per_l2 = conc.get("tier_b_per_l2_max", 99) if conc.get("enabled", False) else 99
     cap_ab_per_l2 = conc.get("tier_ab_per_l2_max", 99) if conc.get("enabled", False) else 99
+
+    # M10 P2 iter 5 — Regime-aware concentration relaxation.
+    # In trend_continuation / early_risk_on / sector_rotation, allow sector
+    # leaders to dominate Tier A (cap 3 → 5). 360d backtest showed trend
+    # regimes had -0.10pp Tier A alpha because tight concentration capped
+    # leaders out. range_bound and down regimes keep tight defaults.
+    conc_by_regime = conc.get("by_regime", {}) or {}
+    if conc.get("enabled", False) and current_regime and current_regime in conc_by_regime:
+        rs = conc_by_regime[current_regime] or {}
+        if "a" in rs:
+            cap_a_per_l2 = int(rs["a"])
+        if "b" in rs:
+            cap_b_per_l2 = int(rs["b"])
+        if "ab" in rs:
+            cap_ab_per_l2 = int(rs["ab"])
+        log.debug("regime-aware concentration for %s: A_l2≤%d B_l2≤%d AB≤%d",
+                  current_regime, cap_a_per_l2, cap_b_per_l2, cap_ab_per_l2)
 
     # Build per-stock SW L2 lookup from candidate evidence (most reliable in-flight).
     l2_of_stock: dict[str, str | None] = {}
