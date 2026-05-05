@@ -3,6 +3,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from ifa.core.report.disclaimer import (
+    DISCLAIMER_PARAGRAPHS_EN,
+    DISCLAIMER_PARAGRAPHS_ZH,
+    FOOTER_SHORT_EN,
+    FOOTER_SHORT_ZH,
+    SHORT_HEADER_EN,
+    SHORT_HEADER_ZH,
+)
 from ifa.families.stock.analysis import StockEdgeAnalysis
 from ifa.families.stock.decision_layer import build_decision_layer
 from ifa.families.stock.features import build_support_resistance, compute_technical_summary
@@ -89,12 +97,15 @@ def build_report_model(analysis: StockEdgeAnalysis) -> dict[str, Any]:
     return {
         "product": "个股作战室",
         "ts_code": ctx.request.ts_code,
+        "stock_name": _target_stock_name(analysis),
         "mode": ctx.request.mode,
         "mode_label": _MODE_LABELS.get(ctx.request.mode, ctx.request.mode),
         "run_mode": ctx.request.run_mode,
+        "template_version": "stock_edge_v2.2",
         "as_of_trade_date": ctx.as_of.as_of_trade_date,
         "data_cutoff_at_bjt": ctx.as_of.data_cutoff_at_bjt,
         "as_of_rule": ctx.as_of.rule,
+        "disclaimer": _build_disclaimer_context(),
         "param_hash": ctx.param_hash,
         "freshness": [_decorate_freshness(item) for item in analysis.snapshot.freshness],
         "degraded_reasons": analysis.snapshot.degraded_reasons,
@@ -363,6 +374,7 @@ def _build_sector_leaders_context(analysis: StockEdgeAnalysis) -> dict[str, Any]
                     "pe_ttm": item.get("pe_ttm"),
                     "pb": item.get("pb"),
                     "setup_label": item.get("setup_label"),
+                    "daily_returns_15d": item.get("daily_returns_15d") or [],
                 }
             )
     peer_rows = _unique_peer_rows(rows)
@@ -379,7 +391,45 @@ def _build_sector_leaders_context(analysis: StockEdgeAnalysis) -> dict[str, Any]
         "charts": {**build_peer_context_charts(peer_rows), "peer_fundamental_svg": build_peer_fundamental_chart(fundamentals.get("rows") or [])},
         "fundamentals": fundamentals,
         "fundamental_trigger_note": "同板块对比以财务报表和 Research deep 因子为主；市值、5/10/15日涨跌幅只作为辅助定位。",
+        "peer_selection_notes": {
+            "fundamental": (
+                "财务质量样本：同一 SW L2 板块内、已落入本地 Research 年报/季报因子的公司；按财务综合分排序，"
+                "最多展示 8 家，并强制保留目标股。若样本少，通常是本地财报因子尚未覆盖更多同行。"
+            ),
+            "trading": (
+                "交易位置样本：同一 SW L2 板块内的市值龙头、5日动量龙头、近7日资金龙头和 TA 形态龙头合并去重，"
+                "最多展示 12 家，并强制保留目标股。"
+            ),
+            "daily_returns": (
+                "每日涨跌样本：沿用交易位置样本；中间 15 根柱来自本地日线 pct_chg 的最近 15 个交易日，"
+                "右侧 5/10/15 日为累计涨跌幅。"
+            ),
+        },
     }
+
+
+def _build_disclaimer_context() -> dict[str, Any]:
+    return {
+        "short_header_zh": SHORT_HEADER_ZH,
+        "short_header_en": SHORT_HEADER_EN,
+        "footer_short_zh": FOOTER_SHORT_ZH,
+        "footer_short_en": FOOTER_SHORT_EN,
+        "paragraphs_zh": list(DISCLAIMER_PARAGRAPHS_ZH),
+        "paragraphs_en": list(DISCLAIMER_PARAGRAPHS_EN),
+    }
+
+
+def _target_stock_name(analysis: StockEdgeAnalysis) -> str | None:
+    sector = analysis.snapshot.sector_membership.data or {}
+    for row in sector.get("sector_peers") or []:
+        if row.get("ts_code") == analysis.ctx.request.ts_code:
+            return row.get("name")
+    rows = analysis.snapshot.daily_bars.data
+    if rows is not None and not rows.empty and "name" in rows.columns:
+        value = rows["name"].dropna()
+        if not value.empty:
+            return str(value.iloc[-1])
+    return None
 
 
 def _unique_peer_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

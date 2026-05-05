@@ -59,6 +59,14 @@ def _decorate_peer(row: dict[str, Any], target_ts_code: str) -> dict[str, Any]:
         "ta_score",
     ]:
         out[key] = _float_or_none(out.get(key))
+    out["daily_returns_15d"] = [
+        {
+            "trade_date": item.get("trade_date"),
+            "pct_chg": _float_or_none(item.get("pct_chg")),
+        }
+        for item in (out.get("daily_returns_15d") or [])
+        if isinstance(item, dict)
+    ]
     return out
 
 
@@ -486,6 +494,34 @@ class LocalDataGateway:
                     ).mappings()
                 ]
                 peer_codes = [r["ts_code"] for r in sector_peers if r.get("ts_code")]
+                peer_daily_returns: dict[str, list[dict[str, Any]]] = {}
+                if peer_codes:
+                    rows_15d = [
+                        dict(r)
+                        for r in conn.execute(
+                            text("""
+                                WITH ranked AS (
+                                    SELECT d.ts_code, d.trade_date, d.pct_chg,
+                                           ROW_NUMBER() OVER (PARTITION BY d.ts_code ORDER BY d.trade_date DESC) AS rn
+                                    FROM smartmoney.raw_daily d
+                                    WHERE d.ts_code = ANY(:peer_codes)
+                                      AND d.trade_date <= :as_of
+                                )
+                                SELECT ts_code, trade_date, pct_chg
+                                FROM ranked
+                                WHERE rn <= 15
+                                ORDER BY ts_code, trade_date
+                            """),
+                            {"peer_codes": peer_codes, "as_of": as_of_trade_date},
+                        ).mappings()
+                    ]
+                    for daily_row in rows_15d:
+                        peer_daily_returns.setdefault(str(daily_row["ts_code"]), []).append(
+                            {
+                                "trade_date": daily_row.get("trade_date"),
+                                "pct_chg": _float_or_none(daily_row.get("pct_chg")),
+                            }
+                        )
                 peer_fundamentals = []
                 if peer_codes:
                     peer_fundamentals = [
@@ -530,8 +566,9 @@ class LocalDataGateway:
         data["sector_flow_7d"] = list(reversed(sector_flow))
         data["sector_state"] = dict(sector_state) if sector_state else None
         data["sector_factor"] = dict(sector_factor) if sector_factor else None
-        data["sector_peers"] = [_decorate_peer(r, ts_code) for r in sector_peers]
-        data["sector_leaders"] = _build_sector_leaders(sector_peers, ts_code)
+        decorated_peers = [_decorate_peer({**r, "daily_returns_15d": peer_daily_returns.get(str(r.get("ts_code")), [])}, ts_code) for r in sector_peers]
+        data["sector_peers"] = decorated_peers
+        data["sector_leaders"] = _build_sector_leaders(decorated_peers, ts_code)
         data["peer_fundamentals"] = peer_fundamentals
         return LoadResult(
             name="sector_membership",

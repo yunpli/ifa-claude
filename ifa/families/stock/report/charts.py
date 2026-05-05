@@ -67,7 +67,7 @@ def _prepare_daily(daily_bars: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
     required = {"trade_date", "open", "high", "low", "close"}
     if daily_bars.empty or not required.issubset(daily_bars.columns):
         return pd.DataFrame()
-    df = daily_bars.sort_values("trade_date").tail(max_rows).copy().reset_index(drop=True)
+    df = daily_bars.sort_values("trade_date").copy().reset_index(drop=True)
     for column in ["open", "high", "low", "close"]:
         df[column] = pd.to_numeric(df[column], errors="coerce")
     df = df.dropna(subset=["open", "high", "low", "close"])
@@ -80,12 +80,12 @@ def _prepare_daily(daily_bars: pd.DataFrame, *, max_rows: int) -> pd.DataFrame:
     df["signal"] = df["macd"].ewm(span=9, adjust=False).mean()
     df["hist"] = (df["macd"] - df["signal"]) * 2
     df["momentum_5d"] = df["close"].pct_change(5) * 100
-    return df
+    return df.tail(max_rows).reset_index(drop=True)
 
 
 def _daily_kline_svg(df: pd.DataFrame, *, price_levels: list[dict[str, Any]]) -> str:
-    width, height = 920, 340
-    left, top, right, bottom = 46, 24, 18, 74
+    width, height = 920, 372
+    left, top, right, bottom = 46, 24, 18, 102
     plot_w = width - left - right
     plot_h = height - top - bottom
     level_values = [level.get("price") for level in price_levels[:6]]
@@ -124,7 +124,7 @@ def _daily_kline_svg(df: pd.DataFrame, *, price_levels: list[dict[str, Any]]) ->
     parts.append(_polyline(df["ma60"], x_at, y_at, MA60, "2.0"))
     parts.append(_price_level_overlay(price_levels[:6], width, left, right, y_at, top=top, bottom=bottom, height=height))
     parts.append(_legend([("K线", UP), ("MA5", MA5), ("MA20", MA20), ("MA60", MA60), ("支撑", DOWN), ("压力", UP)], x=left, y=16))
-    parts.append(_axis_dates(df, x_at, height - 50))
+    parts.append(_axis_dates(df, x_at, height - 74))
     parts.append("</svg>")
     return "".join(parts)
 
@@ -165,15 +165,15 @@ def _price_level_overlay(levels: list[dict[str, Any]], width: int, left: int, ri
             f'stroke="{color}" stroke-width="{stroke:.2f}" stroke-dasharray="{dash}" opacity="0.78"/>'
         )
         labels.append({"color": color, "label": label, "order": len(labels)})
-    legend_y = height - bottom + 34
+    legend_y = height - bottom + 32
     for i, row in enumerate(labels[:6]):
-        col = i % 3
-        row_idx = i // 3
-        x = left + col * 280
-        y = legend_y + row_idx * 16
-        parts.append(f'<line x1="{x}" y1="{y}" x2="{x + 20}" y2="{y}" stroke="{row["color"]}" stroke-width="2.6"/>')
+        col = i % 2
+        row_idx = i // 2
+        x = left + col * 410
+        y = legend_y + row_idx * 21
+        parts.append(f'<line x1="{x}" y1="{y}" x2="{x + 26}" y2="{y}" stroke="{row["color"]}" stroke-width="3.2"/>')
         parts.append(
-            f'<text x="{x + 26}" y="{y + 4}" font-size="10" fill="{row["color"]}" '
+            f'<text x="{x + 34}" y="{y + 5}" font-size="12.5" fill="{row["color"]}" '
             f'font-weight="700">{escape(str(row["label"]))}</text>'
         )
     return "".join(parts)
@@ -227,8 +227,8 @@ def _keep_target(rows: list[dict[str, Any]], *, target: dict[str, Any] | None = 
 
 
 def _peer_size_return_svg(rows: list[dict[str, Any]]) -> str:
-    width, height = 920, 260
-    left, top, right, bottom = 70, 30, 26, 42
+    width, height = 920, 320
+    left, top, right, bottom = 86, 34, 34, 58
     plot_w = width - left - right
     plot_h = height - top - bottom
     returns = _finite_values([row.get("return_5d_pct") for row in rows] + [0])
@@ -239,8 +239,19 @@ def _peer_size_return_svg(rows: list[dict[str, Any]]) -> str:
     y_at = lambda v: top + (y_hi - math.log10(max(float(v), 1.0))) / (y_hi - y_lo or 1.0) * plot_h
     parts = [_svg_open(width, height, "同板块市值与5日涨跌幅对照")]
     parts.append(f'<rect x="{left}" y="{top}" width="{plot_w}" height="{plot_h}" fill="#fff" stroke="{GRID}"/>')
+    for t in [-1.0, -0.5, 0.0, 0.5, 1.0]:
+        value = x_lo + (x_hi - x_lo) * (t + 1.0) / 2.0
+        x = x_at(value)
+        parts.append(f'<line x1="{x:.2f}" y1="{top}" x2="{x:.2f}" y2="{top + plot_h}" stroke="{GRID}" stroke-width="1" opacity="0.62"/>')
+        parts.append(f'<text x="{x:.2f}" y="{top + plot_h + 18}" text-anchor="middle" font-size="10" fill="{MUTED}">{_fmt_signed_axis_pct(value)}</text>')
+    for frac in [0.0, 0.25, 0.50, 0.75, 1.0]:
+        log_value = y_hi - (y_hi - y_lo) * frac
+        mv = 10 ** log_value
+        y = top + plot_h * frac
+        parts.append(f'<line x1="{left}" y1="{y:.2f}" x2="{left + plot_w}" y2="{y:.2f}" stroke="{GRID}" stroke-width="1" opacity="0.50"/>')
+        parts.append(f'<text x="{left - 8}" y="{y + 4:.2f}" text-anchor="end" font-size="10" fill="{MUTED}">{_fmt_market_cap_axis(mv)}</text>')
     zero_x = x_at(0.0)
-    parts.append(f'<line x1="{zero_x:.2f}" y1="{top}" x2="{zero_x:.2f}" y2="{top + plot_h}" stroke="{GRID}" stroke-width="1.2"/>')
+    parts.append(f'<line x1="{zero_x:.2f}" y1="{top}" x2="{zero_x:.2f}" y2="{top + plot_h}" stroke="{INK}" stroke-width="1.3" opacity="0.38"/>')
     for row in rows:
         ret = row.get("return_5d_pct")
         mv = row.get("total_mv")
@@ -256,52 +267,64 @@ def _peer_size_return_svg(rows: list[dict[str, Any]]) -> str:
             parts.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{r + 1.6:.2f}" fill="{color}" opacity="0.92"/>')
         else:
             parts.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="{r}" fill="{color}" opacity="0.82"/>')
-        parts.append(f'<text x="{x + 8:.2f}" y="{y - 6:.2f}" font-size="10" fill="{INK}" font-weight="{700 if row.get("is_target") else 500}">{label}</text>')
-    parts.append(f'<text x="{left}" y="{height - 12}" font-size="11" fill="{MUTED}">横轴：5日涨跌幅，右侧为强；纵轴：总市值，越高越大。目标股带黑色外圈，红涨绿跌。</text>')
+        tx = min(width - right - 58, max(left + 4, x + 8))
+        parts.append(f'<text x="{tx:.2f}" y="{y - 6:.2f}" font-size="10" fill="{INK}" font-weight="{700 if row.get("is_target") else 500}">{label}</text>')
+    parts.append(f'<text x="{left + plot_w / 2:.2f}" y="{height - 26}" text-anchor="middle" font-size="11" fill="{MUTED}">5日涨跌幅（%）</text>')
+    parts.append(f'<text x="18" y="{top + plot_h / 2:.2f}" transform="rotate(-90 18 {top + plot_h / 2:.2f})" text-anchor="middle" font-size="11" fill="{MUTED}">总市值（亿元，近似）</text>')
+    parts.append(f'<text x="{left}" y="{height - 8}" font-size="10.5" fill="{MUTED}">样本：同板块市值/动量/资金/TA代表股；目标股黑色外圈。红=5日上涨，绿=5日下跌。</text>')
     parts.append("</svg>")
     return "".join(parts)
 
 
 def _peer_return_ladder_svg(rows: list[dict[str, Any]]) -> str:
-    width, height = 920, 326
-    left, top, right, bottom = 108, 28, 28, 26
-    sorted_rows = sorted(rows, key=lambda row: float(row.get("return_5d_pct") or -999), reverse=True)
+    width, height = 920, 442
+    left, top, right, bottom = 132, 54, 34, 42
+    sorted_rows = sorted(rows, key=lambda row: float(row.get("return_15d_pct") if row.get("return_15d_pct") is not None else row.get("return_5d_pct") or -999), reverse=True)
     rows = _keep_target(sorted_rows, limit=8)
-    values = _finite_values(
-        [
-            *(row.get("return_5d_pct") for row in rows),
-            *(row.get("return_10d_pct") for row in rows),
-            *(row.get("return_15d_pct") for row in rows),
-            0,
-        ]
-    )
-    lo, hi = _symmetric_domain(values)
-    plot_w = width - left - right
+    series_by_code = {str(row.get("ts_code") or i): _daily_return_series(row) for i, row in enumerate(rows)}
+    daily_values = [value for series in series_by_code.values() for value in series]
+    max_abs_daily = max([abs(value) for value in daily_values] + [2.0])
+    # Use a capped visual scale so one extreme limit-up day does not flatten
+    # normal daily bars. Direction and ordering remain faithful; height is
+    # square-root compressed for readability.
+    visual_scale = min(max_abs_daily * 1.02, 10.0)
+    bar_area_w = 510
+    metric_x = left + bar_area_w + 42
+    metric_cols = [metric_x, metric_x + 54, metric_x + 108]
     row_h = (height - top - bottom) / max(len(rows), 1)
-    x_at = lambda v: left + (float(v) - lo) / (hi - lo or 1.0) * plot_w
-    zero_x = x_at(0.0)
-    parts = [_svg_open(width, height, "同板块5/10/15日涨跌幅阶梯")]
-    parts.append(f'<line x1="{zero_x:.2f}" y1="{top - 8}" x2="{zero_x:.2f}" y2="{height - bottom + 4}" stroke="{GRID}" stroke-width="1.2"/>')
+    parts = [_svg_open(width, height, "同板块15日每日涨跌走势")]
+    parts.append(f'<text x="{left}" y="{top - 22}" font-size="11.5" fill="{MUTED}" font-weight="700">最近15个交易日每日涨跌</text>')
+    for label, x in zip(["5日", "10日", "15日"], metric_cols, strict=True):
+        parts.append(f'<text x="{x}" y="{top - 22}" text-anchor="middle" font-size="11.5" fill="{MUTED}" font-weight="700">{label}</text>')
     for i, row in enumerate(rows):
         y = top + i * row_h + row_h * 0.50
         label = escape(str(row.get("name") or row.get("ts_code")))
         if row.get("is_target"):
             parts.append(
-                f'<rect x="{left - 100}" y="{y - row_h * 0.46:.2f}" width="{plot_w + 108}" '
+                f'<rect x="{left - 112}" y="{y - row_h * 0.46:.2f}" width="{width - left - right + 112}" '
                 f'height="{row_h * 0.92:.2f}" rx="6" fill="#fff3cd" stroke="#d8b45c" opacity="0.95"/>'
             )
-        parts.append(f'<text x="{left - 8}" y="{y + 4:.2f}" text-anchor="end" font-size="11" fill="{INK}" font-weight="{700 if row.get("is_target") else 500}">{label}{ " 目标股" if row.get("is_target") else ""}</text>')
-        for j, (key, opacity) in enumerate([("return_5d_pct", 0.95), ("return_10d_pct", 0.68), ("return_15d_pct", 0.45)]):
-            value = row.get(key)
-            if value is None:
-                continue
-            v = float(value)
-            color = UP if v >= 0 else DOWN
-            yj = y + (j - 1) * 6
-            x = x_at(v)
-            parts.append(f'<line x1="{zero_x:.2f}" y1="{yj:.2f}" x2="{x:.2f}" y2="{yj:.2f}" stroke="{color}" stroke-width="5" opacity="{opacity}"/>')
-    parts.append(_legend([("红=上涨", UP), ("绿=下跌", DOWN), ("深=5日", INK), ("中=10日", "#7d8796"), ("浅=15日", "#a9b0ba")], x=left, y=16))
-    parts.append(f'<text x="{left}" y="{height - 8}" font-size="11" fill="{MUTED}">同板块近期相对强弱：柱体向右为上涨，向左为下跌。</text>')
+        parts.append(f'<text x="{left - 10}" y="{y + 4:.2f}" text-anchor="end" font-size="11" fill="{INK}" font-weight="{700 if row.get("is_target") else 500}">{label}{ " 目标股" if row.get("is_target") else ""}</text>')
+        series = series_by_code.get(str(row.get("ts_code") or i), [])[-15:]
+        bar_gap = 4.0
+        bar_w = max(7.0, (bar_area_w - 14 * bar_gap) / 15)
+        start_x = left
+        zero_y = y
+        max_h = row_h * 0.46
+        parts.append(f'<line x1="{start_x - 4:.2f}" y1="{zero_y:.2f}" x2="{start_x + 15 * (bar_w + bar_gap):.2f}" y2="{zero_y:.2f}" stroke="{GRID}" stroke-width="1.1"/>')
+        start_day = max(1, 16 - len(series))
+        for day, value in enumerate(series, start=start_day):
+            color = UP if value >= 0 else DOWN
+            visual_ratio = math.sqrt(min(abs(value), visual_scale) / visual_scale) if visual_scale > 0 else 0.0
+            h = max(2.2, visual_ratio * max_h)
+            x = start_x + (day - 1) * (bar_w + bar_gap)
+            bar_y = zero_y - h if value >= 0 else zero_y
+            parts.append(f'<rect x="{x:.2f}" y="{bar_y:.2f}" width="{bar_w:.2f}" height="{h:.2f}" rx="1.2" fill="{color}" opacity="0.88"/>')
+        for value, x in zip([row.get("return_5d_pct"), row.get("return_10d_pct"), row.get("return_15d_pct")], metric_cols, strict=True):
+            color = _pct_color(value)
+            parts.append(f'<text x="{x}" y="{y + 4:.2f}" text-anchor="middle" font-size="11.5" fill="{color}" font-weight="800">{_fmt_optional_pct(value)}</text>')
+    parts.append(_legend([("红=当日上涨", UP), ("绿=当日下跌", DOWN), ("黄底=目标股", "#d8b45c")], x=left, y=18))
+    parts.append(f'<text x="{left}" y="{height - 12}" font-size="11" fill="{MUTED}">柱高做视觉增强缩放，当前满刻度约 ±{visual_scale:.1f}%；右侧为 5/10/15 日累计涨跌幅。</text>')
     parts.append("</svg>")
     return "".join(parts)
 
@@ -355,6 +378,81 @@ def _fmt_optional_num(value: Any) -> str:
         return f"{float(value):.2f}"
     except (TypeError, ValueError):
         return "—"
+
+
+def _fmt_signed_axis_pct(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    sign = "+" if number > 0 else ""
+    return f"{sign}{number:.0f}%"
+
+
+def _fmt_market_cap_axis(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "—"
+    # TuShare daily_basic.total_mv is in 10k CNY. Convert to 100M CNY.
+    yi = number / 10000.0
+    if yi >= 10000:
+        return f"{yi / 10000:.1f}万亿"
+    if yi >= 1000:
+        return f"{yi:.0f}亿"
+    if yi >= 100:
+        return f"{yi:.0f}亿"
+    return f"{yi:.1f}亿"
+
+
+def _pct_color(value: Any) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return MUTED
+    if number > 0:
+        return UP
+    if number < 0:
+        return DOWN
+    return MUTED
+
+
+def _daily_return_series(row: dict[str, Any]) -> list[float]:
+    raw = row.get("daily_returns_15d") or []
+    values: list[float] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        value = item.get("pct_chg")
+        if value is None:
+            continue
+        try:
+            values.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    if values:
+        return values[-15:]
+    # Fallback for old cached reports that only have aggregate returns.
+    return _fallback_daily_from_aggregate(row)
+
+
+def _fallback_daily_from_aggregate(row: dict[str, Any]) -> list[float]:
+    r5 = _optional_float(row.get("return_5d_pct")) or 0.0
+    r10 = _optional_float(row.get("return_10d_pct"))
+    r15 = _optional_float(row.get("return_15d_pct"))
+    first = (r15 - r10) / 5.0 if r15 is not None and r10 is not None else 0.0
+    second = (r10 - r5) / 5.0 if r10 is not None else 0.0
+    third = r5 / 5.0
+    return [first] * 5 + [second] * 5 + [third] * 5
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _clip(value: float, low: float, high: float) -> float:
