@@ -227,6 +227,8 @@ def _horizon_metrics(
     buy_hit_rate = float(tf[buy_mask].mean()) if buy_n > 0 else 0.0
     buy_avg_return = float(r[buy_mask].mean()) if buy_n > 0 else 0.0
 
+    # rank IC quality: maps rank IC of [-0.10, +0.20] → [0, 1]; below -0.10 = 0; above +0.20 = 1
+    rank_ic_quality = float(np.clip((rank_ic + 0.10) / 0.30, 0.0, 1.0))
     positive_return_quality = float(np.clip(positive_rate * sample_factor, 0.0, 1.0))
     target_first_quality = float(np.clip(target_first_rate * sample_factor, 0.0, 1.0))
     entry_fill_quality = float(np.clip(min(1.0, buy_n / max(20, n / 5)) * sample_factor, 0.0, 1.0))
@@ -247,6 +249,7 @@ def _horizon_metrics(
         "avg_drawdown": round(avg_dd, 6),
         "avg_mfe": round(avg_mfe, 6),
         "mfe_mae_ratio": round(avg_mfe / max(0.01, avg_dd), 6),
+        "rank_ic_quality": rank_ic_quality,
         "positive_return_quality": positive_return_quality,
         "target_first_quality": target_first_quality,
         "entry_fill_quality": entry_fill_quality,

@@ -33,6 +33,7 @@ class HorizonObjectiveInputs:
     overheat_penalty: float = 0.0
     decay_penalty: float = 0.0
     auxiliary_penalty: float = 0.0
+    rank_ic_quality: float = 0.0
 
     def to_dict(self) -> dict[str, float]:
         return asdict(self)
@@ -64,11 +65,12 @@ class PredictionObjectiveInputs:
 
 
 DEFAULT_HORIZON_WEIGHTS: dict[str, float] = {
-    "positive_return_quality": 0.20,
-    "target_first_quality": 0.18,
-    "entry_fill_quality": 0.12,
-    "reward_risk": 0.16,
-    "risk_adjusted_return": 0.16,
+    "rank_ic_quality": 0.25,           # NEW: reward score-vs-realized rank correlation directly
+    "positive_return_quality": 0.16,
+    "target_first_quality": 0.14,
+    "entry_fill_quality": 0.10,
+    "reward_risk": 0.12,
+    "risk_adjusted_return": 0.12,
     "drawdown_penalty": -0.16,
     "stop_first_penalty": -0.12,
     "liquidity_penalty": -0.05,
@@ -204,9 +206,12 @@ def _decision_layer_bounds() -> dict[str, tuple[float, float]]:
     horizons = ("5d", "10d", "20d")
     for h in horizons:
         keys = DEFAULT_KEYS.get(h, {})
+        # Allow zero-out: signals that are inverted in this universe/period should
+        # be turned off rather than just minimally weighted. Bound floor was 0.30
+        # but a signal with rank IC = -0.34 still drags ranking down at any weight > 0.
         for key in list(keys.get("positive", [])) + list(keys.get("risk", [])):
-            out[f"decision_layer.horizons.{h}.weights.{key}"] = (0.30, 1.80)
-        out[f"decision_layer.horizons.{h}.weights.risk_penalty_weight"] = (0.50, 1.50)
+            out[f"decision_layer.horizons.{h}.weights.{key}"] = (0.0, 1.80)
+        out[f"decision_layer.horizons.{h}.weights.risk_penalty_weight"] = (0.0, 1.50)
         out[f"decision_layer.horizons.{h}.base_score"] = (0.45, 0.55)
         out[f"decision_layer.horizons.{h}.raw_edge_scale"] = (0.30, 0.70)
         # Thresholds — bounds chosen to keep ordering buy > watch > wait > avoid
