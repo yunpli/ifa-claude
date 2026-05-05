@@ -204,6 +204,8 @@ class GateResult:
     value: float
     threshold: float
     detail: str = ""
+    per_horizon: dict[str, bool] = field(default_factory=dict)
+    """Per-horizon pass/fail (used by G9 K-fold consistency, consumed by T1.4 horizon-selective promotion)."""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -239,18 +241,26 @@ def evaluate_promotion_gates(
     candidate_overlay: Mapping[str, Any],
     *,
     config: Mapping[str, Any] | None = None,
+    kfold_results: list[dict[str, Any]] | None = None,
 ) -> PromotionDecision:
-    """Run G1/G2/G6/G7 against candidate vs baseline.
+    """Run G1/G2/G6/G7 (and G9 if K-fold results provided) against candidate vs baseline.
 
     G3 (Sharpe), G4 (regime-bucketed), G5 (bootstrap CI), G8 (multi-iter convergence)
     are deferred — they need either richer panel infrastructure (regime split, more
     samples) or are tracked elsewhere (G8 is in artifact.metrics.search_history).
+
+    G9 (K-fold consistency) activates when `kfold_results` is provided. Each fold dict
+    must contain `val_baseline` and `val_tuned` metric blocks (same shape as
+    candidate_metrics). G9 checks that ≥ min_positive_folds folds show positive lift
+    on each horizon. Per-horizon pass/fail is exposed in `g9.per_horizon` so T1.4
+    horizon-selective promotion can read it.
 
     Default thresholds chosen conservatively per the production-grade spec:
       G1: composite ≥ baseline × 1.005 OR rank-IC absolute lift ≥ +0.005 on any horizon
       G2: per-horizon rank IC non-degraded by more than 0.02 absolute
       G6: ‖overlay - 1.0‖₂/√K < 0.55 AND max single-param drift < 1.5
       G7: per-horizon rank IC ≥ baseline rank IC - 0.01 absolute (works for negative baselines)
+      G9: each horizon ≥ ceil(0.75 × n_folds) folds with val rank IC lift > 0
     """
     cfg = dict(config or {})
     cs = float(candidate_metrics.get("composite_objective", {}).get("score", 0.0))
@@ -338,6 +348,40 @@ def evaluate_promotion_gates(
     )
 
     gates = [g1, g2, g6, g7]
+
+    # ── G9: K-fold consistency (per-horizon) ─────────────────
+    if kfold_results:
+        n_folds = len(kfold_results)
+        min_pos = int(cfg.get("g9_min_positive_folds", math.ceil(n_folds * 0.75)))
+        per_horizon_pass: dict[str, bool] = {}
+        per_horizon_count: dict[str, int] = {}
+        per_horizon_lifts: dict[str, list[float]] = {}
+        for h in (5, 10, 20):
+            lifts = []
+            for fold in kfold_results:
+                vb = fold.get("val_baseline", {}).get(f"objective_{h}d", {}).get("rank_ic", 0.0)
+                vt = fold.get("val_tuned", {}).get(f"objective_{h}d", {}).get("rank_ic", 0.0)
+                lifts.append(float(vt) - float(vb))
+            n_positive = sum(1 for l in lifts if l > 0)
+            per_horizon_count[f"{h}d"] = n_positive
+            per_horizon_pass[f"{h}d"] = n_positive >= min_pos
+            per_horizon_lifts[f"{h}d"] = lifts
+        all_pass = all(per_horizon_pass.values())
+        detail_parts = [
+            f"{h}: {per_horizon_count[h]}/{n_folds} positive folds (lifts {[f'{l:+.3f}' for l in per_horizon_lifts[h]]})"
+            for h in ("5d", "10d", "20d")
+        ]
+        g9 = GateResult(
+            gate_id="G9",
+            name="kfold_consistency",
+            passed=all_pass,
+            value=float(min(per_horizon_count.values())),
+            threshold=float(min_pos),
+            detail=f"min_positive_folds={min_pos}/{n_folds} required; " + "; ".join(detail_parts),
+            per_horizon=per_horizon_pass,
+        )
+        gates.append(g9)
+
     passed = all(g.passed for g in gates)
     summary = (
         f"{'ACCEPTED' if passed else 'REJECTED'} {sum(1 for g in gates if g.passed)}/{len(gates)} gates · "

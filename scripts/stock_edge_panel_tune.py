@@ -108,6 +108,7 @@ def main() -> int:
     parser.add_argument("--k-fold", type=int, default=0, help="K-fold rolling walk-forward (default 0 = single split). Each fold tunes on growing train window, evaluates on next val_dates_per_fold dates")
     parser.add_argument("--val-dates-per-fold", type=int, default=2, help="Validation dates per fold (default 2)")
     parser.add_argument("--min-train-dates", type=int, default=4, help="Minimum train dates for first fold (default 4)")
+    parser.add_argument("--k-fold-min-positive", type=int, default=0, help="G9 gate: minimum number of folds with positive val lift per horizon (default = ceil(0.75 * n_folds))")
     args = parser.parse_args()
 
     engine = get_engine()
@@ -181,6 +182,7 @@ def main() -> int:
 
     # K-fold rolling walk-forward (Phase 5 v2 — robust OOS)
     k_fold_done = False
+    kfold_for_gate: list[dict] | None = None
     if args.k_fold and args.k_fold >= 2:
         folds = k_fold_rolling_walk_forward(
             rows,
@@ -251,7 +253,12 @@ def main() -> int:
             artifact = fold_results[-1]['train_artifact']
             val_metrics_baseline = fold_results[-1]['val_baseline']
             val_metrics_tuned = fold_results[-1]['val_tuned']
-            print(f"\n  [auto-promote will use latest fold's artifact + its val metrics]")
+            # Compact fold metrics for G9 gate input
+            kfold_for_gate = [
+                {"val_baseline": fr["val_baseline"], "val_tuned": fr["val_tuned"], "fold": fr["fold"]}
+                for fr in fold_results
+            ]
+            print(f"\n  [auto-promote will use latest fold's artifact + K-fold results for G9 gate]")
             search_elapsed = elapsed
 
             # Skip the regular [4/4] search and the single-OOS split
@@ -354,8 +361,13 @@ def main() -> int:
             panel = panel_matrix_from_rows(rows)
             baseline_metrics = evaluate_overlay_on_panel(panel, {}, base)
             candidate_metrics_for_gate = artifact.metrics
+        gate_config: dict = {}
+        if args.k_fold_min_positive > 0:
+            gate_config["g9_min_positive_folds"] = args.k_fold_min_positive
         decision = evaluate_promotion_gates(
             candidate_metrics_for_gate, baseline_metrics, artifact.overlay,
+            config=gate_config or None,
+            kfold_results=kfold_for_gate,
         )
         for g in decision.gates:
             mark = "✓" if g.passed else "✗"
