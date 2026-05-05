@@ -38,8 +38,7 @@ def build_evening_report(engine: Engine, on_date: date,
                           *, augmenter=None) -> dict:
     sections: list[dict] = []
     overview = _section_overview(engine, on_date)
-    index_panel = _section_index_panel(engine, on_date)
-    market_state = _section_market_state(engine, on_date)
+    market_env = _section_market_env(engine, on_date)
     methodology = _section_methodology()
     sector_flow_gate = _section_sector_flow_gate(engine, on_date)
     strategy_spotlight = _section_strategy_spotlight(engine, on_date)
@@ -59,9 +58,8 @@ def build_evening_report(engine: Engine, on_date: date,
     disclaimer = _section_disclaimer()
 
     # §00 positioning (static, in template)
-    # §01 tone card (from overview — rendered statically in template)
-    # §02 market env (index_panel + market_state)
-    sections.extend([overview, index_panel, market_state])
+    # §01 Dashboard (static, from report.dashboard)
+    sections.extend([overview, market_env])   # §02 市场环境 (combined)
     if augmenter is not None:
         narrative = augmenter.regime_explainer(
             regime=overview.get("regime"),
@@ -71,7 +69,7 @@ def build_evening_report(engine: Engine, on_date: date,
         if narrative:
             sections.append({"type": "narrative", "title": "§02-N 体制解读",
                              "body": narrative, "folded": True})
-    sections.append(fam)             # §03 候选结构总览 — before candidates
+    sections.append(fam)               # §03 候选结构总览 — before candidates
     sections.append(sector_flow_gate)  # §04 SmartMoney 板块资金闸门
     sections.extend([tier_a, tier_b])  # §05 / §06
     if augmenter is not None:
@@ -93,10 +91,11 @@ def build_evening_report(engine: Engine, on_date: date,
         if narrative:
             sections.append({"type": "narrative", "title": "§07-N 策略评论",
                              "body": narrative, "folded": True})
-    sections.append(verify)         # §08 历史观察池表现 (merged: history+metrics+attribution)
-    sections.append(strategy_spotlight)  # §09 今日主导策略族
+    sections.append(verify)             # §08 历史追踪 (merged: history+metrics+attribution)
+    sections.append(strategy_spotlight) # §09 今日主导策略族
+    hypotheses = _section_hypotheses(engine, on_date)
+    sections.append(hypotheses)         # §10 可证伪技术假设
     sections.append({"type": "appendix"})   # §11 Appendix — rendered statically
-    sections.append(methodology)
     sections.append(disclaimer)
 
     # Dashboard summary (§01 快览卡片)
@@ -656,6 +655,29 @@ def _section_index_panel(engine: Engine, on_date: date) -> dict:
     return {"type": "index_panel", "title": "§02 主要指数收盘", "rows": rows}
 
 
+def _section_market_env(engine: Engine, on_date: date) -> dict:
+    """§02 市场环境 — combined index panel + market breadth in one section."""
+    ip = _section_index_panel(engine, on_date)
+    ms = _section_market_state(engine, on_date)
+    return {
+        "type": "market_env",
+        "title": "§02 市场环境",
+        "index_rows": ip["rows"],
+        "amount_yi_yuan": ms.get("amount_yi_yuan"),
+        "amount_pct_60d": ms.get("amount_pct_60d"),
+        "up_count": ms.get("up_count"),
+        "down_count": ms.get("down_count"),
+        "flat_count": ms.get("flat_count"),
+        "limit_up": ms.get("limit_up"),
+        "limit_down": ms.get("limit_down"),
+        "consecutive_lb_high": ms.get("consecutive_lb_high"),
+        "blow_up_count": ms.get("blow_up_count"),
+        "blow_up_rate": ms.get("blow_up_rate"),
+        "market_state": ms.get("market_state"),
+        "north_yi_yuan": ms.get("north_yi_yuan"),
+    }
+
+
 def _section_sector_flow_gate(engine: Engine, on_date: date) -> dict:
     """§04 资金流闸门 — show SmartMoney sector context that gates TA universe."""
     sql = text("""
@@ -766,7 +788,7 @@ def _section_market_state(engine: Engine, on_date: date) -> dict:
         """), {"start": on_date - timedelta(days=90), "on_date": on_date}).scalar()
     return {
         "type": "market_state",
-        "title": "§02 市场结构与情绪",
+        "title": "§03 市场结构与情绪",
         "amount_yi_yuan": float(amt_today) if amt_today else None,
         "amount_pct_60d": float(amt_pct_60) if amt_pct_60 is not None else None,
         "up_count": int(ms[0]) if ms and ms[0] is not None else None,
@@ -969,7 +991,7 @@ def _section_risk_scan(engine: Engine, on_date: date) -> dict:
     if any(s[2] == "red" for s in risk_signals):
         light = "red"
         light_zh = "红灯·高风险"
-        light_msg = "市场存在多重负面信号,建议降仓 / 不开新多头 / 加紧止损执行。"
+        light_msg = "市场存在多重负面信号,建议降低仓位 / 不新增多头暴露 / 严守技术失效位规则。"
     elif any(s[2] == "yellow" for s in risk_signals):
         light = "yellow"
         light_zh = "黄灯·中等风险"
@@ -1025,13 +1047,13 @@ def _section_hypotheses(engine: Engine, on_date: date) -> dict:
             "name": names.get(ts_code, ""),
             "setup_name": setup_name,
             "score": float(score) if score is not None else None,
-            "statement": f"{ts_code} 触发 {setup_name}（{score:.2f}）将于 T+1 上涨 ≥ 2%",
+            "statement": f"{ts_code} 触发 {setup_name}（{score:.2f}）模型预期 T+1 涨幅 ≥ 2%（可证伪假设）",
             "horizon_days": 1,
             "threshold_pct": 2.0,
         })
     return {
         "type": "hypotheses",
-        "title": "§14 次日假设（可证伪）",
+        "title": "§10 可证伪技术假设",
         "hypotheses": hypotheses,
     }
 
