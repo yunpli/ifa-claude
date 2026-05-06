@@ -32,7 +32,11 @@
     </div>
   </header>
 
-  {% include "_client_brief.html" %}
+  {# Removed "先看这三件事" client_brief card — duplicated §01 总体结论 content
+     (headline + top3) and added visual clutter at top. §01 now serves the same
+     summarising role with full pill + headline + top3 + summary + collapsed
+     bullets. Affects all families that use this template (1+3 + smartmoney +
+     ningbo); research/TA are on separate templates and unaffected. #}
 
   {# ── TOC pills — quick section navigation (C4) ─────────────────── #}
   {% if report.sections | length > 4 %}
