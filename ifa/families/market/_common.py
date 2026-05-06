@@ -121,9 +121,12 @@ def prefetch_market_data(
     aux_report_type: str = "morning_long",
     end_bjt: dt.datetime,
     on_log: Callable[[str], None],
+    slot: str = "morning",
 ) -> dict[str, Any]:
-    on_log("fetching index family + history…")
-    indices = mdata.fetch_index_family(tushare, on_date=on_date, history_days=10)
+    # Use realtime for noon/evening (today's price live), EOD for morning (T-1 close)
+    use_rt = slot in ("noon", "evening")
+    on_log(f"fetching index family + history (slot={slot}, realtime={use_rt})…")
+    indices = mdata.fetch_index_family(tushare, on_date=on_date, history_days=10, use_realtime=use_rt)
     on_log("computing whole-A breadth + 涨跌停 + 连板高度…")
     breadth = mdata.fetch_breadth(tushare, on_date=on_date)
     on_log("fetching SW industry rotation (sw_daily)…")

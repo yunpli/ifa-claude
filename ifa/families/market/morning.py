@@ -327,6 +327,7 @@ def run_market_morning(
             aux_report_type="morning_long",
             end_bjt=to_bjt(data_cutoff_at),
             on_log=on_log,
+            slot="morning",
         )
         on_log("enriching focus stocks (10 + 20)…")
         imp_data, reg_data = enrich_market_focus(

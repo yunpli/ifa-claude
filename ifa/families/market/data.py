@@ -49,27 +49,76 @@ class IndexSnap:
 
 
 def fetch_index_family(client: TuShareClient, *, on_date: dt.date,
-                        history_days: int = 10) -> list[IndexSnap]:
+                        history_days: int = 10,
+                        use_realtime: bool = False) -> list[IndexSnap]:
+    """Fetch index snapshots + history sparkline.
+
+    Slot-aware behaviour (controlled by use_realtime):
+      - use_realtime=False (morning, on_date=T-1): current point is T-1 EOD via
+        index_daily; history is past N EOD. Trade_date verified == on_date.
+      - use_realtime=True (noon/evening, on_date=T): current point is realtime
+        via ts.realtime_quote (PRICE / PRE_CLOSE / AMOUNT); history sparkline is
+        past N EOD ending T-1 via index_daily; today appended at the tail.
+        Trade_date == on_date asserted by realtime DATE field.
+
+    If trade_date mismatches on_date, snap.close stays None and a stale flag is set
+    (so downstream renderer can hide or mark stale instead of fabricating today).
+    """
+    import tushare as ts
+
     end = on_date.strftime("%Y%m%d")
+    hist_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d") if use_realtime else end
     start = (on_date - dt.timedelta(days=history_days * 2 + 5)).strftime("%Y%m%d")
     out: list[IndexSnap] = []
     for ts_code, name, role in MARKET_INDICES:
         snap = IndexSnap(ts_code=ts_code, name=name, role=role,
                          close=None, pct_change=None, amount=None, trade_date=None)
+
+        # Sparkline history (past N EOD)
         try:
-            df = client.call("index_daily", ts_code=ts_code, start_date=start, end_date=end)
+            df_hist = client.call("index_daily", ts_code=ts_code, start_date=start, end_date=hist_end)
         except Exception:
-            out.append(snap); continue
-        if df is None or df.empty:
-            out.append(snap); continue
-        df = df.sort_values("trade_date").tail(history_days)
-        last = df.iloc[-1]
-        snap.close = _f(last.get("close"))
-        snap.pct_change = _f(last.get("pct_chg"))
-        snap.amount = _f(last.get("amount"))
-        snap.trade_date = _d(str(last.get("trade_date")))
-        snap.history_close = [_f(v) for v in df["close"]]
-        snap.history_dates = df["trade_date"].astype(str).tolist()
+            df_hist = None
+        if df_hist is not None and not df_hist.empty:
+            df_hist = df_hist.sort_values("trade_date").tail(history_days)
+            snap.history_close = [_f(v) for v in df_hist["close"]]
+            snap.history_dates = df_hist["trade_date"].astype(str).tolist()
+
+        # Current snapshot
+        if use_realtime:
+            try:
+                rt = ts.realtime_quote(ts_code=ts_code, src="sina")
+                if rt is not None and not rt.empty:
+                    row = rt.iloc[0]
+                    rt_date = str(row.get("DATE") or "")
+                    rt_price = _f(row.get("PRICE"))
+                    rt_pre = _f(row.get("PRE_CLOSE"))
+                    rt_amount = _f(row.get("AMOUNT"))
+                    # Verify trade_date matches on_date
+                    expected_date = on_date.strftime("%Y%m%d")
+                    if rt_date == expected_date and rt_price and rt_pre:
+                        snap.close = rt_price
+                        snap.pct_change = (rt_price - rt_pre) / rt_pre * 100 if rt_pre else None
+                        # rt AMOUNT is 元; downstream renderer expects 千元 (legacy from index_daily)
+                        # Convert: 元 → 千元 (÷1000) so amount unit stays consistent with sparkline
+                        snap.amount = (rt_amount / 1000.0) if rt_amount is not None else None
+                        snap.trade_date = on_date
+                        # Append today's close to sparkline tail
+                        snap.history_close.append(rt_price)
+                        snap.history_dates.append(expected_date)
+            except Exception:
+                pass
+        else:
+            # Use EOD for current point (morning report uses on_date=T-1)
+            if df_hist is not None and not df_hist.empty:
+                last = df_hist.iloc[-1]
+                last_td = _d(str(last.get("trade_date")))
+                if last_td == on_date:
+                    snap.close = _f(last.get("close"))
+                    snap.pct_change = _f(last.get("pct_chg"))
+                    snap.amount = _f(last.get("amount"))
+                    snap.trade_date = last_td
+                # else: keep snap.* as None — staleness defense
         out.append(snap)
     return out
 

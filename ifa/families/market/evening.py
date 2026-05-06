@@ -402,6 +402,7 @@ def run_market_evening(
             aux_report_type="evening_long",   # use today's evening aux for cross-validation
             end_bjt=to_bjt(data_cutoff_at),
             on_log=on_log,
+            slot="evening",
         )
         on_log("enriching focus stocks (10 + 20)…")
         imp_data, reg_data = enrich_market_focus(
