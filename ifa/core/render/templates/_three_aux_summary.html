@@ -7,24 +7,19 @@
     <div>{{ c.integrated_summary }}</div>
   </div>
   {% endif %}
-  <table class="ifa-matrix">
-    <thead>
-      <tr>
-        <th style="width:14%">辅线</th>
-        <th>今日结论</th>
-        <th style="width:13%">影响等级</th>
-        <th style="width:32%">主报告应验证方向</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for r in c.rows %}
-      <tr>
-        <td><span class="ifa-matrix__dim">{{ r.family_display or r.family }}</span></td>
-        <td>{{ r.today_conclusion or '—' }}</td>
-        <td><span class="ifa-matrix__signal" data-signal="{{ '升温' if r.impact_level == '强' else ('降温' if r.impact_level == '弱' else '平稳') }}">{{ r.impact_level or '—' }}</span></td>
-        <td class="ifa-matrix__areas">{{ r.a_share_focus or '—' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="ifa-aux-grid">
+    {% for r in c.rows %}
+    <article class="ifa-aux-card" data-impact="{{ r.impact_level or '—' }}">
+      <div class="ifa-aux-card__top">
+        <span class="ifa-aux-card__family">{{ r.family_display or r.family }}</span>
+        <span class="ifa-matrix__signal" data-signal="{{ '升温' if r.impact_level == '强' else ('降温' if r.impact_level == '弱' else '平稳') }}">{{ r.impact_level or '背景' }}</span>
+      </div>
+      <div class="ifa-aux-card__conclusion">{{ r.today_conclusion or '暂无可提炼的一句话结论。' }}</div>
+      <div class="ifa-aux-card__focus">
+        <span>主报告要验证</span>
+        <p>{{ r.a_share_focus or '等待盘面量价和主线强度确认。' }}</p>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
 </section>

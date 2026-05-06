@@ -1,0 +1,41 @@
+{% set hero = report.sections[0] if report.sections else none %}
+{% if hero %}
+{% set c = hero.content_json %}
+<section class="ifa-client-brief" aria-label="客户阅读摘要">
+  <div class="ifa-client-brief__kicker">先看这三件事</div>
+  <div class="ifa-client-brief__main">
+    <div>
+      <div class="ifa-client-brief__eyebrow">{{ hero.title }}</div>
+      <h2 class="ifa-client-brief__headline">
+        {{ c.headline or c.label or c.tech_state or c.market_state or c.commodity_state or '今日核心判断' }}
+      </h2>
+      <p class="ifa-client-brief__summary">
+        {{ c.summary or c.text or c.review_summary or '先看本摘要，再看下方风险、观察清单和证据表格。' }}
+      </p>
+    </div>
+    <div class="ifa-client-brief__rail">
+      <div class="ifa-client-brief__metric">
+        <span>报告类型</span>
+        <strong>
+          {% if '早盘' in report.title %}盘前计划{% elif '中盘' in report.title %}午间校准{% elif '晚盘' in report.title %}收盘复盘{% else %}研究报告{% endif %}
+        </strong>
+      </div>
+      <div class="ifa-client-brief__metric">
+        <span>阅读重点</span>
+        <strong>结论 → 风险 → 验证点</strong>
+      </div>
+      <div class="ifa-client-brief__metric">
+        <span>使用方式</span>
+        <strong>辅助判断，不替代决策</strong>
+      </div>
+    </div>
+  </div>
+  <div class="ifa-client-brief__nav" aria-label="报告阅读路线">
+    {% for item in report.sections[:6] %}
+      {% if item.type != 'disclaimer' %}
+      <span>{{ "%02d"|format(item.order) }} · {{ item.title }}</span>
+      {% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

@@ -500,11 +500,13 @@ def fetch_three_aux_summaries(engine: Engine, *, report_date: dt.date,
                 except Exception:
                     cj = {}
             tone = cj.get("tone") or cj.get("tech_state") or cj.get("label") or None
+            headline = cj.get("headline") or cj.get("label") or ""
+            summary = cj.get("summary") or cj.get("text") or cj.get("review_summary") or ""
             out[family] = AuxReportSummary(
                 family=family,
-                headline=cj.get("headline") or "",
+                headline=headline,
                 tone_or_state=tone,
-                summary=cj.get("summary") or cj.get("text") or "",
+                summary=summary,
                 bullets=cj.get("bullets") or cj.get("validation_points") or [],
                 template_version=r.template_version,
             )

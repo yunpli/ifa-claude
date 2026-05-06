@@ -87,8 +87,8 @@ def test_event_strategy_signals_use_lhb_and_limit_context():
         event_context=LoadResult(
             "event_context",
             {
-                "top_list": [{"trade_date": dt.date(2026, 4, 29), "net_amount": 3200.0, "l_buy": 9000.0, "l_sell": 5800.0}],
-                "top_inst": [{"trade_date": dt.date(2026, 4, 29), "net_buy": 1800.0, "buy": 2600.0, "sell": 800.0}],
+                "top_list": [{"trade_date": dt.date(2026, 4, 29), "net_amount": 32_000_000.0, "l_buy": 90_000_000.0, "l_sell": 58_000_000.0}],
+                "top_inst": [{"trade_date": dt.date(2026, 4, 29), "net_buy": 18_000_000.0, "buy": 26_000_000.0, "sell": 8_000_000.0}],
                 "kpl": [{"trade_date": dt.date(2026, 4, 30), "pct_chg": 10.0, "status": "涨停", "bid_amount": 1800.0, "amount": 9000.0}],
                 "limit_list": [{"trade_date": dt.date(2026, 4, 30), "pct_chg": 10.0, "open_times": 0, "fc_ratio": 8.0, "amount": 9000.0}],
                 "block_trade": [{"trade_date": dt.date(2026, 4, 29), "price": 16.2, "amount": 6000.0}],
@@ -127,6 +127,9 @@ def test_event_strategy_signals_use_lhb_and_limit_context():
     assert lhb["status"] == "active"
     assert lhb["direction"] == "positive"
     assert lhb["cluster"] == "order_flow_smart_money"
+    assert "榜单净额 +0.32 亿" in lhb["evidence"]
+    assert "机构净买 +0.18 亿" in lhb["evidence"]
+    assert lhb["extra"]["top_net_yuan"] == 32_000_000.0
     assert limit_up["status"] == "active"
     assert limit_up["direction"] == "positive"
     assert limit_up["cluster"] == "trend_breakout"

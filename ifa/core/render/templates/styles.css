@@ -41,14 +41,17 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  overflow-x: hidden;
 }
 
 .ifa-page {
+  width: 100%;
   max-width: 880px;
   margin: 0 auto;
   background: var(--paper);
   box-shadow: 0 1px 0 rgba(13,23,42,0.04), 0 8px 24px rgba(13,23,42,0.06);
   padding: 36px 44px 28px;
+  overflow-x: hidden;
 }
 
 /* ── Banner ────────────────────────────────────────────────────────── */
@@ -131,6 +134,100 @@ html, body {
   font-size: 12.5px;
   color: var(--ink-muted);
   line-height: 1.5;
+}
+
+/* ── Client brief: high-net-worth readable first screen ────────────── */
+.ifa-client-brief {
+  margin: 22px 0 30px;
+  padding: 20px 22px;
+  border: 1px solid var(--rule);
+  border-top: 4px solid var(--accent);
+  background: linear-gradient(180deg, #fff 0%, var(--paper-tint) 100%);
+  border-radius: 6px;
+}
+.ifa-client-brief__kicker {
+  font-size: 10.5px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+.ifa-client-brief__main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px;
+  gap: 20px;
+  align-items: start;
+}
+.ifa-client-brief__main > * { min-width: 0; }
+.ifa-client-brief__eyebrow {
+  font-size: 11px;
+  color: var(--ink-muted);
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+.ifa-client-brief__headline {
+  margin: 0 0 10px;
+  font-family: var(--font-serif);
+  font-size: 24px;
+  line-height: 1.25;
+  font-weight: 650;
+  color: var(--ink);
+}
+.ifa-client-brief__summary {
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.75;
+  font-size: 14.5px;
+  overflow-wrap: anywhere;
+}
+.ifa-client-brief__rail {
+  display: grid;
+  gap: 8px;
+}
+.ifa-client-brief__metric {
+  padding: 10px 12px;
+  border: 1px solid var(--rule-soft);
+  background: #fff;
+  border-radius: 4px;
+}
+.ifa-client-brief__metric span {
+  display: block;
+  font-size: 10px;
+  color: var(--ink-soft);
+  letter-spacing: 0;
+  text-transform: uppercase;
+  font-weight: 700;
+  margin-bottom: 3px;
+}
+.ifa-client-brief__metric strong {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.35;
+}
+.ifa-client-brief__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--rule);
+}
+.ifa-client-brief__nav span {
+  display: inline-block;
+  padding: 4px 8px;
+  border: 1px solid var(--rule);
+  background: #fff;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── Section frame ─────────────────────────────────────────────────── */
@@ -456,6 +553,59 @@ html, body {
   color: var(--ink-2);
 }
 
+/* ── Three auxiliary report cards ──────────────────────────────────── */
+.ifa-aux-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.ifa-aux-card {
+  border: 1px solid var(--rule);
+  background: #fff;
+  border-radius: 6px;
+  padding: 14px 14px 13px;
+  min-height: 168px;
+}
+.ifa-aux-card__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ifa-aux-card__family {
+  font-family: var(--font-serif);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 15px;
+}
+.ifa-aux-card__conclusion {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.ifa-aux-card__focus {
+  border-top: 1px dashed var(--rule);
+  padding-top: 9px;
+}
+.ifa-aux-card__focus span {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.ifa-aux-card__focus p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
 /* ── Risk / hypothesis lists ───────────────────────────────────────── */
 .ifa-risk-list, .ifa-hypo-list { list-style: none; padding: 0; margin: 0; }
 .ifa-risk-list__item, .ifa-hypo-list__item {
@@ -597,8 +747,43 @@ html, body {
 
 /* ── Mobile ────────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
-  .ifa-page { padding: 24px 18px 20px; box-shadow: none; }
+  html, body { width: 100vw; max-width: 100vw; }
+  .ifa-page {
+    width: 100vw;
+    max-width: 100vw;
+    min-width: 0;
+    margin: 0;
+    padding: 24px 18px 20px;
+    box-shadow: none;
+  }
+  .ifa-banner,
+  .ifa-section,
+  .ifa-client-brief,
+  .ifa-tone,
+  .ifa-commentary {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .ifa-banner__brand,
+  .ifa-banner__title,
+  .ifa-banner__subtitle,
+  .ifa-banner__short-disclaimer,
+  .ifa-section__title,
+  .ifa-commentary,
+  .ifa-client-brief__headline,
+  .ifa-client-brief__summary,
+  .ifa-tone__summary {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .ifa-banner__brand { font-size: 10px; letter-spacing: 0.08em; line-height: 1.45; }
   .ifa-banner__title { font-size: 24px; }
+  .ifa-banner__subtitle { font-size: 13px; line-height: 1.45; }
+  .ifa-client-brief { padding: 16px; }
+  .ifa-client-brief__main { grid-template-columns: 1fr; }
+  .ifa-client-brief__headline { font-size: 21px; }
+  .ifa-aux-grid { grid-template-columns: 1fr; }
   .ifa-grid { grid-template-columns: 1fr; }
   .ifa-tone__bullet { grid-template-columns: 1fr; gap: 4px; }
   .ifa-tone__bullet-conf { justify-self: start; }
@@ -606,6 +791,16 @@ html, body {
   .ifa-news__time { padding-top: 0; }
   .ifa-panel__chart { display: none; }
   .ifa-matrix th:nth-child(3), .ifa-matrix td:nth-child(3) { display: none; }
+  table.ifa-panel, table.ifa-matrix, table.ifa-capture {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ifa-risk-list__detail, .ifa-hypo-list__detail {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
 }
 
 /* ── Print ─────────────────────────────────────────────────────────── */

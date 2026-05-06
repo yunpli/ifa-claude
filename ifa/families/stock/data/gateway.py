@@ -30,7 +30,7 @@ def _decorate_ta_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_sector_leaders(peers: list[dict[str, Any]], target_ts_code: str) -> dict[str, Any]:
-    decorated = [_decorate_peer(row, target_ts_code) for row in peers]
+    decorated = [_decorate_peer(row, target_ts_code) for row in peers if _is_active_listing_peer(row, target_ts_code)]
     return {
         "size": _top_peers(decorated, "total_mv", target_ts_code=target_ts_code),
         "momentum": _top_peers(decorated, "return_5d_pct", target_ts_code=target_ts_code),
@@ -82,6 +82,19 @@ def _top_peers(peers: list[dict[str, Any]], key: str, *, target_ts_code: str, li
     if target is None:
         return top
     return [*top[: max(limit - 1, 0)], target]
+
+
+def _is_active_listing_peer(row: dict[str, Any], target_ts_code: str | None = None) -> bool:
+    ts_code = str(row.get("ts_code") or "")
+    if target_ts_code and ts_code == target_ts_code:
+        return True
+    list_status = str(row.get("list_status") or "").strip().upper()
+    if list_status and list_status != "L":
+        return False
+    name = str(row.get("name") or "").replace(" ", "")
+    if "退市" in name or "退(" in name or name.endswith("退"):
+        return False
+    return True
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -416,10 +429,15 @@ class LocalDataGateway:
                     for r in conn.execute(
                         text("""
                             WITH members AS (
-                                SELECT ts_code, name
-                                FROM smartmoney.sw_member_monthly
-                                WHERE snapshot_month = :snapshot_month
-                                  AND l2_code = :l2_code
+                                SELECT m.ts_code, m.name, ci.list_status
+                                FROM smartmoney.sw_member_monthly m
+                                LEFT JOIN research.company_identity ci ON ci.ts_code = m.ts_code
+                                WHERE m.snapshot_month = :snapshot_month
+                                  AND m.l2_code = :l2_code
+                                  AND COALESCE(ci.list_status, 'L') = 'L'
+                                  AND m.name NOT LIKE '%退市%'
+                                  AND m.name NOT LIKE '%退(%'
+                                  AND m.name NOT LIKE '%退'
                             ),
                             latest_daily AS (
                                 SELECT DISTINCT ON (d.ts_code)
@@ -477,7 +495,7 @@ class LocalDataGateway:
                                 WHERE c.trade_date <= :as_of
                                 ORDER BY c.ts_code, c.trade_date DESC, c.final_score DESC NULLS LAST
                             )
-                            SELECT m.ts_code, m.name,
+                            SELECT m.ts_code, m.name, m.list_status,
                                    ld.close, ld.pct_chg, ld.amount,
                                    r.return_5d_pct, r.return_10d_pct, r.return_15d_pct,
                                    lb.total_mv, lb.circ_mv, lb.pe_ttm, lb.pb,
@@ -566,7 +584,11 @@ class LocalDataGateway:
         data["sector_flow_7d"] = list(reversed(sector_flow))
         data["sector_state"] = dict(sector_state) if sector_state else None
         data["sector_factor"] = dict(sector_factor) if sector_factor else None
-        decorated_peers = [_decorate_peer({**r, "daily_returns_15d": peer_daily_returns.get(str(r.get("ts_code")), [])}, ts_code) for r in sector_peers]
+        decorated_peers = [
+            _decorate_peer({**r, "daily_returns_15d": peer_daily_returns.get(str(r.get("ts_code")), [])}, ts_code)
+            for r in sector_peers
+            if _is_active_listing_peer(r, ts_code)
+        ]
         data["sector_peers"] = decorated_peers
         data["sector_leaders"] = _build_sector_leaders(decorated_peers, ts_code)
         data["peer_fundamentals"] = peer_fundamentals

@@ -436,6 +436,8 @@ def _unique_peer_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
     for row in rows:
+        if not _is_active_peer_for_report(row):
+            continue
         code = str(row.get("ts_code") or "")
         if not code or code in seen:
             continue
@@ -445,6 +447,7 @@ def _unique_peer_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _build_peer_fundamentals_context(peers: list[dict[str, Any]], factor_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    peers = [row for row in peers if _is_active_peer_for_report(row)]
     if not peers:
         return {"available": False, "rows": [], "note": "本地尚未取得同板块财务比较样本。"}
     peer_by_code = {str(row.get("ts_code")): row for row in peers if row.get("ts_code")}
@@ -577,12 +580,25 @@ def _weighted_avg(items: list[tuple[float | None, float]]) -> float | None:
 
 
 def _keep_target_peer_rows(rows: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    rows = [row for row in rows if _is_active_peer_for_report(row)]
     ranked = sorted(rows, key=lambda row: float(row.get("total_mv") or 0), reverse=True)
     target = next((row for row in ranked if row.get("is_target")), None)
     out = ranked[:limit]
     if target is not None and not any(row.get("ts_code") == target.get("ts_code") for row in out):
         out = [*out[: max(limit - 1, 0)], target]
     return out
+
+
+def _is_active_peer_for_report(row: dict[str, Any]) -> bool:
+    if row.get("is_target"):
+        return True
+    list_status = str(row.get("list_status") or "").strip().upper()
+    if list_status and list_status != "L":
+        return False
+    name = str(row.get("name") or "").replace(" ", "")
+    if "退市" in name or "退(" in name or name.endswith("退"):
+        return False
+    return True
 
 
 def _safe_float(value: Any) -> float | None:

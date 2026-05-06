@@ -59,7 +59,7 @@ MORNING_TONE_SCHEMA = """{
   "validation_points": [{"metric":"...","threshold":"...","window":"开盘后/上午/全天"}]
 }"""
 
-THREE_AUX_INSTRUCTIONS = """对宏观 / Asset / Tech 三个早报的"一句话结论 + 头部 bullet"做一段 80-120 字的整合，
+THREE_AUX_INSTRUCTIONS = """对宏观 / Asset / Tech 三份三辅报告的"一句话结论 + 头部 bullet"做一段 80-120 字的整合，
 以及为每个辅线产出一行 "今日对 A 股的实际影响" 评级表。
 
 要求：

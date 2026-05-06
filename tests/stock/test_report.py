@@ -11,6 +11,7 @@ from ifa.core.report.timezones import BJT
 from ifa.families.stock.analysis import StockEdgeAnalysis
 from ifa.families.stock.context import StockEdgeRequest, build_context
 from ifa.families.stock.data.availability import LoadResult
+from ifa.families.stock.data.gateway import _build_sector_leaders
 from ifa.families.stock.data.snapshot import StockEdgeSnapshot
 from ifa.families.stock.report import build_report_model, render_report_assets
 from ifa.families.stock.report.charts import build_peer_context_charts
@@ -167,9 +168,32 @@ def test_peer_charts_keep_target_when_target_is_not_top_ranked():
             "total_mv": 80.0,
         }
     )
+    peers.append({"ts_code": "002618.SZ", "name": "丹邦退(退市)", "return_5d_pct": 88.0, "return_10d_pct": 90.0, "return_15d_pct": 100.0, "total_mv": 4.0})
 
     charts = build_peer_context_charts(peers)
 
     assert "朗科科技" in charts["peer_size_return_svg"]
     assert "目标股黑色外圈" in charts["peer_size_return_svg"]
     assert "朗科科技" in charts["peer_return_ladder_svg"]
+    assert "丹邦退" not in charts["peer_size_return_svg"]
+    assert "丹邦退" not in charts["peer_return_ladder_svg"]
+
+
+def test_sector_leaders_filter_delisted_peers_from_comparison_universe():
+    peers = [
+        {"ts_code": "002938.SZ", "name": "鹏鼎控股", "return_5d_pct": -4.5, "total_mv": 1670.0},
+        {"ts_code": "002618.SZ", "name": "丹邦退(退市)", "return_5d_pct": 43.2, "total_mv": 4.2},
+        {"ts_code": "002288.SZ", "name": "*ST超华(退市)", "return_5d_pct": 99.0, "total_mv": 3.0},
+        {"ts_code": "688655.SH", "name": "迅捷兴", "return_5d_pct": 26.1, "total_mv": 30.0},
+        {"ts_code": "002463.SZ", "name": "沪电股份", "return_5d_pct": -3.8, "total_mv": 1000.0, "list_status": "L"},
+        {"ts_code": "000000.SZ", "name": "非上市样本", "return_5d_pct": 88.0, "total_mv": 10.0, "list_status": "D"},
+    ]
+
+    leaders = _build_sector_leaders(peers, "002938.SZ")
+    names = {row["name"] for rows in leaders.values() for row in rows}
+
+    assert "鹏鼎控股" in names
+    assert "迅捷兴" in names
+    assert "丹邦退(退市)" not in names
+    assert "*ST超华(退市)" not in names
+    assert "非上市样本" not in names

@@ -2002,9 +2002,17 @@ def _lhb_institution_hotmoney_signal(snapshot: StockEdgeSnapshot, params: dict) 
         score,
         0.62,
         "active",
-        f"近30日龙虎榜 {len(top_rows)} 条、机构席位 {len(inst_rows)} 条；榜单净额 {top_net:+.1f} 万，机构净买 {inst_net:+.1f} 万。",
+        f"近30日龙虎榜 {len(top_rows)} 条、机构席位 {len(inst_rows)} 条；"
+        f"榜单净额 {_fmt_signed_yuan_amount(top_net)}，机构净买 {_fmt_signed_yuan_amount(inst_net)}。",
         "smartmoney.raw_top_list/raw_top_inst",
-        extra={"top_rows": len(top_rows), "inst_rows": len(inst_rows), "top_net_wan": round(top_net, 2), "inst_net_wan": round(inst_net, 2)},
+        extra={
+            "top_rows": len(top_rows),
+            "inst_rows": len(inst_rows),
+            "top_net_yuan": round(top_net, 2),
+            "inst_net_yuan": round(inst_net, 2),
+            "top_net_yi": round(top_net / 1e8, 4),
+            "inst_net_yi": round(inst_net / 1e8, 4),
+        },
     )
 
 
@@ -2951,6 +2959,18 @@ def _as_float(value) -> float | None:
 
 def _fmt_optional_float(value: float | None) -> str:
     return f"{value:.3f}" if value is not None else "—"
+
+
+def _fmt_signed_yuan_amount(value: float | None) -> str:
+    if value is None:
+        return "—"
+    sign = "+" if value >= 0 else "-"
+    amount = abs(value)
+    if amount >= 1e7:
+        return f"{sign}{amount / 1e8:.2f} 亿"
+    if amount >= 1e4:
+        return f"{sign}{amount / 1e4:.1f} 万"
+    return f"{sign}{amount:.0f} 元"
 
 
 def _fundamental_lineup_signal(snapshot: StockEdgeSnapshot) -> StrategySignal:

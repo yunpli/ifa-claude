@@ -206,6 +206,8 @@ def _dedupe_peers(peers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     target: dict[str, Any] | None = None
     for row in peers:
+        if not _is_active_peer_for_chart(row):
+            continue
         code = str(row.get("ts_code") or "")
         if not code or code in seen:
             continue
@@ -214,6 +216,18 @@ def _dedupe_peers(peers: list[dict[str, Any]]) -> list[dict[str, Any]]:
             target = row
         rows.append(row)
     return _keep_target(rows, target=target, limit=12)
+
+
+def _is_active_peer_for_chart(row: dict[str, Any]) -> bool:
+    if row.get("is_target"):
+        return True
+    list_status = str(row.get("list_status") or "").strip().upper()
+    if list_status and list_status != "L":
+        return False
+    name = str(row.get("name") or "").replace(" ", "")
+    if "退市" in name or "退(" in name or name.endswith("退"):
+        return False
+    return True
 
 
 def _keep_target(rows: list[dict[str, Any]], *, target: dict[str, Any] | None = None, limit: int) -> list[dict[str, Any]]:

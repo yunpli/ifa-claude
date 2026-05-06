@@ -30,6 +30,8 @@
     </div>
   </header>
 
+  {% include "_client_brief.html" %}
+
   {# ── Sections ───────────────────────────────────────────────────── #}
   {% for s in report.sections %}
     {% if s.type == 'tone_card' %}
