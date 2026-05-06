@@ -194,6 +194,58 @@ html, body {
   font-size: 14.5px;
   overflow-wrap: anywhere;
 }
+/* New: lead = short headline above the 三件事 list */
+.ifa-client-brief__lead {
+  margin: 0 0 14px;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink-2);
+  font-style: italic;
+  border-left: 2px solid var(--accent);
+  padding-left: 12px;
+  overflow-wrap: anywhere;
+}
+/* New: actual 三件事 numbered list — premium serif counters */
+.ifa-client-brief__top3 {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  counter-reset: brief-top3;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+@media (min-width: 720px) {
+  .ifa-client-brief__top3 { grid-template-columns: 1fr; gap: 12px; }
+}
+.ifa-client-brief__top3 li {
+  counter-increment: brief-top3;
+  position: relative;
+  padding: 12px 16px 12px 52px;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  letter-spacing: -0.005em;
+}
+.ifa-client-brief__top3 li::before {
+  content: counter(brief-top3, decimal-leading-zero);
+  position: absolute;
+  left: 16px;
+  top: 12px;
+  font-family: var(--font-serif);
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
 .ifa-client-brief__rail {
   display: grid;
   gap: 8px;
