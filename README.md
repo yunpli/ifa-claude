@@ -251,7 +251,8 @@ Implementation uses headless Chrome with print-CSS injection that opens all `<de
 ## Documentation Index
 
 ### V2.2 release pack
-- [`docs/v2.2-release-notes.md`](docs/v2.2-release-notes.md) — V2.2 deliverables, migration v2.1.3 → v2.2, breaking changes, ops checklist, gap analysis
+- [`docs/v2.2-release-notes.md`](docs/v2.2-release-notes.md) — V2.2 deliverables, migration v2.1.3 → v2.2, breaking changes, gap analysis
+- [`docs/v2.2-operations-cookbook.md`](docs/v2.2-operations-cookbook.md) — **standalone scripts, BJT schedule, cron/launchd examples, per-family quickstart with examples, troubleshooting cookbook, ledger queries**
 - [`docs/ui-overhaul-v2.2.md`](docs/ui-overhaul-v2.2.md) — premium card design system reference (components, tokens, anti-patterns)
 - [`docs/tuning-playbook.md`](docs/tuning-playbook.md) — cross-family tuning surface (TA / SmartMoney / Stock Edge), how to extend, V2.2.1 plan
 
