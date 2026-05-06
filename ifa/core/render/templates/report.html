@@ -7,7 +7,7 @@
 <style>{{ inline_css }}</style>
 </head>
 <body>
-<article class="ifa-page">
+<article class="ifa-page" id="top">
 
   {# ── Banner / Header ────────────────────────────────────────────── #}
   <header class="ifa-banner">
@@ -17,7 +17,6 @@
     <div class="ifa-banner__meta">
       <span><strong>报告日期</strong> {{ report.report_date_bjt }}</span>
       <span><strong>数据截止</strong> {{ report.data_cutoff_bjt }} 北京时间</span>
-      <span><strong>模板</strong> {{ report.template_version }}</span>
       <span class="ifa-run-mode-badge ifa-run-mode-badge--{{ report.run_mode }}">
         {% if report.run_mode == 'test' %}⚠ TEST 测试模式{% elif report.run_mode == 'manual' %}✎ MANUAL 手动运行{% else %}✓ PRODUCTION 生产{% endif %}
       </span>
@@ -34,6 +33,18 @@
   </header>
 
   {% include "_client_brief.html" %}
+
+  {# ── TOC pills — quick section navigation (C4) ─────────────────── #}
+  {% if report.sections | length > 4 %}
+  <nav class="ifa-toc-pills" aria-label="目录">
+    <span class="ifa-toc-pills__label">目录</span>
+    {% for s in report.sections %}
+    {% if s.type != 'disclaimer' %}
+    <a href="#s{{ s.order }}">§{{ '%02d'|format(s.order) }} {{ s.title }}</a>
+    {% endif %}
+    {% endfor %}
+  </nav>
+  {% endif %}
 
   {# ── Sections ───────────────────────────────────────────────────── #}
   {% for s in report.sections %}
@@ -138,11 +149,14 @@
     {% endif %}
   {% endfor %}
 
-  {# ── Footer ─────────────────────────────────────────────────────── #}
+  {# ── Back-to-top anchor (C4) — CSS-only, no JS ─────────────────── #}
+  <a href="#top" class="ifa-back-top" aria-label="回到顶部">↑</a>
+
+  {# ── Footer — technical metadata lives here (C3) ───────────────── #}
   <footer class="ifa-footer">
     <strong>Lindenwood Management LLC</strong> ｜ For informational purposes only. Not investment advice. Investment involves risk.<br>
     See full disclaimer at the end of this report. ｜ 完整免责声明见报告末尾。<br>
-    Generated {{ report.generated_at_bjt }} 北京时间 · Run-ID {{ report.report_run_id_short }} · {{ report.template_version }}
+    <span class="ifa-footer__aux">Generated {{ report.generated_at_bjt }} 北京时间 · Run-ID {{ report.report_run_id_short }} · {{ report.template_version }}</span>
   </footer>
 
 </article>

@@ -2,8 +2,11 @@
 <section class="ifa-section">
   {% include "_section_head.html" %}
   {% if c.events %}
+  {% set all_events = c.events %}
+  {% set first_batch = all_events[:5] %}
+  {% set rest_batch = all_events[5:] %}
   <ul class="ifa-news">
-    {% for e in c.events %}
+    {% for e in first_batch %}
     <li class="ifa-news__item">
       <div class="ifa-news__time">{{ e.time_display or '' }}</div>
       <div>
@@ -18,6 +21,29 @@
     </li>
     {% endfor %}
   </ul>
+  {% if rest_batch %}
+  <details class="ifa-list-expand">
+    <summary>展开更多（共 {{ all_events | length }} 条）</summary>
+    <div class="ifa-list-expand__body">
+      <ul class="ifa-news">
+        {% for e in rest_batch %}
+        <li class="ifa-news__item">
+          <div class="ifa-news__time">{{ e.time_display or '' }}</div>
+          <div>
+            <div class="ifa-news__title">{{ e.title }}</div>
+            <div class="ifa-news__source">
+              <span class="ifa-news__source-tag">{{ e.event_type or 'news' }}</span>
+              {{ e.source_name or '' }}{% if e.importance %} · 重要性 {{ e.importance }}{% endif %}
+            </div>
+            {% if e.summary %}<div class="ifa-news__summary">{{ e.summary }}</div>{% endif %}
+            {% if e.possible_a_share_impact %}<div class="ifa-news__impact">对 A 股可能影响：{{ e.possible_a_share_impact }}</div>{% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </details>
+  {% endif %}
   {% else %}
   <div class="ifa-empty">{{ c.fallback_text or '本报告窗口内未捕获重大新事件。' }}</div>
   {% endif %}

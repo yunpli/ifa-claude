@@ -154,7 +154,9 @@ def _build_e1_headline(ctx: TechCtx, morning_hyps: list[dict]) -> dict:
 
 # ─── reuse morning helpers (with re-tagging) ───────────────────────────────
 
-def _retag(sec: dict, *, key: str, title: str, order: int) -> dict:
+def _retag(sec: dict | None, *, key: str, title: str, order: int) -> dict | None:
+    if sec is None:
+        return None
     sec = dict(sec)
     sec["key"] = key
     sec["title"] = title
@@ -484,6 +486,9 @@ def run_tech_evening(
             t0 = time.monotonic()
             on_log(f"building {label}…")
             sec = builder()
+            if sec is None:
+                on_log(f'  {label} skipped (data not available at this slot)')
+                continue
             sections.append(sec)
             insert_section(
                 engine, report_run_id=run.report_run_id,

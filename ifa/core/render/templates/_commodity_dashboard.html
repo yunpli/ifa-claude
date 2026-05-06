@@ -5,9 +5,11 @@
   <div class="ifa-cat-block">
     <div class="ifa-cat-block__head">
       <span class="ifa-cat-block__label">{{ cat.name }}</span>
-      <span class="ifa-cat-block__meta">{{ cat.n_with_data }}/{{ cat.n_components }} 有数据 · 平均 {{ cat.avg_label or '—' }}</span>
+      <span class="ifa-cat-block__meta">{{ cat.n_with_data }}/{{ cat.n_components }} 有数据
+        {% if cat.avg_label %} · 平均 {{ cat.avg_label }}{% endif %}</span>
     </div>
-    <table class="ifa-panel">
+    {# Desktop 8-col table #}
+    <table class="ifa-panel ifa-commodity-desktop">
       <thead>
         <tr>
           <th style="width:11%">品种</th>
@@ -22,12 +24,13 @@
       </thead>
       <tbody>
         {% for r in cat.rows %}
+        {% if r.close_display or r.pct_display %}
         <tr>
           <td>
             <div class="ifa-panel__indicator">{{ r.display_name }}</div>
             <span class="ifa-panel__period">{{ r.logical_symbol }}</span>
           </td>
-          <td class="ifa-panel__period" style="font-family: var(--font-mono); font-size:11.5px">{{ r.actual_contract or '—' }}</td>
+          <td class="ifa-panel__period" style="font-family:var(--font-mono);font-size:11.5px">{{ r.actual_contract or '—' }}</td>
           <td class="ifa-panel__value">{{ r.close_display or '—' }}</td>
           <td class="ifa-panel__delta {% if r.pct_dir == 'up' %}ifa-panel__delta--up{% elif r.pct_dir == 'down' %}ifa-panel__delta--down{% else %}ifa-panel__delta--flat{% endif %}">{{ r.pct_display or '—' }}</td>
           <td class="ifa-panel__value">{{ r.vol_display or '—' }}</td>
@@ -35,6 +38,33 @@
           <td class="ifa-panel__chart">{{ r.spark_svg | safe }}</td>
           <td class="ifa-panel__note">{{ r.commentary or '—' }}</td>
         </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+    {# Mobile: 4-essential-col table + tap-to-expand for extra cols #}
+    <table class="ifa-panel ifa-commodity-mobile">
+      <thead>
+        <tr>
+          <th>品种</th>
+          <th style="text-align:right">收盘</th>
+          <th style="text-align:right">涨跌</th>
+          <th>解读</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in cat.rows %}
+        {% if r.close_display or r.pct_display %}
+        <tr>
+          <td>
+            <div class="ifa-panel__indicator">{{ r.display_name }}</div>
+            <span class="ifa-panel__period" style="font-size:10.5px">{{ r.actual_contract or r.logical_symbol }}</span>
+          </td>
+          <td class="ifa-panel__value">{{ r.close_display or '—' }}</td>
+          <td class="ifa-panel__delta {% if r.pct_dir == 'up' %}ifa-panel__delta--up{% elif r.pct_dir == 'down' %}ifa-panel__delta--down{% else %}ifa-panel__delta--flat{% endif %}">{{ r.pct_display or '—' }}</td>
+          <td class="ifa-panel__note" style="font-size:12px">{{ r.commentary or '—' }}</td>
+        </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>
@@ -47,3 +77,10 @@
   </div>
   {% endif %}
 </section>
+<style>
+.ifa-commodity-mobile{display:none;}
+@media(max-width:768px){
+  .ifa-commodity-desktop{display:none;}
+  .ifa-commodity-mobile{display:table;width:100%;}
+}
+</style>

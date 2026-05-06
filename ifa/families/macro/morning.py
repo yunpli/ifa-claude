@@ -394,7 +394,7 @@ def _build_s2_panel(ctx: RuntimeCtx) -> dict:
 
 # ─── S3: liquidity grid ────────────────────────────────────────────────────
 
-def _build_s3_liquidity(ctx: RuntimeCtx) -> dict:
+def _build_s3_liquidity(ctx: RuntimeCtx) -> dict | None:
     liq = ctx.liquidity
     cells: list[dict[str, Any]] = []
 
@@ -446,6 +446,9 @@ def _build_s3_liquidity(ctx: RuntimeCtx) -> dict:
             "note": "活跃资金 / 杠杆情绪",
         })
 
+    if not cells:
+        return None
+
     cells_text = "\n".join(
         f"  - {c['label']}: {c['value']} {c.get('unit','')} ({c.get('period','—')})  {c.get('note','')}"
         for c in cells
@@ -489,19 +492,10 @@ def _build_s3_liquidity(ctx: RuntimeCtx) -> dict:
 
 # ─── S4: news list (curated from active policy events) ────────────────────
 
-def _build_s4_news(ctx: RuntimeCtx) -> dict:
+def _build_s4_news(ctx: RuntimeCtx) -> dict | None:
     from ifa.families._shared.news import post_process_news_events
     if not ctx.policy_events:
-        return {
-            "key": "macro_morning.s4_news",
-            "title": "关键新闻、政策与事件摘要",
-            "order": 4,
-            "type": "news_list",
-            "content_json": {
-                "events": [],
-                "fallback_text": "本报告窗口内未捕获重大政策与事件，本节使用既有政策记忆。",
-            },
-        }
+        return None
     candidates = [
         {
             "title": p.event_title,
@@ -880,6 +874,9 @@ def run_macro_morning(
             t0 = time.monotonic()
             on_log(f"building {label}…")
             sec = builder()
+            if sec is None:
+                on_log(f'  {label} skipped (data not available at this slot)')
+                continue
             sections.append(sec)
             insert_section(
                 engine,

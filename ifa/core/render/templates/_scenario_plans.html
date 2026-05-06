@@ -2,16 +2,50 @@
 <section class="ifa-section">
   {% include "_section_head.html" %}
   <p class="ifa-section__intro">情景计划描述不同市场状态下的观察对象，<strong>不构成交易指令</strong>；客户根据实际盘面节奏自主决定。</p>
-  <div class="ifa-cand-grid">
+  <div class="ifa-scenario-grid">
     {% for sp in c.scenarios %}
-    <div class="ifa-cand-card" style="border-left-color: {{ 'var(--up)' if sp.priority == 'high' else ('var(--accent-2)' if sp.priority == 'medium' else 'var(--ink-soft)') }};">
-      <div class="ifa-cand-card__head">
-        <span class="ifa-cand-card__name">{{ sp.scenario_label }}</span>
-        <span class="ifa-cand-card__layer">{{ (sp.priority or '—') | upper }}</span>
+    {%- set dir = sp.direction or ('bullish' if sp.priority == 'high' else ('bearish' if sp.priority == 'low' else 'neutral')) -%}
+    <div class="ifa-scenario-card ifa-scenario-card--{{ dir }}">
+      <div class="ifa-scenario-card__header">
+        <span class="ifa-scenario-card__badge ifa-scenario-card__badge--{{ dir }}">
+          {{ '▲ 看多' if dir == 'bullish' else ('▼ 看空' if dir == 'bearish' else '◆ 震荡') }}
+        </span>
+        <span class="ifa-scenario-card__priority ifa-scenario-card__priority--{{ sp.priority or 'medium' }}">
+          {{ '重点' if sp.priority == 'high' else ('参考' if sp.priority == 'medium' else '备选') }}
+        </span>
       </div>
-      <div class="ifa-cand-card__row up"><span class="ifa-cand-card__lbl">触发条件</span><span>{{ sp.condition or '—' }}</span></div>
-      <div class="ifa-cand-card__row"><span class="ifa-cand-card__lbl">应观察</span><span>{{ sp.recommended_focus or '—' }}</span></div>
+      <div class="ifa-scenario-card__name">{{ sp.scenario_label }}</div>
+      <div class="ifa-scenario-card__field">
+        <span class="ifa-scenario-card__lbl">触发条件</span>
+        <span class="ifa-scenario-card__val">{{ sp.condition or '—' }}</span>
+      </div>
+      <div class="ifa-scenario-card__field">
+        <span class="ifa-scenario-card__lbl">观察重点</span>
+        <span class="ifa-scenario-card__val">{{ sp.recommended_focus or '—' }}</span>
+      </div>
     </div>
     {% endfor %}
   </div>
 </section>
+<style>
+.ifa-scenario-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+@media(min-width:820px){.ifa-scenario-grid{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:680px){.ifa-scenario-grid{grid-template-columns:1fr;}}
+.ifa-scenario-card{position:relative;border:1px solid var(--rule);border-radius:6px;padding:16px 18px 14px;background:var(--paper);overflow:hidden;transition:box-shadow .15s;}
+.ifa-scenario-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
+.ifa-scenario-card--bullish::before{background:var(--up);}
+.ifa-scenario-card--bearish::before{background:var(--down);}
+.ifa-scenario-card--neutral::before{background:var(--accent-2);}
+.ifa-scenario-card__header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.ifa-scenario-card__badge{font-size:11px;font-weight:700;letter-spacing:.04em;padding:2px 8px;border-radius:999px;}
+.ifa-scenario-card__badge--bullish{background:var(--up-soft);color:var(--up);}
+.ifa-scenario-card__badge--bearish{background:var(--down-soft);color:var(--down);}
+.ifa-scenario-card__badge--neutral{background:#fffbeb;color:#92400e;}
+.ifa-scenario-card__priority{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);}
+.ifa-scenario-card__priority--high{color:var(--accent);font-weight:700;}
+.ifa-scenario-card__name{font-family:var(--font-serif);font-size:16px;font-weight:600;color:var(--ink);margin-bottom:12px;line-height:1.35;}
+.ifa-scenario-card__field{display:grid;grid-template-columns:52px 1fr;gap:6px;padding:5px 0;border-top:1px solid var(--rule-soft);font-size:13px;line-height:1.55;}
+.ifa-scenario-card__field:last-child{border-bottom:none;}
+.ifa-scenario-card__lbl{font-size:10.5px;font-weight:600;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.05em;padding-top:2px;}
+.ifa-scenario-card__val{color:var(--ink-2);}
+</style>

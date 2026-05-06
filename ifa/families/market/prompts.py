@@ -217,11 +217,23 @@ REVIEW_SCHEMA = """{
 NOON_SCENARIO_INSTRUCTIONS = """生成下午 4-6 条情景计划（不是交易指令）。
 
 要求：
-1. 每条 scenario_label（强势延续 / 分歧修复 / 缩量震荡 / 退潮风险 / 轮动加速 / 高位兑现 等）+ condition（什么状态触发该情景）+ recommended_focus（在该情景下应观察哪些方向）+ priority（high/medium/low）。
-2. 不写买卖指令。"""
+1. 每条必须包含：
+   - scenario_label：情景名称（强势延续 / 分歧修复 / 缩量震荡 / 退潮风险 / 轮动加速 / 高位兑现 等）
+   - direction：市场方向（bullish=看多 / bearish=看空 / neutral=震荡观望）
+   - condition：触发该情景的具体条件（≤40字，含可量化信号）
+   - recommended_focus：该情景下应观察的方向或指标（≤40字）
+   - priority：优先级 high/medium/low
+2. 请确保 direction 字段只填 bullish / bearish / neutral 之一。
+3. 不写买卖指令。"""
 
 NOON_SCENARIO_SCHEMA = """{
-  "scenarios":[{"scenario_label":"...","condition":"...","recommended_focus":"...","priority":"medium"}]
+  "scenarios":[{
+    "scenario_label":"强势延续",
+    "direction":"bullish",
+    "condition":"...",
+    "recommended_focus":"...",
+    "priority":"high"
+  }]
 }"""
 
 NOON_REVIEW_HOOKS_INSTRUCTIONS = """生成 3-5 条 "晚报需要重点 review 的问题"。每一条都必须是一个**可在晚报阶段用具体阈值验证**的 forward-looking 假设。

@@ -387,13 +387,9 @@ def _build_s4_us(ctx: TechCtx) -> dict:
 
 # ─── S5: tech news ────────────────────────────────────────────────────────
 
-def _build_s5_news(ctx: TechCtx) -> dict:
+def _build_s5_news(ctx: TechCtx) -> dict | None:
     if ctx.news_df is None or (hasattr(ctx.news_df, "empty") and ctx.news_df.empty):
-        return {
-            "key": "tech_morning.s5_news", "title": "全球科技与产业新闻摘要",
-            "order": 5, "type": "news_list",
-            "content_json": {"events": [], "fallback_text": "近 24 小时未捕获显著的科技产业新闻。"},
-        }
+        return None
     from ifa.core.report.timezones import BJT
     candidates = []
     for _, row in ctx.news_df.head(20).iterrows():
@@ -846,6 +842,9 @@ def run_tech_morning(
             t0 = time.monotonic()
             on_log(f"building {label}…")
             sec = builder()
+            if sec is None:
+                on_log(f'  {label} skipped (data not available at this slot)')
+                continue
             sections.append(sec)
             insert_section(
                 engine, report_run_id=run.report_run_id,

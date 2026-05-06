@@ -1,10 +1,16 @@
 {% set c = s.content_json %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
-  <p class="ifa-section__intro">
-    今日整体风险等级：<strong>{{ c.risk_level or '—' }}</strong>
-    {% if c.summary %}· {{ c.summary }}{% endif %}
-  </p>
+  {% if c.risk_level or c.summary %}
+  <div class="ifa-risk-summary">
+    {% if c.risk_level %}
+    <span class="ifa-risk-summary__level ifa-risk-summary__level--{{ c.risk_level | lower }}">
+      {{ '⚠ 高风险' if c.risk_level in ['high','高'] else ('▲ 中等风险' if c.risk_level in ['medium','中'] else '● 低风险') }}
+    </span>
+    {% endif %}
+    {% if c.summary %}<span class="ifa-risk-summary__text">{{ c.summary }}</span>{% endif %}
+  </div>
+  {% endif %}
   <ul class="ifa-risk-list">
     {% for r in c.risks %}
     <li class="ifa-risk-list__item ifa-risk-list__item--{{ r.confidence_class or 'med' }}">
@@ -13,9 +19,17 @@
         <span class="ifa-risk-list__label">触发条件</span><span>{{ r.trigger or '—' }}</span>
         <span class="ifa-risk-list__label">可能影响</span><span>{{ r.possible_impact or '—' }}</span>
         <span class="ifa-risk-list__label">观察指标</span><span>{{ r.watch_indicator or '—' }}</span>
-        <span class="ifa-risk-list__label">数据时点</span><span>{{ r.data_timing or '—' }}</span>
+        {% if r.data_timing %}<span class="ifa-risk-list__label">数据时点</span><span>{{ r.data_timing }}</span>{% endif %}
       </div>
     </li>
     {% endfor %}
   </ul>
 </section>
+<style>
+.ifa-risk-summary{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 14px;background:var(--paper-tint);border-radius:4px;border:1px solid var(--rule);}
+.ifa-risk-summary__level{font-size:12px;font-weight:700;letter-spacing:.04em;padding:2px 10px;border-radius:999px;white-space:nowrap;}
+.ifa-risk-summary__level--high,.ifa-risk-summary__level--高{background:var(--up-soft);color:var(--up);}
+.ifa-risk-summary__level--medium,.ifa-risk-summary__level--中{background:#fffbeb;color:#92400e;}
+.ifa-risk-summary__level--low,.ifa-risk-summary__level--低{background:var(--down-soft);color:var(--down);}
+.ifa-risk-summary__text{font-size:13px;color:var(--ink-2);line-height:1.5;}
+</style>

@@ -481,6 +481,9 @@ def run_macro_evening(
             t0 = time.monotonic()
             on_log(f"building {label}…")
             sec = builder()
+            if sec is None:
+                on_log(f'  {label} skipped (data not available at this slot)')
+                continue
             sections.append(sec)
             insert_section(
                 engine,
@@ -516,7 +519,9 @@ def run_macro_evening(
 
 
 # Reuse morning builders, but rewrite section_key prefix to macro_evening.*
-def _retag(sec: dict, new_key: str, new_title: str, new_order: int) -> dict:
+def _retag(sec: dict | None, new_key: str, new_title: str, new_order: int) -> dict | None:
+    if sec is None:
+        return None
     sec = dict(sec)
     sec["key"] = new_key
     sec["title"] = new_title
@@ -525,7 +530,7 @@ def _retag(sec: dict, new_key: str, new_title: str, new_order: int) -> dict:
     return sec
 
 
-def _build_e3_news(ctx: EveningCtx) -> dict:
+def _build_e3_news(ctx: EveningCtx) -> dict | None:
     from ifa.families.macro.morning import _build_s4_news
     sec = _build_s4_news(ctx)
     return _retag(sec, "macro_evening.s3_news", "今日宏观数据与政策事件复盘", 3)

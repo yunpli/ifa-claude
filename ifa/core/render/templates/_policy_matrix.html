@@ -1,6 +1,21 @@
 {% set c = s.content_json %}
+{% set _neutral_signals = ['无新增信号', '平稳', '延续既有框架'] %}
+{% set _active_rows = [] %}
+{% for r in c.rows %}{% if r.current_signal not in _neutral_signals %}{% set _ = _active_rows.append(r) %}{% endif %}{% endfor %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
+  {% if _active_rows | length == 0 %}
+  <div class="ifa-policy-quiet">
+    <span class="ifa-policy-quiet__icon">◎</span>
+    <span>今日无新增政策信号，各维度延续既有框架，无需特别操作响应。</span>
+  </div>
+  {% if c.summary %}
+  <div class="ifa-commentary" style="margin-top:12px;">
+    <span class="ifa-commentary__label">政策综述</span>
+    <div>{{ c.summary }}</div>
+  </div>
+  {% endif %}
+  {% else %}
   <table class="ifa-matrix">
     <thead>
       <tr>
@@ -31,4 +46,9 @@
     <div>{{ c.summary }}</div>
   </div>
   {% endif %}
+  {% endif %}
 </section>
+<style>
+.ifa-policy-quiet{display:flex;align-items:center;gap:10px;padding:14px 18px;background:var(--paper-tint);border:1px dashed var(--rule);border-radius:4px;font-size:13.5px;color:var(--ink-muted);}
+.ifa-policy-quiet__icon{font-size:18px;color:var(--ink-soft);flex-shrink:0;}
+</style>

@@ -344,19 +344,9 @@ def _build_s3_strength(ctx: AssetCtx) -> dict:
 
 # ─── S4: anomaly / risk list ──────────────────────────────────────────────
 
-def _build_s4_anomalies(ctx: AssetCtx) -> dict:
+def _build_s4_anomalies(ctx: AssetCtx) -> dict | None:
     if not ctx.anomalies:
-        return {
-            "key": "asset_morning.s4_anomalies",
-            "title": "异常波动与关键品种提醒",
-            "order": 4,
-            "type": "risk_list",
-            "content_json": {
-                "risk_level": "low",
-                "risks": [],
-                "summary": "今日商品端未捕获显著的异常波动；以稳态信号为主。",
-            },
-        }
+        return None
     flag_summary = []
     for a in ctx.anomalies[:15]:
         flag_summary.append({
@@ -493,15 +483,9 @@ def _build_s6_chain(ctx: AssetCtx) -> dict:
 
 # ─── S7: news list ─────────────────────────────────────────────────────────
 
-def _build_s7_news(ctx: AssetCtx) -> dict:
+def _build_s7_news(ctx: AssetCtx) -> dict | None:
     if ctx.news_df is None or (hasattr(ctx.news_df, "empty") and ctx.news_df.empty):
-        return {
-            "key": "asset_morning.s7_news",
-            "title": "Asset 相关新闻与事件摘要",
-            "order": 7,
-            "type": "news_list",
-            "content_json": {"events": [], "fallback_text": "近 36 小时未捕获显著的商品/能源/金属/农产品相关新闻。"},
-        }
+        return None
     from ifa.core.report.timezones import BJT
     candidates = []
     for _, row in ctx.news_df.head(20).iterrows():
@@ -677,6 +661,9 @@ def run_asset_morning(
             t0 = time.monotonic()
             on_log(f"building {label}…")
             sec = builder()
+            if sec is None:
+                on_log(f'  {label} skipped (data not available at this slot)')
+                continue
             sections.append(sec)
             insert_section(
                 engine, report_run_id=run.report_run_id,

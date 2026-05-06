@@ -884,6 +884,14 @@ html, body {
   letter-spacing: 0.04em;
 }
 .ifa-footer strong { color: var(--ink-muted); font-weight: 600; }
+.ifa-footer__aux {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  opacity: 0.6;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+}
 
 /* ── Utility ───────────────────────────────────────────────────────── */
 .ifa-empty {
@@ -989,9 +997,230 @@ html, body {
   }
 }
 
-/* ── Print ─────────────────────────────────────────────────────────── */
+/* ── Back-to-top button (C4 / S9) — CSS-only, no JS ───────────────── */
+.ifa-back-top {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  border-radius: 50%;
+  text-decoration: none;
+  box-shadow: 0 2px 12px rgba(138,28,32,.35);
+  opacity: 0.88;
+  transition: opacity .15s, transform .15s;
+  z-index: 200;
+  line-height: 1;
+}
+.ifa-back-top:hover { opacity: 1; transform: translateY(-2px); }
+@media print { .ifa-back-top { display: none; } }
+
+/* ── Glossary inline tooltip (T3 / S7) ────────────────────────────── */
+.ifa-term {
+  border-bottom: 1px dashed var(--accent-2);
+  cursor: help;
+  position: relative;
+  display: inline;
+}
+.ifa-term::after {
+  content: attr(data-def);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 200px;
+  max-width: 280px;
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 7px 10px;
+  border-radius: 4px;
+  white-space: normal;
+  text-align: left;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 99;
+  font-family: var(--font-sans);
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: 0;
+}
+.ifa-term::before {
+  content: '';
+  position: absolute;
+  bottom: calc(100% + 1px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--ink);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 100;
+}
+.ifa-term:hover::after,
+.ifa-term:hover::before { opacity: 1; }
+
+/* ── Sticky TOC sidebar + scroll-to-top (C4 / S9) ─────────────────── */
+.ifa-toc-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 24px 0;
+  padding: 12px 14px;
+  background: var(--paper-tint);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+.ifa-toc-pills a {
+  display: inline-block;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background .1s, color .1s;
+}
+.ifa-toc-pills a:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.ifa-toc-pills__label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  align-self: center;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+/* ── Typography hierarchy (C5 / S11) ──────────────────────────────── */
+/* §01 headline card and §last review hooks — elevated prominence */
+.ifa-section--elevated .ifa-section__title {
+  font-size: 21px;
+}
+.ifa-section--elevated {
+  border-left: 3px solid var(--accent);
+  padding-left: 16px;
+}
+/* Appendix / disclaimer — subdued */
+.ifa-section--appendix .ifa-section__title {
+  font-size: 16px;
+  color: var(--ink-muted);
+}
+.ifa-section--appendix {
+  opacity: 0.8;
+}
+
+/* ── Mobile responsive wide tables (C1 / S4) ─────────────────────── */
+@media (max-width: 768px) {
+  /* Tables with more than 4 columns collapse to horizontal scroll */
+  table.ifa-panel,
+  table.ifa-matrix,
+  table.ifa-capture {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+  }
+  table.ifa-panel td,
+  table.ifa-matrix td,
+  table.ifa-capture td {
+    white-space: normal;
+    min-width: 80px;
+  }
+  /* Hide sparkline column on narrow screens */
+  .ifa-panel__chart { display: none; }
+  /* Mobile: hide lower-priority table columns */
+  .ifa-matrix th:last-child, .ifa-matrix td:last-child { display: none; }
+  .ifa-mapping-table th:nth-child(3), .ifa-mapping-table td:nth-child(3) { display: none; }
+}
+
+/* ── Collapsible long lists (C2 / S5) — CSS-only <details> ────────── */
+.ifa-list-expand {
+  margin-top: 8px;
+}
+.ifa-list-expand summary {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--accent);
+  font-weight: 600;
+  list-style: none;
+  padding: 4px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  user-select: none;
+}
+.ifa-list-expand summary::-webkit-details-marker { display: none; }
+.ifa-list-expand[open] summary::before { content: '▲ '; font-size: 9px; }
+.ifa-list-expand:not([open]) summary::before { content: '▼ '; font-size: 9px; }
+.ifa-list-expand__body { margin-top: 8px; }
+
+/* ── Banner metadata cleanup (C3 / S8) — move template_version to footer ── */
+.ifa-banner__meta .ifa-banner__meta-aux {
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  opacity: 0.7;
+}
+
+/* ── A股 红涨/绿跌 colour convention guard (C6 / S12) ──────────────── */
+/* Explicit up/down overrides for any component that might use wrong colors */
+.up, [data-dir="up"], .delta-up { color: var(--up) !important; }
+.down, [data-dir="down"], .delta-down { color: var(--down) !important; }
+td.up, td[data-dir="up"] { color: var(--up); }
+td.down, td[data-dir="down"] { color: var(--down); }
+
+/* ── Print (C7 / S13) — production-grade PDF export ───────────────── */
 @media print {
-  body { background: white; }
-  .ifa-page { box-shadow: none; padding: 12mm 15mm; max-width: 100%; }
+  body { background: white; font-size: 12px; }
+  .ifa-page {
+    box-shadow: none;
+    padding: 12mm 15mm;
+    max-width: 100%;
+    margin: 0;
+  }
+  /* Section break control */
   .ifa-section { page-break-inside: avoid; }
+  .ifa-section--page-break { page-break-before: always; }
+  /* Cards and risk items stay together */
+  .ifa-risk-list__item,
+  .ifa-hypo-list__item,
+  .ifa-chain-card,
+  .ifa-scenario-card,
+  .ifa-review-hook,
+  .ifa-headline-card { page-break-inside: avoid; }
+  /* Repeating table headers on multi-page tables */
+  thead { display: table-header-group; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  td, th { page-break-inside: avoid; }
+  /* Hide interactive UI elements */
+  .ifa-toc-pills,
+  .ifa-term::after,
+  .ifa-term::before,
+  .ifa-list-expand summary { display: none; }
+  .ifa-list-expand { display: block; }
+  .ifa-list-expand__body { display: block !important; }
+  /* Ensure tooltip text shows in print via title fallback */
+  .ifa-term { border-bottom: none; }
+  /* Footer on every page */
+  .ifa-footer { margin-top: 8mm; }
+  /* Suppress external link decorations */
+  a[href]::after { content: none !important; }
 }

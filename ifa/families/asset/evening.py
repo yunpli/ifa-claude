@@ -376,15 +376,9 @@ def _build_e6_chain_review(ctx: AssetEveningCtx) -> dict:
 
 # ─── S7: news list ────────────────────────────────────────────────────────
 
-def _build_e7_news(ctx: AssetEveningCtx) -> dict:
+def _build_e7_news(ctx: AssetEveningCtx) -> dict | None:
     if ctx.news_df is None or (hasattr(ctx.news_df, "empty") and ctx.news_df.empty):
-        return {
-            "key": "asset_evening.s7_news",
-            "title": "Asset 相关新闻与事件复盘",
-            "order": 7,
-            "type": "news_list",
-            "content_json": {"events": [], "fallback_text": "今日窗口未捕获显著的商品/期货相关新闻。"},
-        }
+        return None
     from ifa.core.report.timezones import BJT
     candidates = []
     for _, row in ctx.news_df.head(20).iterrows():
@@ -598,6 +592,9 @@ def run_asset_evening(
             t0 = time.monotonic()
             on_log(f"building {label}…")
             sec = builder()
+            if sec is None:
+                on_log(f'  {label} skipped (data not available at this slot)')
+                continue
             sections.append(sec)
             insert_section(
                 engine, report_run_id=run.report_run_id,

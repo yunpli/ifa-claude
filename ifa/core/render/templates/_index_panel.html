@@ -15,6 +15,7 @@
     </thead>
     <tbody>
       {% for r in c.indices %}
+      {%- if r.close_display or r.pct_display or r.amount_display -%}
       <tr>
         <td>
           <div class="ifa-panel__indicator">{{ r.name }}</div>
@@ -26,6 +27,7 @@
         <td class="ifa-panel__chart">{{ r.spark_svg | safe }}</td>
         <td class="ifa-panel__note">{{ r.role }}{% if r.commentary %} · {{ r.commentary }}{% endif %}</td>
       </tr>
+      {%- endif -%}
       {% endfor %}
     </tbody>
   </table>
