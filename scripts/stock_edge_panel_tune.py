@@ -36,6 +36,7 @@ from ifa.families.stock.backtest.panel_evaluator import (
     bootstrap_rank_ic_lift,
     evaluate_overlay_on_panel,
     k_fold_rolling_walk_forward,
+    kfold_aggregate_ci,
     panel_matrix_from_rows,
     regime_bucketed_rank_ic_lift,
     walk_forward_split,
@@ -404,7 +405,10 @@ def main() -> int:
             gate_config["g9_min_positive_folds"] = args.k_fold_min_positive
         gate_config["g4_min_improved_bucket_pct"] = args.regime_min_bucket_pct
 
-        # Pick val panel for downstream stat checks
+        # Pick val panel for downstream stat checks (G4 regime / G5 bootstrap).
+        # Latest fold = the artifact we'd promote (its overlay was tuned on the most
+        # recent training data without leakage). Earlier folds' val rows ARE part of
+        # the latest fold's training window, so pooling them would leak.
         val_panel_for_stats = None
         if args.oos or k_fold_done:
             if k_fold_done:
@@ -413,8 +417,16 @@ def main() -> int:
                 val_panel_for_stats = panel_matrix_from_rows(val_rows)
 
         # ── G5 Bootstrap CI: compute on val panel ─────────────
+        # K-fold mode: use across-fold t-CI (4 independent OOS lifts → real CI on
+        # mean lift; no leakage). Single-OOS mode: bootstrap on the val panel rows.
         bootstrap_results = None
-        if args.bootstrap_iterations > 0 and val_panel_for_stats is not None:
+        if k_fold_done and kfold_for_gate:
+            bootstrap_results = kfold_aggregate_ci(
+                kfold_for_gate,
+                confidence=args.bootstrap_confidence,
+            )
+            print(f"      G5 across-fold t-CI: {len(kfold_for_gate)} folds, conf={args.bootstrap_confidence}")
+        elif args.bootstrap_iterations > 0 and val_panel_for_stats is not None:
             t0_boot = time.monotonic()
             bootstrap_results = bootstrap_rank_ic_lift(
                 val_panel_for_stats, artifact.overlay, base,

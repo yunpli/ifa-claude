@@ -486,6 +486,62 @@ def regime_bucketed_rank_ic_lift(
     return out
 
 
+def kfold_aggregate_ci(
+    kfold_results: list[dict[str, Any]],
+    *,
+    confidence: float = 0.95,
+) -> dict[str, dict[str, float]]:
+    """t-distribution CI on the mean per-fold rank IC lift.
+
+    Each K-fold fold provides an independent OOS lift estimate (no leakage between
+    fold artifacts and their respective val rows). Treat the K lifts as i.i.d.
+    samples and form a t-CI on the mean — this is the statistically correct way
+    to test "does the tuner produce positive lift on average across regimes" with
+    K-fold data.
+
+    For K=4 (typical), the t critical value at 95% is large (~3.18) — CI requires
+    very low variance. With more folds CI tightens linearly. Caller can lower
+    confidence (e.g. 0.80) when K is small but consistency (G9) is also tracked.
+
+    Returns {"5d": {lift_mean, lift_ci_low, lift_ci_high, n_folds}, ...}.
+    """
+    if not kfold_results:
+        return {}
+    out: dict[str, dict[str, float]] = {}
+    n = len(kfold_results)
+    if n < 2:
+        return {}
+    # t critical value via scipy.stats.t (or a reasonable approximation if scipy missing)
+    try:
+        from scipy.stats import t as student_t
+        t_crit = float(student_t.ppf(1.0 - (1.0 - confidence) / 2.0, df=n - 1))
+    except ImportError:
+        # Approximate t for small df: at 95%, df=3 → 3.18, df=5 → 2.57, df=10 → 2.23, df=∞ → 1.96
+        approx_table_95 = {1: 12.71, 2: 4.30, 3: 3.18, 4: 2.78, 5: 2.57, 6: 2.45, 7: 2.36, 8: 2.31, 9: 2.26, 10: 2.23}
+        t_crit = approx_table_95.get(n - 1, 1.96 + 0.5 / max(n - 1, 1))
+    for h in (5, 10, 20):
+        lifts = [
+            float(fold.get("val_tuned", {}).get(f"objective_{h}d", {}).get("rank_ic", 0.0))
+            - float(fold.get("val_baseline", {}).get(f"objective_{h}d", {}).get("rank_ic", 0.0))
+            for fold in kfold_results
+        ]
+        mean = float(np.mean(lifts))
+        std = float(np.std(lifts, ddof=1)) if n > 1 else 0.0
+        sem = std / float(np.sqrt(n))
+        ci_half = t_crit * sem
+        out[f"{h}d"] = {
+            "lift_mean": round(mean, 6),
+            "lift_ci_low": round(mean - ci_half, 6),
+            "lift_ci_high": round(mean + ci_half, 6),
+            "lift_std": round(std, 6),
+            "sem": round(sem, 6),
+            "n_folds": n,
+            "method": "t_distribution_kfold",
+            "confidence": confidence,
+        }
+    return out
+
+
 def bootstrap_rank_ic_lift(
     panel: PanelMatrix,
     overlay: Mapping[str, Any],

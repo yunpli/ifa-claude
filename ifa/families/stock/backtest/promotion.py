@@ -464,17 +464,25 @@ def evaluate_promotion_gates(
     if bootstrap_results:
         g5_per_horizon: dict[str, bool] = {}
         g5_detail_parts = []
+        # Detect method: kfold-aggregate-t (label per fold) vs single-panel-bootstrap
+        any_method = next(iter(bootstrap_results.values()), {}).get("method", "bootstrap")
         for h in ("5d", "10d", "20d"):
             stat = bootstrap_results.get(h, {})
             ci_low = float(stat.get("lift_ci_low", 0.0))
             ci_high = float(stat.get("lift_ci_high", 0.0))
             mean = float(stat.get("lift_mean", 0.0))
-            n_iter = int(stat.get("n_iterations", 0)) or "—"
+            conf = stat.get("confidence")
+            ci_label = f"{int((conf or 0.95) * 100)}%"
+            n_label = (
+                f"folds={int(stat.get('n_folds') or 0)}"
+                if any_method == "t_distribution_kfold"
+                else f"n_iter={int(stat.get('n_iterations') or 0) or '—'}"
+            )
             passed_h = ci_low > 0
             g5_per_horizon[h] = passed_h
             mark = "✓" if passed_h else "✗"
             g5_detail_parts.append(
-                f"{h} {mark} mean {mean:+.4f}, 95% CI [{ci_low:+.4f}, {ci_high:+.4f}] (n_iter={n_iter})"
+                f"{h} {mark} mean {mean:+.4f}, {ci_label} CI [{ci_low:+.4f}, {ci_high:+.4f}] ({n_label})"
             )
         all_pass_g5 = all(g5_per_horizon.values())
         # gate value = min CI low across horizons (most conservative)
