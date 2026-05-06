@@ -1,6 +1,36 @@
 # ifa-claude — iFA China Market Report System
 
-**Version 2.2.0 in progress** · AI-native, structured, source-anchored intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
+**Version 2.2.0** · AI-native, structured, source-anchored intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
+
+---
+
+## What's New in V2.2
+
+V2.2 ships **three new families** plus a **complete report UI overhaul** and **production-grade data correctness** across the existing 1+3 reports.
+
+### Three new families
+- **Research** — single-stock financial-statement reports. 28 factors × 5 dimensions, SW L2 peer percentile, four lenses (quarterly/annual × quick/deep), durable Postgres fundamental memory, analyst-PDF extraction cache. See [`docs/research-deep-dive.md`](docs/research-deep-dive.md).
+- **TA** — 晚盘技术面 evening report. 9-regime classifier, 19 candidate setups across 7 families, T+N outcome tracking, regime gating + decay-based suspension, 11 deterministic + 3 LLM-augmented sections. See [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md).
+- **Stock Edge** — single-stock 5d/10d/20d quantitative trade plan. 85-strategy 决策矩阵 + per-horizon decision layer + auto-promotion gates. Tuning playbook still maturing (current alpha 不稳，see "Roadmap to V2.2.1" below). See [`docs/stock-edge-deep-dive.md`](docs/stock-edge-deep-dive.md).
+
+### Complete UI overhaul (1 main + 3 aux)
+- **§01 headline cards** standardised across all 9 family×slot combinations: `headline ≤28字 + top3[3] ≤22字 + summary ≤80字`. The "三件事" promise on every card front is now actually three forward-looking actions, not a recap of §02.
+- **Premium card components** replace wall-of-text everywhere: `_review_hooks` (numbered question cards), `_scenario_plans` (3-col color-coded), `_chain_review` (商品端/A股端 row cards), `_chain_transmission` (上游 ▶ 中游 ▶ 下游 chevron pipeline), `_layer_map` (5-layer cake with plain-language intro), `_risk_list` (severity-colored card grid), `_hypotheses_list` (numbered cards with confidence pills), `_mapping_table` (sector pills with up/down tone).
+- **Schema-validation retry** in LLM layer — 3 attempts with 2s/4s/8s exponential backoff if `top3` missing; only fallback after retries exhausted.
+- **System-wide infrastructure** — 7 robust Jinja format filters (no raw float reaches templates), 37-term plain-language glossary tooltip system, mobile-responsive (cards collapse <768px), print-CSS optimised, A股 红涨/绿跌 enforced, banner staleness warning, sticky TOC pills + 回到顶部 floating button.
+- See [`docs/ui-overhaul-v2.2.md`](docs/ui-overhaul-v2.2.md) for the full design reference.
+
+### Data correctness (production-blocking bugs fixed)
+- **Slot cutoff** — noon=11:30, evening=15:00 honored in BOTH live runs and historical replay. Production today uses `rt_min_daily` cut at slot; historical noon uses `stk_mins` 09:30→11:30 last bar.
+- **Realtime breadth** — `rt_k` whole-A snapshot + `stk_limit` join computes today's breadth locally when EOD `daily` isn't published yet; fail-closed on partial wildcard failure.
+- **SW realtime aggregation** — new `market/_sw_realtime.py` synthesizes SW L1/L2 sector pct from member stocks (TuShare's `rt_min_daily` rejects SW codes); MV-weighted by T-1 `daily_basic.total_mv`.
+- **Trade-day-aware everywhere** — every "previous day" computation now goes through `ifa.core.calendar.prev_trading_day` (smartmoney.trade_cal-backed). 8 sites previously used calendar-day stepping which broke on Mondays + post-holiday opens.
+- **Pre-flight DB freshness check** per slot — only validates tables that slot actually loads (noon doesn't read raw_moneyflow → not flagged).
+- **Banner staleness warning** when any `trade_date < report_date` — red-bordered alert tells the reader why "—" appears.
+- See [`docs/v2.2-release-notes.md`](docs/v2.2-release-notes.md) for the bug list (#1—#19, all closed) and migration guide.
+
+### Roadmap to V2.2.1
+- **Stock Edge tuning** — T3.2 ML 跨日期复用 + T3.3 扩 panel 100×24 终验。Currently 5d/10d val rank IC unstable across folds (2/4 positive); 20d at +0.034 K-fold median (target ≥+0.05). Production YAML works but is suboptimal. See [`docs/tuning-playbook.md`](docs/tuning-playbook.md) for the cross-family tuning surface.
 
 ---
 
@@ -76,6 +106,7 @@ The main `market` family is 总指挥型 — it summarises the day. The three au
 | **Ningbo** (separate) | `ifa ningbo evening` | evening | 5 | Yes (SW L2 member lookup) | 短线策略三轨 — 启发式 / ML 激进 / ML 稳健，★1-★5 共识矩阵，15 日追踪 |
 | **Research** (V2.2, separate) | `ifa research report` | quarterly/annual × quick/standard/deep | 18 | Yes (SW L2 peer rank) | 个股财报分析 — 四类报告 / 5 维度 / 研报 PDF 摘要 / Postgres 基本面记忆 / 报告资产复用 |
 | **TA** (V2.2, separate) | `ifa ta evening` | evening | 11 + 3 LLM | Yes (SW L1/L2 sector) | 晚盘技术面 — 9 体制 + 19 setup + T+N 追踪 + 衰减门控 |
+| **Stock Edge** (V2.2, separate) | `ifa stock edge` | on-demand | – | Yes (SW peer scan) | 个股 5d/10d/20d 量化交易计划 — 85 策略矩阵 + 决策层 + 自动晋升门 (V2.2.1 调参中) |
 
 Most families share the core reporting tables (`report_runs`, `report_sections`, `report_judgments`, `model_outputs`) and the same `ReportRun` lifecycle. Research additionally owns `research.report_runs` / `research.report_sections` as a single-stock report asset registry plus `research.period_factor_decomposition` and `research.pdf_extract_cache` for reusable fundamental memory.
 
@@ -219,17 +250,31 @@ Implementation uses headless Chrome with print-CSS injection that opens all `<de
 
 ## Documentation Index
 
-- [`docs/architecture.md`](docs/architecture.md) — the 1+3+smartmoney design, data flow, lifecycle, LLM usage
-- [`docs/family-reference.md`](docs/family-reference.md) — per-family slots, sections, data sources, sample CLI
-- [`docs/sw-migration.md`](docs/sw-migration.md) — why we unified on 申万, phase plan, key tables, the 千元 bug
-- [`docs/pdf-tool.md`](docs/pdf-tool.md) — PDF export internals and troubleshooting
-- [`docs/database-schema.md`](docs/database-schema.md) — full schema reference (`public.*` + `smartmoney.*`)
-- [`docs/run-modes.md`](docs/run-modes.md) — test / manual / production semantics
-- `docs/audit-pre-b8.md` — historical audit record (kept for provenance, do not edit)
-- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — 运维手册：日/周/月/季节奏，所有 family 的操作检查清单
+### V2.2 release pack
+- [`docs/v2.2-release-notes.md`](docs/v2.2-release-notes.md) — V2.2 deliverables, migration v2.1.3 → v2.2, breaking changes, ops checklist, gap analysis
+- [`docs/ui-overhaul-v2.2.md`](docs/ui-overhaul-v2.2.md) — premium card design system reference (components, tokens, anti-patterns)
+- [`docs/tuning-playbook.md`](docs/tuning-playbook.md) — cross-family tuning surface (TA / SmartMoney / Stock Edge), how to extend, V2.2.1 plan
+
+### Family deep-dives
+- [`docs/research-deep-dive.md`](docs/research-deep-dive.md) — Research family (V2.2 NEW)
+- [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md) — TA family (V2.2 NEW)
+- [`docs/stock-edge-deep-dive.md`](docs/stock-edge-deep-dive.md) — Stock Edge family (V2.2 NEW)
 - [`docs/ningbo-deep-dive.md`](docs/ningbo-deep-dive.md) — 宁波派完整架构：Phase 1-3.D，三轨，Champion-Challenger
 - [`docs/smartmoney-deep-dive.md`](docs/smartmoney-deep-dive.md) — SmartMoney V2.1.2 修复背景 + 两层 recompute 体系
 - [`docs/main-three-aux-deep-dive.md`](docs/main-three-aux-deep-dive.md) — 一主三辅协作时序与数据流
+
+### Engineering reference
+- [`docs/architecture.md`](docs/architecture.md) — the 1+3+smartmoney design, data flow, lifecycle, LLM usage
+- [`docs/family-reference.md`](docs/family-reference.md) — per-family slots, sections, data sources, sample CLI
+- [`docs/database-schema.md`](docs/database-schema.md) — full schema reference (`public.*` + `smartmoney.*` + `research.*` + `ta.*`)
+- [`docs/data-accuracy-guidelines.md`](docs/data-accuracy-guidelines.md) — 15 rules every data fetcher must follow (PIT, staleness gate, slot cutoff, etc.)
+- [`docs/tushare-units-reference.md`](docs/tushare-units-reference.md) — TuShare API units cheatsheet (千元 / 万元 / 元 / 万股 / 万亿）
+- [`docs/sw-migration.md`](docs/sw-migration.md) — why we unified on 申万, phase plan, key tables, the 千元 bug
+
+### Operations
+- [`docs/OPERATIONS.md`](docs/OPERATIONS.md) — 运维手册：日/周/月/季节奏，所有 family 的操作检查清单
+- [`docs/run-modes.md`](docs/run-modes.md) — test / manual / production semantics
+- [`docs/pdf-tool.md`](docs/pdf-tool.md) — PDF export internals and troubleshooting
 - [`docs/multi-agent-deployment.md`](docs/multi-agent-deployment.md) — 多 agent 平台部署指南（generic prompt + watcher 配置）
 
 The root `CLAUDE.md` is the engineering checklist for the in-progress SmartMoney B/C work and is the source of truth for migration phase status.
@@ -244,12 +289,12 @@ The root `CLAUDE.md` is the engineering checklist for the in-progress SmartMoney
 | V2.1.1 patch (SW L2 daily price ETL)          | Done |
 | V2.1.2 patch (SmartMoney L2 pct_change in factors; recompute+retrain required) | Done |
 | V2.1.3 patch (Ningbo Phase 1-3.D 全闭环；Champion-Challenger；★ 共识矩阵；运维文档) | Done |
-| SmartMoney A 阶段 (raw backfill 2021-01 → 2026) | Done |
-| SmartMoney B 阶段 (factor refactor onto SW) | In progress |
-| SmartMoney C 阶段 (compute / train / OOS validation) | Pending B |
-| V2.2 (planned) | Transition matrix LLM nudge; persistent param store v2026_05; drop legacy DC fallback in `factors/flow.py` |
+| **V2.2 release** — UI overhaul + Research + TA + Stock Edge + production data correctness | **Done** |
+| V2.2.1 (planned) — Stock Edge tuning T3.2 + T3.3 → variant YAML auto-promote | In progress |
+| V2.3 (planned) — Research HTTP API + Telegram + quota + dashboard | Backlog |
 
-See `CLAUDE.md` for the live B1–B9 / C1–C6 task list.
+See [`docs/v2.2-release-notes.md`](docs/v2.2-release-notes.md) for the full V2.2 deliverables list and migration guide.
+See [`docs/tuning-playbook.md`](docs/tuning-playbook.md) for the cross-family tuning surface and V2.2.1 plan.
 
 ---
 

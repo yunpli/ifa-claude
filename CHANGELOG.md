@@ -6,7 +6,92 @@ All notable changes to iFA China Market Report System.
 
 ---
 
-## [2.2.0] — 2026-05-04 (in development)
+## [2.2.0] — 2026-05-06 — UI overhaul + production-grade data correctness
+
+### Added — Reports UI v2.2 (4 family × 9 slots — premium card system)
+
+**Cross-family `§01` headline overhaul** (kills wall-of-text 流水账)
+- New schema: `{headline ≤28字, top3[3] ≤22字, summary ≤80-100字}` enforced
+  across all 8 morning/noon/evening tone+headline prompts
+- LLM schema-validation retry: 3 attempts with 2s/4s/8s exponential backoff
+  if `top3` missing; only fallback after retries exhausted
+- New premium components: `.ifa-headline-card`, `.ifa-tone__top3`,
+  `.ifa-client-brief__top3` — numbered serif tile grid (01/02/03 衬线大数字)
+
+**Section type upgrades**
+- `_review_hooks.html` (NEW) — 中报 §11 review hooks render as numbered card
+  grid with question / 为什么重要 / 验证阈值 / 关联板块 pills (was wall of text)
+- `_scenario_plans.html` — premium 3-col color-coded grid (看多/震荡/看空)
+- `_chain_review.html` — 商品端/A股端 row card layout
+- `_chain_transmission.html` — 上游 ▶ 中游 ▶ 下游/A股 chevron pipeline
+- `_layer_map.html` — AI Five-Layer Cake gets plain-language intro + 今日 highlight
+- `_risk_list.html` — color-coded card grid with severity badges (was flat list)
+- `_hypotheses_list.html` — 01/02 numbered cards with chip metadata
+- `_leader_table.html` — column rename: 所在层→AI 产业链层 / 龙头类型→属性·标签
+  / 失效→退场信号
+- `_mapping_table.html` — sector tags as colored ifa-pills (was concatenated text)
+
+**System-wide UI infrastructure**
+- New `ifa/core/render/glossary.py` — 37 plain-language financial term tooltips,
+  exposed via `ifa_term` Jinja filter
+- New `ifa/core/render/templates/styles.css` premium components:
+  `.ifa-pill`, `.ifa-headline-card`, `.ifa-section--elevated/--appendix`,
+  `.ifa-toc-pills`, `.ifa-back-top`, `.ifa-chain-flow`, etc.
+- 7 robust Jinja filters in HtmlRenderer: `fmt_pct`, `fmt_pct_signed`,
+  `fmt_amt_yi`, `fmt_num`, `fmt_int`, `fmt_price`, `fmt_dir` (no raw float
+  ever reaches templates)
+- Cross-family TOC pill nav + section anchors (`id="s{order}"`) + 回到顶部
+  floating button
+- Mobile responsive: `@media(max-width:768px)` table → card collapse;
+  6/8-col tables get desktop+mobile dual layouts
+- Print CSS: `page-break-inside: avoid` + repeating table headers + auto-expand
+  collapsed `<details>` on print; PDF-friendly typography hierarchy
+- A股 红涨/绿跌 convention enforced via `--up/--down` CSS variables
+- Banner staleness warning component (red-bordered alert at top of report
+  when any data point's `trade_date < report_date`)
+
+### Fixed — Data correctness bugs (issues #1 — #19, all closed)
+
+**P0 data-correctness bugs (production-blocking)**
+- #1 Staleness defense across 4 families — fields stay None when
+  `row.trade_date != on_date` (no more T-1 prints labeled as today)
+- #2 Noon breadth EOD empty — rt_k whole-A snapshot + stk_limit join
+  computes total amount / up-down / limit-up locally; fail-closed
+- #3 LLM hallucination — morning/noon/evening hyps are now in prompts
+  (no more "早报假设未提供" filler)
+- #4 Banner staleness warning across 4 main families
+- #5 DB ETL freshness pre-flight check (per-slot, trading-day-aware)
+- #10 Watchlist empty placeholder fields hidden
+- #11 Sparkline timeframe + slot cutoff (noon=11:30 / evening=15:00,
+  production AND historical replay both honor the cutoff)
+- #12 Calendar-day vs trading-day audit — fixed 8 sites across all
+  families (morning's `prev = report_date - 1 day` was breaking every
+  Monday + post-holiday open)
+- #13 Noon report drops sections that have no data at this slot (vs
+  rendering empty placeholders)
+- #15 Cross-asset HK / 期货 strict staleness gate
+- #19 Noon prefetch + freshness check no longer pulls/validates EOD-only
+  tables noon doesn't display
+
+**Engineering bugs found during UI overhaul**
+- M5: noon `_build_n11_review_hooks` now `insert_judgment(...)` so evening
+  §08 中报判断 Review can load them (was always empty)
+- MC4: macro §07 sector tags use `.ifa-pill` chips with up/down tone
+  (was concatenated text "资源品工业金属化工")
+- A2: `_chain_review.html` strip_prefix macro handles nested + slash-variant
+  duplicates (`A股端A股端...` / `下游/A 股下游/A股...`)
+- T2: tech "潜在蓄势待发标的池" section removed entirely (low-value empty
+  placeholder)
+- T4: tech morning news lookback 24h → 36h + keyword expansion (was missing
+  prev-trade-day evening news)
+
+**Slot cutoff / SW realtime aggregation**
+- New `ifa/families/market/_sw_realtime.py` — synthesizes SW L1/L2 sector
+  pct from member rt_k snapshots (TuShare's `rt_min_daily` + `stk_mins`
+  reject SW codes); MV-weighted by T-1 `daily_basic.total_mv`
+- Slot cutoff coverage extended to macro / asset / tech `fetch_*` (4
+  families now uniform: today+noon|evening → realtime, morning/historical
+  → EOD with strict staleness gate)
 
 ### Added — Research core complete; TA in progress; Stock Intel deferred
 
