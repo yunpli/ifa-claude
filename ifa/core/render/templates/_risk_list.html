@@ -11,19 +11,37 @@
     {% if c.summary %}<span class="ifa-risk-summary__text">{{ c.summary }}</span>{% endif %}
   </div>
   {% endif %}
-  <ul class="ifa-risk-list">
+  <div class="ifa-risk-grid">
     {% for r in c.risks %}
-    <li class="ifa-risk-list__item ifa-risk-list__item--{{ r.confidence_class or 'med' }}">
-      <div class="ifa-risk-list__title">{{ r.risk }}</div>
-      <div class="ifa-risk-list__detail">
-        <span class="ifa-risk-list__label">触发条件</span><span>{{ r.trigger or '—' }}</span>
-        <span class="ifa-risk-list__label">可能影响</span><span>{{ r.possible_impact or '—' }}</span>
-        <span class="ifa-risk-list__label">观察指标</span><span>{{ r.watch_indicator or '—' }}</span>
-        {% if r.data_timing %}<span class="ifa-risk-list__label">数据时点</span><span>{{ r.data_timing }}</span>{% endif %}
+    {%- set lvl = (r.severity or r.confidence_class or 'med') | lower -%}
+    {%- set kind = 'high' if lvl in ['high','高','严重'] else ('low' if lvl in ['low','低','轻','warning'] else 'medium') -%}
+    <article class="ifa-risk-card ifa-risk-card--{{ kind }}">
+      <header class="ifa-risk-card__head">
+        <span class="ifa-risk-card__badge ifa-risk-card__badge--{{ kind }}">
+          {{ '⚠ 高' if kind == 'high' else ('● 低' if kind == 'low' else '▲ 中') }}
+        </span>
+        <h3 class="ifa-risk-card__title">{{ r.risk }}</h3>
+      </header>
+      <div class="ifa-risk-card__field">
+        <span class="ifa-risk-card__lbl">触发条件</span>
+        <span class="ifa-risk-card__val">{{ r.trigger or '—' }}</span>
       </div>
-    </li>
+      <div class="ifa-risk-card__field">
+        <span class="ifa-risk-card__lbl">可能影响</span>
+        <span class="ifa-risk-card__val">{{ r.possible_impact or '—' }}</span>
+      </div>
+      <div class="ifa-risk-card__field">
+        <span class="ifa-risk-card__lbl">观察指标</span>
+        <span class="ifa-risk-card__val">{{ r.watch_indicator or '—' }}</span>
+      </div>
+      {% if r.data_timing %}
+      <div class="ifa-risk-card__footer">
+        <span class="ifa-risk-card__time">{{ r.data_timing }}</span>
+      </div>
+      {% endif %}
+    </article>
     {% endfor %}
-  </ul>
+  </div>
 </section>
 <style>
 .ifa-risk-summary{display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 14px;background:var(--paper-tint);border-radius:4px;border:1px solid var(--rule);}
@@ -32,4 +50,24 @@
 .ifa-risk-summary__level--medium,.ifa-risk-summary__level--中{background:#fffbeb;color:#92400e;}
 .ifa-risk-summary__level--low,.ifa-risk-summary__level--低{background:var(--down-soft);color:var(--down);}
 .ifa-risk-summary__text{font-size:13px;color:var(--ink-2);line-height:1.5;}
+
+.ifa-risk-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;}
+@media(min-width:1024px){.ifa-risk-grid{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:680px){.ifa-risk-grid{grid-template-columns:1fr;}}
+.ifa-risk-card{position:relative;border:1px solid var(--rule);border-radius:6px;padding:14px 16px 12px;background:var(--paper);page-break-inside:avoid;overflow:hidden;}
+.ifa-risk-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
+.ifa-risk-card--high::before{background:var(--up);}
+.ifa-risk-card--medium::before{background:var(--accent-2);}
+.ifa-risk-card--low::before{background:var(--down);}
+.ifa-risk-card__head{display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px dashed var(--rule);}
+.ifa-risk-card__badge{flex-shrink:0;font-size:10.5px;font-weight:700;letter-spacing:.04em;padding:2px 8px;border-radius:999px;line-height:1.6;height:fit-content;}
+.ifa-risk-card__badge--high{background:var(--up-soft);color:var(--up);}
+.ifa-risk-card__badge--medium{background:#fffbeb;color:#92400e;}
+.ifa-risk-card__badge--low{background:var(--down-soft);color:var(--down);}
+.ifa-risk-card__title{font-family:var(--font-serif);font-size:14.5px;font-weight:600;color:var(--ink);margin:0;line-height:1.45;}
+.ifa-risk-card__field{display:grid;grid-template-columns:64px 1fr;gap:8px;margin:6px 0;font-size:12.5px;line-height:1.55;color:var(--ink-2);align-items:baseline;}
+.ifa-risk-card__lbl{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-muted);padding-top:2px;white-space:nowrap;}
+.ifa-risk-card__val{overflow-wrap:anywhere;}
+.ifa-risk-card__footer{margin-top:8px;padding-top:8px;border-top:1px solid var(--rule-soft);}
+.ifa-risk-card__time{font-size:10.5px;color:var(--ink-muted);font-style:italic;}
 </style>

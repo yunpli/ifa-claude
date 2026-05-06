@@ -2,41 +2,47 @@
 {% set all_hypos = c.hypotheses or [] %}
 {% set first_batch = all_hypos[:5] %}
 {% set rest_batch = all_hypos[5:] %}
+{# Reusable hypothesis card with 01/02 numbered prefix, mirroring _review_hooks. #}
+{% macro hypo_card(h, idx) %}
+<article class="ifa-hypo-card">
+  <header class="ifa-hypo-card__head">
+    <span class="ifa-hypo-card__num">{{ '%02d'|format(idx) }}</span>
+    <h3 class="ifa-hypo-card__title">{{ h.hypothesis or '—' }}</h3>
+    {% if h.confidence %}
+    <span class="ifa-hypo-card__conf ifa-hypo-card__conf--{{ (h.confidence or 'medium') | lower }}">
+      {{ h.confidence | upper }}
+    </span>
+    {% endif %}
+  </header>
+  {% if h.validation_method %}
+  <p class="ifa-hypo-card__field"><strong>验证方式</strong>{{ h.validation_method }}</p>
+  {% endif %}
+  {% if h.review_rule %}
+  <p class="ifa-hypo-card__field ifa-hypo-card__field--rule"><strong>通过判定</strong>{{ h.review_rule }}</p>
+  {% endif %}
+  <div class="ifa-hypo-card__meta">
+    {% if h.observation_window %}
+    <span class="ifa-pill" data-tone="accent">{{ h.observation_window }}</span>
+    {% endif %}
+    {% for sec in (h.related_markets_or_sectors or []) %}
+      {% if sec %}<span class="ifa-pill">{{ sec }}</span>{% endif %}
+    {% endfor %}
+  </div>
+</article>
+{% endmacro %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
   {% if all_hypos %}
-  <ul class="ifa-hypo-list">
-    {% for h in first_batch %}
-    <li class="ifa-hypo-list__item">
-      <div class="ifa-hypo-list__title">{{ h.hypothesis }}</div>
-      <div class="ifa-hypo-list__detail">
-        <span class="ifa-hypo-list__label">验证方式</span><span>{{ h.validation_method or '—' }}</span>
-        <span class="ifa-hypo-list__label">观察窗口</span><span>{{ h.observation_window or '—' }}</span>
-        <span class="ifa-hypo-list__label">关联板块</span><span>{{ (h.related_markets_or_sectors or []) | join('、') or '—' }}</span>
-        <span class="ifa-hypo-list__label">通过判定</span><span>{{ h.review_rule or '—' }}</span>
-        <span class="ifa-hypo-list__label">置信度</span><span>{{ h.confidence or '—' }}</span>
-      </div>
-    </li>
-    {% endfor %}
-  </ul>
+  <div class="ifa-hypo-grid">
+    {% for h in first_batch %}{{ hypo_card(h, loop.index) }}{% endfor %}
+  </div>
   {% if rest_batch %}
   <details class="ifa-list-expand">
     <summary>展开更多假设（共 {{ all_hypos | length }} 条）</summary>
     <div class="ifa-list-expand__body">
-      <ul class="ifa-hypo-list">
-        {% for h in rest_batch %}
-        <li class="ifa-hypo-list__item">
-          <div class="ifa-hypo-list__title">{{ h.hypothesis }}</div>
-          <div class="ifa-hypo-list__detail">
-            <span class="ifa-hypo-list__label">验证方式</span><span>{{ h.validation_method or '—' }}</span>
-            <span class="ifa-hypo-list__label">观察窗口</span><span>{{ h.observation_window or '—' }}</span>
-            <span class="ifa-hypo-list__label">关联板块</span><span>{{ (h.related_markets_or_sectors or []) | join('、') or '—' }}</span>
-            <span class="ifa-hypo-list__label">通过判定</span><span>{{ h.review_rule or '—' }}</span>
-            <span class="ifa-hypo-list__label">置信度</span><span>{{ h.confidence or '—' }}</span>
-          </div>
-        </li>
-        {% endfor %}
-      </ul>
+      <div class="ifa-hypo-grid">
+        {% for h in rest_batch %}{{ hypo_card(h, loop.index + first_batch | length) }}{% endfor %}
+      </div>
     </div>
   </details>
   {% endif %}
@@ -44,3 +50,19 @@
   <div class="ifa-empty">今日无待验证假设。</div>
   {% endif %}
 </section>
+<style>
+.ifa-hypo-grid{display:grid;grid-template-columns:1fr;gap:14px;}
+@media(min-width:720px){.ifa-hypo-grid{grid-template-columns:repeat(2,1fr);gap:16px;}}
+.ifa-hypo-card{position:relative;border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:2px;padding:16px 18px 14px 60px;background:var(--paper);page-break-inside:avoid;}
+.ifa-hypo-card__head{margin-bottom:8px;display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;}
+.ifa-hypo-card__num{position:absolute;left:16px;top:16px;font-family:var(--font-serif);font-size:22px;font-weight:600;color:var(--accent);letter-spacing:-0.02em;line-height:1;}
+.ifa-hypo-card__title{flex:1;font-family:var(--font-serif);font-size:15px;font-weight:600;color:var(--ink);line-height:1.5;margin:0;}
+.ifa-hypo-card__conf{flex-shrink:0;font-size:9.5px;font-weight:700;letter-spacing:.06em;padding:2px 8px;border-radius:999px;align-self:flex-start;line-height:1.6;}
+.ifa-hypo-card__conf--high{background:var(--up-soft);color:var(--up);}
+.ifa-hypo-card__conf--medium{background:#fffbeb;color:#92400e;}
+.ifa-hypo-card__conf--low{background:var(--rule-soft);color:var(--ink-muted);}
+.ifa-hypo-card__field{font-size:13px;line-height:1.6;color:var(--ink-2);margin:6px 0 0 0;}
+.ifa-hypo-card__field strong{display:inline-block;margin-right:8px;padding:1px 8px;font-size:10.5px;font-weight:600;color:var(--ink-muted);background:var(--rule-soft);text-transform:uppercase;letter-spacing:.06em;vertical-align:1px;}
+.ifa-hypo-card__field--rule{padding-bottom:6px;}
+.ifa-hypo-card__meta{margin-top:10px;padding-top:8px;border-top:1px dashed var(--rule);}
+</style>
