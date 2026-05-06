@@ -381,6 +381,11 @@ def run_market_noon(
             t0 = time.monotonic()
             on_log(f"building {label}…")
             sec = builder()
+            if sec is None:
+                # Builder signalled "data not available — drop this section
+                # entirely rather than show an empty placeholder."
+                on_log(f"  {label} skipped (data not available at this slot)")
+                continue
             sections.append(sec)
             insert_section(
                 engine, report_run_id=run.report_run_id,

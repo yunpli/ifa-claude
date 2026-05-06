@@ -129,7 +129,7 @@ def prefetch_market_data(
     on_log("computing whole-A breadth + 涨跌停 + 连板高度…")
     breadth = mdata.fetch_breadth(tushare, on_date=on_date, slot=slot, engine=engine)
     on_log("fetching SW industry rotation (sw_daily)…")
-    sw_rotation = mdata.fetch_sw_rotation(tushare, on_date=on_date)
+    sw_rotation = mdata.fetch_sw_rotation(tushare, on_date=on_date, slot=slot, engine=engine)
     on_log("fetching main-line candidates (SW L2 dynamic)…")
     main_lines = mdata.fetch_main_lines(engine, on_date=on_date)
     on_log("fetching top fund-flow stocks…")
@@ -425,11 +425,16 @@ def build_three_aux_section(ctx: MarketCtx, *, order: int, title: str, key: str)
     }
 
 
-def build_rotation_section(ctx: MarketCtx, *, order: int, title: str, key: str) -> dict:
+def build_rotation_section(ctx: MarketCtx, *, order: int, title: str, key: str) -> dict | None:
     valid_sw = [s for s in ctx.sw_rotation if s.pct_change is not None]
     valid_sw.sort(key=lambda s: s.pct_change or 0, reverse=True)
     valid_main = [s for s in ctx.main_lines if s.pct_change is not None]
     valid_main.sort(key=lambda s: s.pct_change or 0, reverse=True)
+    # If the data layer has nothing (e.g., noon EOD endpoints empty AND realtime
+    # path also failed), drop the entire section rather than render an empty
+    # table. Caller filters None.
+    if not valid_sw and not valid_main:
+        return None
     items = valid_sw[:6] + valid_sw[-3:] + valid_main[:6]   # 强 + 弱 + 主线候选
     bulk = []
     for i, s in enumerate(items):

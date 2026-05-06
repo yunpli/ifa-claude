@@ -551,8 +551,42 @@ class SectorBar:
     rank: int | None = None
 
 
-def fetch_sw_rotation(client: TuShareClient, *, on_date: dt.date) -> list[SectorBar]:
-    """All 31 SW level-1 industries via sw_daily (uses pct_change, not pct_chg)."""
+def fetch_sw_rotation(client: TuShareClient, *, on_date: dt.date,
+                       slot: str = "morning", engine=None) -> list[SectorBar]:
+    """All 31 SW level-1 industries.
+
+    Slot routing (consistent with the rest of the SW realtime plumbing):
+      today + (noon|evening) → MV-weighted realtime aggregation from member
+                                 rt_k snapshots (via market._sw_realtime).
+      morning + historical replay → sw_daily EOD with strict staleness gate.
+
+    sw_daily is EOD only — at noon today it returns T-1 silently. Without
+    the staleness gate below, the rotation section would show T-1's pct_change
+    labeled as today's. Now: if row.trade_date != on_date, pct_change=None
+    and the section drops the row.
+    """
+    is_today = on_date == _today_bjt()
+    if is_today and slot in ("noon", "evening") and engine is not None:
+        from ifa.families.market._sw_realtime import compute_sw_realtime_snapshot
+        codes = [c for c, _ in SW_LEVEL1]
+        agg = compute_sw_realtime_snapshot(client, engine, on_date=on_date,
+                                              sw_codes=codes, level="l1")
+        out: list[SectorBar] = []
+        for code, name in SW_LEVEL1:
+            v = agg.get(code, {})
+            out.append(SectorBar(
+                code=code, name=name,
+                close=v.get("close"),
+                pct_change=v.get("pct_change"),
+                trade_date=v.get("trade_date"),
+            ))
+        valid = [s for s in out if s.pct_change is not None]
+        valid.sort(key=lambda s: s.pct_change or 0, reverse=True)
+        for i, s in enumerate(valid):
+            s.rank = i + 1
+        return out
+
+    # EOD / historical path
     end = on_date.strftime("%Y%m%d")
     start = (on_date - dt.timedelta(days=8)).strftime("%Y%m%d")
     out: list[SectorBar] = []
@@ -565,13 +599,15 @@ def fetch_sw_rotation(client: TuShareClient, *, on_date: dt.date) -> list[Sector
             out.append(SectorBar(code, name, None, None, None)); continue
         df = df.sort_values("trade_date")
         row = df.iloc[-1]
+        row_td = _d(str(row["trade_date"]))
+        # Staleness gate — don't surface T-1 close as today's pct_change.
+        is_current = row_td == on_date
         out.append(SectorBar(
             code=code, name=name,
-            close=_f(row.get("close")),
-            pct_change=_f(row.get("pct_change")),
-            trade_date=_d(str(row["trade_date"])),
+            close=_f(row.get("close")) if is_current else None,
+            pct_change=_f(row.get("pct_change")) if is_current else None,
+            trade_date=row_td,
         ))
-    # Rank by pct_change desc
     valid = [s for s in out if s.pct_change is not None]
     valid.sort(key=lambda s: s.pct_change or 0, reverse=True)
     for i, s in enumerate(valid):
