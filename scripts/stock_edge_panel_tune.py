@@ -28,7 +28,10 @@ from pathlib import Path
 from sqlalchemy import text
 
 from ifa.core.db import get_engine
-from ifa.families.stock.backtest.optimizer import fit_global_preset_via_panel
+from ifa.families.stock.backtest.optimizer import (
+    fit_global_preset_successive_halving,
+    fit_global_preset_via_panel,
+)
 from ifa.families.stock.backtest.panel_evaluator import (
     bootstrap_rank_ic_lift,
     evaluate_overlay_on_panel,
@@ -102,6 +105,7 @@ def main() -> int:
     parser.add_argument("--no-warmstart", action="store_true", help="Disable IC-derived warmstart")
     parser.add_argument("--no-negative-weights", action="store_true", help="Disable negative weights for inverted signals")
     parser.add_argument("--search-algo", choices=("random", "tpe"), default="random", help="Search algorithm (default 'random'; 'tpe' uses Optuna TPE sampler)")
+    parser.add_argument("--successive-halving", action="store_true", help="Use 3-stage successive halving (broad → narrow → fine); ignores --n-iterations")
     parser.add_argument("--auto-promote", action="store_true", help="Apply gates; if passed, write YAML variant")
     parser.add_argument("--variant-output", default=None, help="Where to write YAML variant (default: side-by-side .variant.yaml)")
     parser.add_argument("--base-yaml", default="ifa/families/stock/params/stock_edge_v2.2.yaml")
@@ -213,16 +217,27 @@ def main() -> int:
             fold_results = []
             t0 = time.monotonic()
             for i, (train_rows, val_rows) in enumerate(folds):
-                fold_artifact = fit_global_preset_via_panel(
-                    train_rows, as_of_date=as_of, base_params=base,
-                    universe=f"{args.universe_id}_top{args.top}_fold{i}",
-                    max_candidates=args.max_candidates,
-                    n_iterations=args.n_iterations,
-                    use_ic_warmstart=not args.no_warmstart,
-                    allow_negative_weights=not args.no_negative_weights,
-                    search_algo=args.search_algo,
-                    on_progress=None,
-                )
+                if args.successive_halving:
+                    fold_artifact = fit_global_preset_successive_halving(
+                        train_rows, as_of_date=as_of, base_params=base,
+                        universe=f"{args.universe_id}_top{args.top}_fold{i}",
+                        total_budget=args.max_candidates,
+                        use_ic_warmstart=not args.no_warmstart,
+                        allow_negative_weights=not args.no_negative_weights,
+                        search_algo=args.search_algo,
+                        on_progress=None,
+                    )
+                else:
+                    fold_artifact = fit_global_preset_via_panel(
+                        train_rows, as_of_date=as_of, base_params=base,
+                        universe=f"{args.universe_id}_top{args.top}_fold{i}",
+                        max_candidates=args.max_candidates,
+                        n_iterations=args.n_iterations,
+                        use_ic_warmstart=not args.no_warmstart,
+                        allow_negative_weights=not args.no_negative_weights,
+                        search_algo=args.search_algo,
+                        on_progress=None,
+                    )
                 val_panel = panel_matrix_from_rows(val_rows)
                 val_baseline = evaluate_overlay_on_panel(val_panel, {}, base)
                 val_tuned = evaluate_overlay_on_panel(val_panel, fold_artifact.overlay, base)
@@ -291,18 +306,31 @@ def main() -> int:
     if not k_fold_done:
         print(f"\n[4/4] Running search ({args.max_candidates} candidates × {args.n_iterations} iterations over decision_layer space)...")
         t0 = time.monotonic()
-        artifact = fit_global_preset_via_panel(
-            search_rows,
-            as_of_date=as_of,
-            base_params=base,
-            universe=f"{args.universe_id}_top{args.top}",
-            max_candidates=args.max_candidates,
-            n_iterations=args.n_iterations,
-            use_ic_warmstart=not args.no_warmstart,
-            allow_negative_weights=not args.no_negative_weights,
-            search_algo=args.search_algo,
-            on_progress=lambda p: print(f"      iter {p.get('iteration', 0)} cand {p['candidate']}/{p['total']} score={p['score']:.4f} best={p['best_score']:.4f}") if p.get("candidate", 0) % max(1, args.max_candidates // 8) == 0 else None,
-        )
+        if args.successive_halving:
+            artifact = fit_global_preset_successive_halving(
+                search_rows,
+                as_of_date=as_of,
+                base_params=base,
+                universe=f"{args.universe_id}_top{args.top}",
+                total_budget=args.max_candidates,
+                use_ic_warmstart=not args.no_warmstart,
+                allow_negative_weights=not args.no_negative_weights,
+                search_algo=args.search_algo,
+                on_progress=None,
+            )
+        else:
+            artifact = fit_global_preset_via_panel(
+                search_rows,
+                as_of_date=as_of,
+                base_params=base,
+                universe=f"{args.universe_id}_top{args.top}",
+                max_candidates=args.max_candidates,
+                n_iterations=args.n_iterations,
+                use_ic_warmstart=not args.no_warmstart,
+                allow_negative_weights=not args.no_negative_weights,
+                search_algo=args.search_algo,
+                on_progress=lambda p: print(f"      iter {p.get('iteration', 0)} cand {p['candidate']}/{p['total']} score={p['score']:.4f} best={p['best_score']:.4f}") if p.get("candidate", 0) % max(1, args.max_candidates // 8) == 0 else None,
+            )
         search_elapsed = time.monotonic() - t0
         print(f"      search: {search_elapsed:.2f}s ({artifact.candidate_count}/{search_elapsed:.1f}s = {artifact.candidate_count/max(search_elapsed, 0.001):.0f} cand/sec, {artifact.metrics.get('search_iterations', 1)} iterations)")
 

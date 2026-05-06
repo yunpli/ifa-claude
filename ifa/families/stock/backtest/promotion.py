@@ -405,7 +405,11 @@ def evaluate_promotion_gates(
     search_history = src.get("search_history") if isinstance(src, Mapping) else None
     if search_history and len(search_history) >= 3:
         # Take last 3 iter_best entries (skip baseline + warmstart labels)
-        iter_bests = [h for h in search_history if str(h.get("label", "")).startswith("iter_")]
+        # Recognise both plain (iter_X_best) and successive-halving (stageN_iter_X_best) labels
+        iter_bests = [
+            h for h in search_history
+            if "iter_" in str(h.get("label", "")) and str(h.get("label", "")) != "ic_warmstart"
+        ]
         if len(iter_bests) >= 3:
             recent = [float(h.get("score", 0.0)) for h in iter_bests[-3:]]
             mean = sum(recent) / 3

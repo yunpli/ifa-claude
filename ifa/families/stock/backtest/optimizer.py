@@ -77,6 +77,8 @@ def fit_global_preset_via_panel(
     use_ic_warmstart: bool = True,
     allow_negative_weights: bool = True,
     search_algo: str = "random",
+    bounds_override: Mapping[str, tuple[float, float]] | None = None,
+    initial_overlay: Mapping[str, float] | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
     progress_every: int = 32,
 ) -> "TuningArtifact":
@@ -109,22 +111,27 @@ def fit_global_preset_via_panel(
     from .objectives import panel_only_overlay_bounds
 
     panel = panel_matrix_from_rows(panel_rows)
-    bounds = panel_only_overlay_bounds()
-
-    # YAML overrides
-    raw = base_params.get("tuning", {}).get("search_bounds", {})
-    if isinstance(raw, Mapping):
-        for key, value in raw.items():
-            if isinstance(value, (list, tuple)) and len(value) == 2 and key in bounds:
-                low, high = float(value[0]), float(value[1])
-                if low < high:
-                    bounds[str(key)] = (low, high)
+    if bounds_override is not None:
+        bounds = dict(bounds_override)
+    else:
+        bounds = panel_only_overlay_bounds()
+        # YAML overrides
+        raw = base_params.get("tuning", {}).get("search_bounds", {})
+        if isinstance(raw, Mapping):
+            for key, value in raw.items():
+                if isinstance(value, (list, tuple)) and len(value) == 2 and key in bounds:
+                    low, high = float(value[0]), float(value[1])
+                    if low < high:
+                        bounds[str(key)] = (low, high)
 
     # Phase 3-A: warm-start from per-signal IC
     ic_priors = compute_signal_ic_priors(panel) if use_ic_warmstart else {}
-    if use_ic_warmstart and any(ic_priors.values()):
+    if initial_overlay is not None:
+        # Successive-halving stage continuation: prefer caller-supplied overlay
+        warmstart = dict(initial_overlay)
+    elif use_ic_warmstart and any(ic_priors.values()):
         warmstart = build_ic_warmstart_overlay(ic_priors, allow_negative=allow_negative_weights)
-        if allow_negative_weights:
+        if allow_negative_weights and bounds_override is None:
             bounds = negative_weight_bounds_for_panel(bounds, ic_priors, threshold_invert=-0.20)
     else:
         warmstart = {}
@@ -291,6 +298,152 @@ def fit_global_preset_via_panel(
         history_rows=panel.n_rows,
         created_at=dt.datetime.now(dt.timezone.utc),
         namespace=f"stock_edge/global_preset/panel/{universe}/{as_of_date:%Y%m%d}",
+        objective_version=str(metrics.get("objective_version", "stock_edge_5_10_20_v1")),
+    )
+
+
+def fit_global_preset_successive_halving(
+    panel_rows,
+    *,
+    as_of_date: dt.date,
+    base_params: Mapping[str, Any],
+    universe: str = "top_liquidity_500",
+    total_budget: int = 1024,
+    use_ic_warmstart: bool = True,
+    allow_negative_weights: bool = True,
+    search_algo: str = "tpe",
+    on_progress: Callable[[dict[str, Any]], None] | None = None,
+    stage_budgets: tuple[int, int, int] = (4, 2, 1),
+    stage_widths: tuple[float, float, float] = (1.0, 0.25, 0.10),
+) -> "TuningArtifact":
+    """3-stage successive halving wrapper around fit_global_preset_via_panel (T2.2).
+
+    Stage A (broad):   full bounds, total_budget × ratio[0] / sum(ratio) trials
+    Stage B (narrow):  ±25% of bound width around stage A best, ×ratio[1] trials
+    Stage C (fine):    ±10% around stage B best, ×ratio[2] trials
+
+    Default stage_budgets=(4,2,1) means budget split 4/7 → 2/7 → 1/7.
+
+    Returns the best artifact across all stages with full search_history accumulated.
+    """
+    from .panel_evaluator import (
+        panel_matrix_from_rows,
+        compute_signal_ic_priors,
+        build_ic_warmstart_overlay,
+        negative_weight_bounds_for_panel,
+    )
+    from .objectives import panel_only_overlay_bounds
+
+    panel = panel_matrix_from_rows(panel_rows)
+
+    # Initial bounds (with negative-weight expansion if applicable)
+    bounds_full = panel_only_overlay_bounds()
+    raw = base_params.get("tuning", {}).get("search_bounds", {})
+    if isinstance(raw, Mapping):
+        for key, value in raw.items():
+            if isinstance(value, (list, tuple)) and len(value) == 2 and key in bounds_full:
+                low, high = float(value[0]), float(value[1])
+                if low < high:
+                    bounds_full[str(key)] = (low, high)
+    if use_ic_warmstart and allow_negative_weights:
+        ic_priors = compute_signal_ic_priors(panel)
+        if any(ic_priors.values()):
+            bounds_full = negative_weight_bounds_for_panel(bounds_full, ic_priors, threshold_invert=-0.20)
+
+    # Total budget split across stages by stage_budgets ratios
+    total_ratio = sum(stage_budgets)
+    stage_n = [max(1, total_budget * r // total_ratio) for r in stage_budgets]
+
+    cumulative_history: list[dict[str, Any]] = []
+    cumulative_evaluated = 0
+    best_overlay: dict[str, float] = {}
+    best_score = -999.0
+    best_artifact = None
+
+    for stage_idx, (n_trials, width_factor) in enumerate(zip(stage_n, stage_widths)):
+        # Per-stage bounds: stage 0 uses full; stages 1+ narrow around best_overlay
+        if stage_idx == 0:
+            stage_bounds = dict(bounds_full)
+            stage_initial = None  # use IC warmstart from inner call
+        else:
+            stage_bounds = {}
+            for k, (low, high) in bounds_full.items():
+                center = float(best_overlay.get(k, (low + high) / 2.0))
+                width = (high - low) * width_factor
+                # Half-width on each side around center, clipped to original bounds
+                stage_low = max(low, center - width / 2.0)
+                stage_high = min(high, center + width / 2.0)
+                if stage_high - stage_low < 1e-6:
+                    # Degenerate: keep tiny window around center
+                    stage_low = max(low, center - 0.005)
+                    stage_high = min(high, center + 0.005)
+                stage_bounds[k] = (stage_low, stage_high)
+            stage_initial = dict(best_overlay)
+
+        # Inner fit
+        sub_artifact = fit_global_preset_via_panel(
+            panel_rows,
+            as_of_date=as_of_date,
+            base_params=base_params,
+            universe=f"{universe}_sh{stage_idx}",
+            max_candidates=n_trials,
+            n_iterations=1,                # halving stages don't multi-iter
+            use_ic_warmstart=(stage_idx == 0 and use_ic_warmstart),
+            allow_negative_weights=allow_negative_weights,
+            search_algo=search_algo,
+            bounds_override=stage_bounds,
+            initial_overlay=stage_initial,
+            on_progress=on_progress,
+            progress_every=max(1, n_trials // 4),
+        )
+        # Aggregate
+        cumulative_evaluated += sub_artifact.candidate_count
+        # Re-label history entries with stage info
+        sh = sub_artifact.metrics.get("search_history", [])
+        for entry in sh:
+            entry_copy = dict(entry)
+            entry_copy["stage"] = stage_idx
+            entry_copy["label"] = f"stage{stage_idx}_{entry_copy.get('label','')}"
+            cumulative_history.append(entry_copy)
+        if sub_artifact.objective_score > best_score:
+            best_overlay = dict(sub_artifact.overlay)
+            best_score = sub_artifact.objective_score
+            best_artifact = sub_artifact
+        # Always update best_overlay seed for next stage even if score didn't improve
+        # (so next stage searches around current best, not a worse stage's best)
+        elif sub_artifact.overlay:
+            # Use current best for next stage's center; do not overwrite best_overlay
+            pass
+
+    if best_artifact is None:
+        # Edge case: nothing happened; return a degenerate artifact
+        return fit_global_preset_via_panel(
+            panel_rows, as_of_date=as_of_date, base_params=base_params,
+            universe=universe, max_candidates=total_budget, n_iterations=1,
+            use_ic_warmstart=use_ic_warmstart, allow_negative_weights=allow_negative_weights,
+            search_algo=search_algo,
+        )
+
+    # Replace artifact's history with cumulative + add stage budgets
+    metrics = dict(best_artifact.metrics)
+    metrics["search_history"] = cumulative_history
+    metrics["search_iterations"] = len(stage_n)
+    metrics["successive_halving_stages"] = list(stage_n)
+    metrics["successive_halving_widths"] = list(stage_widths)
+    return TuningArtifact(
+        ts_code="__GLOBAL__",
+        as_of_trade_date=as_of_date,
+        kind="global_preset",
+        base_param_hash=best_artifact.base_param_hash,
+        overlay=best_overlay,
+        objective_score=best_score,
+        metrics=metrics,
+        candidate_count=cumulative_evaluated,
+        history_start=best_artifact.history_start,
+        history_end=best_artifact.history_end,
+        history_rows=panel.n_rows,
+        created_at=dt.datetime.now(dt.timezone.utc),
+        namespace=f"stock_edge/global_preset/sh/{universe}/{as_of_date:%Y%m%d}",
         objective_version=str(metrics.get("objective_version", "stock_edge_5_10_20_v1")),
     )
 
