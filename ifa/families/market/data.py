@@ -256,23 +256,116 @@ class BreadthSnap:
     consec_streak_dist: dict[int, int] = field(default_factory=dict)  # {streak: count}
 
 
-def fetch_breadth(client: TuShareClient, *, on_date: dt.date) -> BreadthSnap:
+def _fetch_realtime_breadth_snapshot(client: TuShareClient, *, on_date: dt.date) -> dict | None:
+    """Aggregate whole-A breadth from rt_k (intraday cumulative snapshot) +
+    stk_limit (today's up/down limit prices). Used during noon/evening of a
+    live trading day when EOD `daily` isn't published yet.
+
+    rt_k returns: ts_code, pre_close, open, high, low, close, vol, amount, num
+    Cumulative since 09:30 — at 11:30 reflects morning session, post 15:00 reflects
+    full day. Slot cutoff is enforced by WHEN this function is called (caller
+    decides timing; data itself has no timestamp granularity).
+
+    Returns dict shaped like the EOD `daily` aggregate or None on failure.
+    """
+    chunks = []
+    for pattern in ("6*.SH", "0*.SZ", "3*.SZ"):
+        try:
+            df = client.call("rt_k", ts_code=pattern)
+            if df is not None and not df.empty:
+                chunks.append(df)
+        except Exception:
+            continue
+    if not chunks:
+        return None
+    df = pd.concat(chunks, ignore_index=True).drop_duplicates(subset=["ts_code"])
+    # Stocks must have valid pre_close + close
+    df = df[df["pre_close"].notna() & df["close"].notna() & (df["pre_close"] > 0)]
+    if df.empty:
+        return None
+    df["pct_chg"] = (df["close"] - df["pre_close"]) / df["pre_close"] * 100
+    out = {
+        "total_amount": float(df["amount"].sum()) / 1e8 / 1e4,  # 元 → 亿 → 万亿
+        "up_count": int((df["pct_chg"] > 0).sum()),
+        "down_count": int((df["pct_chg"] < 0).sum()),
+        "flat_count": int((df["pct_chg"] == 0).sum()),
+        "avg_pct_change": float(df["pct_chg"].mean()),
+        "limit_up_count": None,
+        "limit_down_count": None,
+    }
+    # Join with stk_limit to get realtime limit-up / limit-down counts.
+    # Prefer pre-market CSV cache (scripts/premarket_warm_cache.py) when present
+    # to save the API round trip; fall back to live API if missing.
+    df_lim = None
+    try:
+        from pathlib import Path as _Path
+        cache = _Path(__file__).parent.parent.parent.parent / "var" / "cache" / f"stk_limit_{on_date.isoformat()}.csv"
+        if cache.exists():
+            df_lim = pd.read_csv(cache, dtype={"ts_code": str})
+    except Exception:
+        pass
+    if df_lim is None or df_lim.empty:
+        try:
+            df_lim = client.call("stk_limit", trade_date=on_date.strftime("%Y%m%d"))
+        except Exception:
+            df_lim = None
+    if df_lim is not None and not df_lim.empty:
+        try:
+            merged = df.merge(df_lim[["ts_code", "up_limit", "down_limit"]], on="ts_code", how="left")
+            # Small tolerance (0.5 cent) handles float rounding
+            up_hit = (merged["close"] >= merged["up_limit"] - 0.005) & merged["up_limit"].notna()
+            down_hit = (merged["close"] <= merged["down_limit"] + 0.005) & merged["down_limit"].notna()
+            out["limit_up_count"] = int(up_hit.sum())
+            out["limit_down_count"] = int(down_hit.sum())
+        except Exception:
+            pass
+    return out
+
+
+def fetch_breadth(client: TuShareClient, *, on_date: dt.date,
+                   slot: str = "morning") -> BreadthSnap:
+    """Whole-A breadth aggregate.
+
+    slot/today routing:
+      morning, or any historical replay → EOD `daily` (settled, full-day).
+      today + (noon|evening) → realtime aggregation via rt_k + stk_limit.
+        At noon: rt_k cumulative reflects 09:30→now; if called at 14:00 the
+                 numbers include early afternoon — caller must run at ~11:35
+                 to get true morning-session breadth (or accept the snapshot).
+        At evening: rt_k cumulative ≈ full day; falls back to EOD daily
+                    when EOD becomes available.
+    """
     snap = BreadthSnap(trade_date=on_date, total_amount=None, total_amount_prev=None,
                        up_count=None, down_count=None, flat_count=None,
                        avg_pct_change=None, limit_up_count=None, limit_down_count=None,
                        broke_limit_count=None, broke_limit_pct=None,
                        max_consec_streak=None)
     end = on_date.strftime("%Y%m%d")
-    try:
-        df = client.call("daily", trade_date=end)
-        if df is not None and not df.empty:
-            snap.total_amount = float(df["amount"].sum()) / 1e5 / 1e4   # 千元→亿→万亿 (1万亿=1e9千元)
-            snap.up_count = int((df["pct_chg"] > 0).sum())
-            snap.down_count = int((df["pct_chg"] < 0).sum())
-            snap.flat_count = int((df["pct_chg"] == 0).sum())
-            snap.avg_pct_change = float(df["pct_chg"].mean())
-    except Exception:
-        pass
+    is_today = on_date == _today_bjt()
+    used_realtime = False
+    if is_today and slot in ("noon", "evening"):
+        agg = _fetch_realtime_breadth_snapshot(client, on_date=on_date)
+        if agg is not None:
+            snap.total_amount = agg["total_amount"]
+            snap.up_count = agg["up_count"]
+            snap.down_count = agg["down_count"]
+            snap.flat_count = agg["flat_count"]
+            snap.avg_pct_change = agg["avg_pct_change"]
+            snap.limit_up_count = agg["limit_up_count"]
+            snap.limit_down_count = agg["limit_down_count"]
+            snap.trade_date = on_date
+            used_realtime = True
+    if not used_realtime:
+        try:
+            df = client.call("daily", trade_date=end)
+            if df is not None and not df.empty:
+                snap.total_amount = float(df["amount"].sum()) / 1e5 / 1e4   # 千元→亿→万亿
+                snap.up_count = int((df["pct_chg"] > 0).sum())
+                snap.down_count = int((df["pct_chg"] < 0).sum())
+                snap.flat_count = int((df["pct_chg"] == 0).sum())
+                snap.avg_pct_change = float(df["pct_chg"].mean())
+        except Exception:
+            pass
     # previous day amount
     for back in range(1, 8):
         prev_end = (on_date - dt.timedelta(days=back)).strftime("%Y%m%d")
