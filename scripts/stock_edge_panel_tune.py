@@ -101,6 +101,7 @@ def main() -> int:
     parser.add_argument("--n-iterations", type=int, default=3, help="Search iterations (default 3)")
     parser.add_argument("--no-warmstart", action="store_true", help="Disable IC-derived warmstart")
     parser.add_argument("--no-negative-weights", action="store_true", help="Disable negative weights for inverted signals")
+    parser.add_argument("--search-algo", choices=("random", "tpe"), default="random", help="Search algorithm (default 'random'; 'tpe' uses Optuna TPE sampler)")
     parser.add_argument("--auto-promote", action="store_true", help="Apply gates; if passed, write YAML variant")
     parser.add_argument("--variant-output", default=None, help="Where to write YAML variant (default: side-by-side .variant.yaml)")
     parser.add_argument("--base-yaml", default="ifa/families/stock/params/stock_edge_v2.2.yaml")
@@ -219,6 +220,7 @@ def main() -> int:
                     n_iterations=args.n_iterations,
                     use_ic_warmstart=not args.no_warmstart,
                     allow_negative_weights=not args.no_negative_weights,
+                    search_algo=args.search_algo,
                     on_progress=None,
                 )
                 val_panel = panel_matrix_from_rows(val_rows)
@@ -298,6 +300,7 @@ def main() -> int:
             n_iterations=args.n_iterations,
             use_ic_warmstart=not args.no_warmstart,
             allow_negative_weights=not args.no_negative_weights,
+            search_algo=args.search_algo,
             on_progress=lambda p: print(f"      iter {p.get('iteration', 0)} cand {p['candidate']}/{p['total']} score={p['score']:.4f} best={p['best_score']:.4f}") if p.get("candidate", 0) % max(1, args.max_candidates // 8) == 0 else None,
         )
         search_elapsed = time.monotonic() - t0

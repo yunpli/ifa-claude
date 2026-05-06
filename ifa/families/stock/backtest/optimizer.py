@@ -76,6 +76,7 @@ def fit_global_preset_via_panel(
     n_iterations: int = 3,
     use_ic_warmstart: bool = True,
     allow_negative_weights: bool = True,
+    search_algo: str = "random",
     on_progress: Callable[[dict[str, Any]], None] | None = None,
     progress_every: int = 32,
 ) -> "TuningArtifact":
@@ -85,12 +86,18 @@ def fit_global_preset_via_panel(
     → decision_layer._horizon_score` aggregation (cached signal_map). Search restricted
     to `decision_layer.horizons.*` (the actually load-bearing params for 5/10/20).
 
-    Phase 3 search algorithm:
+    Phase 3 search algorithms (`search_algo`):
+      - 'random': gaussian sampling around best-so-far with shrinking width
+                  (Phase 3 v1, IC warmstart + multi-iter)
+      - 'tpe':    Optuna TPE sampler (Phase 3 v2 / T2.1) — Bayesian sample-efficient,
+                  warmstart enqueued as first trial; multi-iter is informational
+                  only since TPE accumulates evidence across all trials
+
+    Common machinery:
       1. Warm-start: per-signal IC priors → IC-derived overlay as iteration-0 center
       2. Negative weights: signals with IC < -0.20 get bound (-1.50, 1.80) — model
          learns to invert strongly-inverted signals (validated +0.557 lift on 10d)
-      3. Multi-iteration with shrinking width: each iteration centers on previous best
-         with σ shrinking 0.30 → 0.18 → 0.10. Caps at n_iterations or convergence.
+      3. Multi-iteration with shrinking width (random) or single study (tpe)
     """
     from .panel_evaluator import (
         evaluate_overlay_on_panel,
@@ -156,42 +163,109 @@ def fit_global_preset_via_panel(
     width_schedule = [0.30, 0.18, 0.10, 0.07, 0.05]   # σ in fraction of bound width
 
     total_evaluated = 0
-    for it in range(n_iterations):
-        rng = random.Random(int(hashlib.sha256(f"{seed_root}:iter{it}".encode()).hexdigest()[:12], 16))
-        width_factor = width_schedule[min(it, len(width_schedule) - 1)]
-        center_overlay = dict(best_overlay)
-        for cand_idx in range(candidates_per_iter):
-            overlay: dict[str, Any] = {}
+    if search_algo == "tpe":
+        # ── Optuna TPE search (T2.1) ──────────────────────────
+        import optuna
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+        seed_int = int(hashlib.sha256(f"{seed_root}:tpe".encode()).hexdigest()[:12], 16) % (2**31)
+        sampler = optuna.samplers.TPESampler(
+            seed=seed_int,
+            multivariate=True,
+            group=True,
+            n_startup_trials=max(10, max_candidates // 16),  # initial random exploration
+        )
+        study = optuna.create_study(direction="maximize", sampler=sampler)
+
+        # Enqueue warmstart as first trial — Optuna will evaluate it with its own
+        # trial machinery so it's recorded and informs TPE
+        if warmstart:
+            ws_for_optuna = {k: v for k, v in warmstart.items() if k in bounds}
+            for k in keys:
+                if k not in ws_for_optuna:
+                    ws_for_optuna[k] = _center_value(k, {})
+            # Clip to bounds
+            for k, v in list(ws_for_optuna.items()):
+                low, high = bounds[k]
+                ws_for_optuna[k] = max(low, min(high, float(v)))
+            study.enqueue_trial(ws_for_optuna)
+
+        def _objective(trial):
+            overlay: dict[str, float] = {}
             for key in keys:
                 low, high = bounds[key]
-                center = _center_value(key, center_overlay)
-                center = max(low, min(high, center))
-                width = (high - low) * width_factor
-                value = max(low, min(high, rng.gauss(center, width)))
-                overlay[key] = round(value, 6)
+                overlay[key] = trial.suggest_float(key, low, high)
             metrics = evaluate_overlay_on_panel(panel, overlay, base_params)
             score = float(metrics.get("composite_objective", {}).get("score", 0.0))
-            total_evaluated += 1
-            if score > best_score:
-                best_overlay, best_metrics, best_score = dict(overlay), metrics, score
-            if on_progress and (total_evaluated % progress_every == 0):
+            trial.set_user_attr("metrics_payload", metrics)
+            return score
+
+        # Run trials in chunks so we can update progress + record per-iteration best
+        for it in range(n_iterations):
+            chunk_size = candidates_per_iter
+            study.optimize(_objective, n_trials=chunk_size, show_progress_bar=False)
+            total_evaluated = len(study.trials)
+            if on_progress:
                 elapsed = time.monotonic() - started
                 on_progress({
                     "iteration": it,
                     "candidate": total_evaluated,
                     "total": max_candidates,
-                    "score": round(score, 6),
-                    "best_score": round(best_score, 6),
+                    "score": round(study.trials[-1].value or 0.0, 6),
+                    "best_score": round(study.best_value, 6),
                     "elapsed_seconds": round(elapsed, 2),
                 })
-        history.append({"iteration": it, "score": best_score, "label": f"iter_{it}_best"})
+            history.append({"iteration": it, "score": study.best_value, "label": f"iter_{it}_best"})
+            # Soft convergence
+            if it >= 2:
+                recent = [h["score"] for h in history[-3:]]
+                mean = sum(recent) / 3
+                if mean > 0 and (max(recent) - min(recent)) / mean < 0.02:
+                    break
 
-        # Convergence check (G8-style, soft)
-        if it >= 2:
-            recent = [h["score"] for h in history[-3:]]
-            mean = sum(recent) / 3
-            if mean > 0 and (max(recent) - min(recent)) / mean < 0.02:
-                break
+        if study.best_value > best_score:
+            best_score = float(study.best_value)
+            best_overlay = {k: round(float(v), 6) for k, v in study.best_params.items()}
+            best_metrics = study.best_trial.user_attrs.get("metrics_payload", best_metrics)
+
+    else:
+        # ── Random gaussian search around best-so-far (Phase 3 v1) ─
+        for it in range(n_iterations):
+            rng = random.Random(int(hashlib.sha256(f"{seed_root}:iter{it}".encode()).hexdigest()[:12], 16))
+            width_factor = width_schedule[min(it, len(width_schedule) - 1)]
+            center_overlay = dict(best_overlay)
+            for cand_idx in range(candidates_per_iter):
+                overlay: dict[str, Any] = {}
+                for key in keys:
+                    low, high = bounds[key]
+                    center = _center_value(key, center_overlay)
+                    center = max(low, min(high, center))
+                    width = (high - low) * width_factor
+                    value = max(low, min(high, rng.gauss(center, width)))
+                    overlay[key] = round(value, 6)
+                metrics = evaluate_overlay_on_panel(panel, overlay, base_params)
+                score = float(metrics.get("composite_objective", {}).get("score", 0.0))
+                total_evaluated += 1
+                if score > best_score:
+                    best_overlay, best_metrics, best_score = dict(overlay), metrics, score
+                if on_progress and (total_evaluated % progress_every == 0):
+                    elapsed = time.monotonic() - started
+                    on_progress({
+                        "iteration": it,
+                        "candidate": total_evaluated,
+                        "total": max_candidates,
+                        "score": round(score, 6),
+                        "best_score": round(best_score, 6),
+                        "elapsed_seconds": round(elapsed, 2),
+                    })
+            history.append({"iteration": it, "score": best_score, "label": f"iter_{it}_best"})
+
+            # Convergence check (G8-style, soft)
+            if it >= 2:
+                recent = [h["score"] for h in history[-3:]]
+                mean = sum(recent) / 3
+                if mean > 0 and (max(recent) - min(recent)) / mean < 0.02:
+                    break
 
     metrics = dict(best_metrics)
     metrics["panel_n_rows"] = panel.n_rows
@@ -202,6 +276,7 @@ def fit_global_preset_via_panel(
     metrics["lift_vs_baseline"] = round(best_score - baseline_score, 6)
     metrics["used_ic_warmstart"] = use_ic_warmstart
     metrics["allowed_negative_weights"] = allow_negative_weights
+    metrics["search_algo"] = search_algo
     return TuningArtifact(
         ts_code="__GLOBAL__",
         as_of_trade_date=as_of_date,
