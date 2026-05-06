@@ -107,7 +107,8 @@ def main() -> int:
     parser.add_argument("--search-algo", choices=("random", "tpe"), default="random", help="Search algorithm (default 'random'; 'tpe' uses Optuna TPE sampler)")
     parser.add_argument("--successive-halving", action="store_true", help="Use 3-stage successive halving (broad → narrow → fine); ignores --n-iterations")
     parser.add_argument("--auto-promote", action="store_true", help="Apply gates; if passed, write YAML variant")
-    parser.add_argument("--variant-output", default=None, help="Where to write YAML variant (default: side-by-side .variant.yaml)")
+    parser.add_argument("--variant-output", default=None, help="Where to write YAML variant (default: side-by-side .variant.yaml; ignored if --apply-to-baseline)")
+    parser.add_argument("--apply-to-baseline", action="store_true", help="Overwrite the base YAML directly (with .bak_<ts> backup); ideal for weekly cron")
     parser.add_argument("--base-yaml", default="ifa/families/stock/params/stock_edge_v2.2.yaml")
     parser.add_argument("--oos", action="store_true", help="Walk-forward OOS: tune on older half, gate on newer half")
     parser.add_argument("--train-fraction", type=float, default=0.5, help="OOS train fraction (default 0.5)")
@@ -450,7 +451,13 @@ def main() -> int:
         print(f"\n  → {decision.summary}")
 
         base_yaml = Path(args.base_yaml)
-        variant_path = Path(args.variant_output) if args.variant_output else base_yaml.with_suffix(".variant.yaml")
+        if args.apply_to_baseline:
+            variant_path = base_yaml
+            print(f"      [apply-to-baseline] gates pass → will overwrite {base_yaml} with backup")
+        elif args.variant_output:
+            variant_path = Path(args.variant_output)
+        else:
+            variant_path = base_yaml.with_suffix(".variant.yaml")
         reject_dir = Path("/Users/neoclaw/claude/ifaenv/manifests/stock_edge_global_promotion/rejected")
         result = auto_promote_if_passing(
             decision,

@@ -36,12 +36,17 @@ def prepare_report_params(
     calendar: TradingCalendar | None = None,
     base_params: dict | None = None,
 ) -> ReportTuningResult:
-    """Prepare params for report generation.
+    """Prepare params for report generation — single-stock overlay only.
 
-    With `tuning.enabled: false`, this is a no-op except for attaching audit
-    metadata. When enabled, it checks a fresh pre-report overlay artifact for
-    the target stock; if stale or missing, it runs bounded single-stock tuning
-    before report generation.
+    Architectural simplification (post T1.4): the legacy global_preset JSON overlay
+    layer is gone; YAML baseline is the single source of truth for global params,
+    updated weekly by the panel-based tuner via auto_promote_if_passing. Only the
+    per-stock pre_report_overlay JSON layer remains at runtime.
+
+    With `tuning.enabled: false` this is a no-op except for attaching audit
+    metadata. When enabled, checks a fresh pre-report overlay artifact for the
+    target stock; if stale or missing, runs bounded single-stock tuning before
+    report generation.
     """
     params = base_params or load_params()
     tuning_cfg = params.get("tuning", {})
@@ -55,25 +60,17 @@ def prepare_report_params(
         )
 
     ctx = build_context(request, engine=engine, calendar=calendar, params=params)
-    global_cfg = tuning_cfg.get("global_preset", {})
     overlay_cfg = tuning_cfg.get("pre_report_overlay", {})
     ttl_days = int(overlay_cfg.get("ttl_days", tuning_cfg.get("per_stock_ttl_days", 10)))
-    global_ttl_days = int(global_cfg.get("artifact_ttl_days", ttl_days))
     min_history_rows = int(overlay_cfg.get("min_history_rows", tuning_cfg.get("min_history_rows", 360)))
     max_history_rows = int(overlay_cfg.get("max_history_rows", tuning_cfg.get("max_history_rows", 900)))
     max_candidates = int(overlay_cfg.get("max_candidates", 64))
 
-    global_artifact = _compatible_global_artifact(
-        params,
-        reference_datetime=request.requested_at,
-        ttl_days=global_ttl_days,
-        enabled=bool(global_cfg.get("enabled", False)),
-    )
-    params_after_global = apply_param_overlay(params, global_artifact.overlay) if global_artifact else dict(params)
-    global_file = str(artifact_path(global_artifact)) if global_artifact else None
+    base = dict(params)
+    base_hash = params_hash(base)
 
     latest = find_latest_tuning_artifact(ts_code=request.ts_code, kind="pre_report_overlay")
-    latest_if_compatible = latest if latest and latest.base_param_hash == params_hash(params_after_global) else None
+    latest_if_compatible = latest if latest and latest.base_param_hash == base_hash else None
     bars = load_daily_bars_for_tuning(
         engine,
         ts_code=request.ts_code,
@@ -91,7 +88,7 @@ def prepare_report_params(
         max_history_rows=max_history_rows,
     )
     backfill_result: BackfillResult | None = None
-    if _should_backfill_short_history(plan, latest_if_compatible=latest_if_compatible, params=params_after_global):
+    if _should_backfill_short_history(plan, latest_if_compatible=latest_if_compatible, params=base):
         backfill_result = backfill_core_stock_window(
             engine,
             request.ts_code,
@@ -121,22 +118,19 @@ def prepare_report_params(
         plan_reason = plan.reason
     if not plan.should_tune and latest_if_compatible:
         return _with_artifacts(
-            params_after_global,
-            global_artifact=global_artifact,
+            base,
+            global_artifact=None,
             single_artifact=latest_if_compatible,
             status="reused",
             reason=plan_reason,
-            global_file_path=global_file,
+            global_file_path=None,
             single_file_path=str(artifact_path(latest_if_compatible)),
         )
     if not plan.should_tune:
         tuned = attach_tuning_runtime(
-            params_after_global,
+            base,
             status="skipped",
             reason=plan_reason,
-            global_artifact_path=global_file,
-            global_objective_score=global_artifact.objective_score if global_artifact else None,
-            global_candidate_count=global_artifact.candidate_count if global_artifact else None,
         )
         return ReportTuningResult(
             params=tuned,
@@ -144,25 +138,23 @@ def prepare_report_params(
             reason=plan_reason,
             artifact=None,
             artifact_file=None,
-            global_artifact=global_artifact,
-            global_artifact_file=global_file,
         )
 
     artifact = fit_pre_report_overlay(
         bars,
         ts_code=request.ts_code,
         as_of_trade_date=ctx.as_of.as_of_trade_date,
-        base_params=params_after_global,
+        base_params=base,
         max_candidates=max_candidates,
     )
     file_path = str(write_tuning_artifact(artifact))
     return _with_artifacts(
-        params_after_global,
-        global_artifact=global_artifact,
+        base,
+        global_artifact=None,
         single_artifact=artifact,
         status="generated",
         reason=plan_reason,
-        global_file_path=global_file,
+        global_file_path=None,
         single_file_path=file_path,
     )
 

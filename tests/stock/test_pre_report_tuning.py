@@ -295,32 +295,20 @@ def test_param_overlay_updates_nested_strategy_and_risk_values():
     assert params_hash(overlaid) != params_hash(params)
 
 
-def test_global_then_single_overlay_runtime_path(monkeypatch):
+def test_single_overlay_only_runtime_path(monkeypatch):
+    """Path A (global_preset JSON overlay at runtime) was removed in favour of
+    YAML-as-source-of-truth (variant YAML written by panel-based tuner).
+    Only the per-stock pre_report_overlay JSON layer remains at runtime.
+    """
     from ifa.families.stock.backtest import report_runtime
 
     base = load_params()
     as_of = dt.date(2026, 4, 30)
-    global_artifact = TuningArtifact(
-        ts_code="__GLOBAL__",
-        as_of_trade_date=as_of,
-        kind="global_preset",
-        base_param_hash=params_hash(base),
-        overlay={"aggregate.buy_threshold": 0.60, "cluster_weights.model_ensemble": 1.20},
-        objective_score=0.21,
-        metrics={"objective_version": "stock_edge_5_10_20_v1"},
-        candidate_count=12,
-        history_start=dt.date(2024, 1, 1),
-        history_end=as_of,
-        history_rows=1000,
-        created_at=dt.datetime(2026, 5, 1, tzinfo=dt.UTC),
-        namespace="stock_edge/global_preset/top/20260430",
-    )
-    params_after_global = apply_param_overlay(base, global_artifact.overlay)
     single_artifact = TuningArtifact(
         ts_code="300042.SZ",
         as_of_trade_date=as_of,
         kind="pre_report_overlay",
-        base_param_hash=params_hash(params_after_global),
+        base_param_hash=params_hash(base),   # NEW: hash of plain base, not post-global
         overlay={"aggregate.buy_threshold": 0.64},
         objective_score=0.31,
         metrics={"objective_version": "stock_edge_5_10_20_v1"},
@@ -333,8 +321,6 @@ def test_global_then_single_overlay_runtime_path(monkeypatch):
     )
 
     def fake_find_latest_tuning_artifact(*, ts_code, kind, **_kwargs):
-        if kind == "global_preset":
-            return global_artifact
         if kind == "pre_report_overlay":
             return single_artifact
         return None
@@ -351,12 +337,11 @@ def test_global_then_single_overlay_runtime_path(monkeypatch):
 
     runtime = result.params["_runtime_tuning"]
     assert result.status == "reused"
-    assert result.global_artifact is global_artifact
     assert result.single_artifact is single_artifact
     assert result.params["strategy_matrix"]["aggregate"]["buy_threshold"] == 0.64
-    assert result.params["strategy_matrix"]["cluster_weights"]["model_ensemble"] == 1.20
-    assert runtime["global_artifact_path"]
     assert runtime["single_artifact_path"]
+    # Path A removed: no global artifact applied at runtime
+    assert result.global_artifact is None
 
 
 def test_incompatible_global_hash_is_not_used(monkeypatch):
