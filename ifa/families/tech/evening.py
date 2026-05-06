@@ -490,7 +490,14 @@ def run_tech_evening(
             )
             on_log(f"  {label} done in {time.monotonic()-t0:.1f}s")
 
-        out_path = _render_and_save(run, sections, settings, user=user)
+        from ifa.core.render.staleness import compute_staleness_warning
+        all_boards = [b for boards in ctx.boards_by_layer.values() for b in boards]
+        staleness = compute_staleness_warning(
+            report_date=run.report_date,
+            dated_objects=[*all_boards, *ctx.sw_sectors],
+        )
+        out_path = _render_and_save(run, sections, settings, user=user,
+                                      staleness_warning=staleness)
         finalize_report_run(engine, run, status="succeeded", output_html_path=out_path)
         on_log(f"saved → {out_path}")
         return out_path
@@ -500,7 +507,8 @@ def run_tech_evening(
         raise
 
 
-def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: str) -> Path:
+def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: str,
+                      staleness_warning: str | None = None) -> Path:
     renderer = HtmlRenderer()
     cutoff_bjt_str = fmt_bjt(run.data_cutoff_at)
     generated_bjt_str = fmt_bjt(utc_now(), "%Y-%m-%d %H:%M")
@@ -514,6 +522,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
         "run_mode": run.run_mode.value,
         "report_run_id_short": str(run.report_run_id)[:8],
         "sections": sections,
+        "staleness_warning": staleness_warning,
     }
     html = renderer.render(report=report)
     from ifa.core.report.output import output_dir_for_run

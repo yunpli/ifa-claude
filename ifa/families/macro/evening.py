@@ -490,7 +490,17 @@ def run_macro_evening(
             )
             on_log(f"  {label} done in {time.monotonic()-t0:.1f}s")
 
-        out_path = _render_and_save_evening(run, sections, settings)
+        from ifa.core.render.staleness import compute_staleness_warning
+        # Cross-asset items have `period` strings (YYYY-MM-DD); MarketDay has trade_date.
+        # AssetSnapshot.period is already YYYY-MM-DD per fetch_cross_asset; map to dict
+        # so the helper picks up trade_date.
+        ca_dated = [{"trade_date": a.period} for a in (ctx.cross_asset or []) if a.period]
+        staleness = compute_staleness_warning(
+            report_date=run.report_date,
+            dated_objects=[ctx.market, *ca_dated],
+        )
+        out_path = _render_and_save_evening(run, sections, settings,
+                                              staleness_warning=staleness)
         finalize_report_run(engine, run, status="succeeded", output_html_path=out_path)
         on_log(f"saved → {out_path}")
         return out_path
@@ -537,7 +547,8 @@ def _build_e10_capture(ctx: EveningCtx) -> dict:
     return _retag(sec, "macro_evening.s10_capture", "新闻源抽取宏观数据更新", 10)
 
 
-def _render_and_save_evening(run: ReportRun, sections: list[dict], settings) -> Path:
+def _render_and_save_evening(run: ReportRun, sections: list[dict], settings,
+                               *, staleness_warning: str | None = None) -> Path:
     renderer = HtmlRenderer()
     cutoff_bjt_str = fmt_bjt(run.data_cutoff_at)
     generated_bjt_str = fmt_bjt(utc_now(), "%Y-%m-%d %H:%M")
@@ -551,6 +562,7 @@ def _render_and_save_evening(run: ReportRun, sections: list[dict], settings) -> 
         "run_mode": run.run_mode.value,
         "report_run_id_short": str(run.report_run_id)[:8],
         "sections": sections,
+        "staleness_warning": staleness_warning,
     }
     html = renderer.render(report=report)
 

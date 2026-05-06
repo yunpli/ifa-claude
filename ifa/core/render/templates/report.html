@@ -22,6 +22,9 @@
         {% if report.run_mode == 'test' %}⚠ TEST 测试模式{% elif report.run_mode == 'manual' %}✎ MANUAL 手动运行{% else %}✓ PRODUCTION 生产{% endif %}
       </span>
     </div>
+    {% if report.staleness_warning %}
+    <div class="ifa-banner__staleness">{{ report.staleness_warning }}</div>
+    {% endif %}
     <div class="ifa-banner__short-disclaimer">
       由 Lindenwood Management LLC 编制。仅供信息汇总与研究参考，不构成投资建议。
       <br>
