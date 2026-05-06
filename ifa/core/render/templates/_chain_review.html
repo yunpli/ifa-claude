@@ -1,11 +1,15 @@
 {% set c = s.content_json %}
-{# Strip duplicated label prefix that LLM occasionally emits ("A 股端A股端...") #}
+{# Strip duplicated label prefix that LLM occasionally emits ("A 股端A股端...") .
+   We loop 3 passes through every prefix so even triple-nested dups
+   ("A股端A 股端A股端...") collapse to a clean string. #}
 {% macro strip_prefix(value, prefixes) -%}
-  {%- set v = (value or '').strip() -%}
-  {%- for p in prefixes -%}
-    {%- if v.startswith(p) -%}{%- set v = v[p|length:].lstrip() -%}{%- endif -%}
+  {%- set ns = namespace(v=(value or '').strip()) -%}
+  {%- for _ in range(3) -%}
+    {%- for p in prefixes -%}
+      {%- if ns.v.startswith(p) -%}{%- set ns.v = ns.v[p|length:].lstrip(' ：:') -%}{%- endif -%}
+    {%- endfor -%}
   {%- endfor -%}
-  {{ v }}
+  {{ ns.v }}
 {%- endmacro %}
 <section class="ifa-section">
   {% include "_section_head.html" %}

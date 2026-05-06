@@ -1,10 +1,12 @@
 {% set c = s.content_json %}
 {% macro strip_prefix(value, prefixes) -%}
-  {%- set v = (value or '').strip() -%}
-  {%- for p in prefixes -%}
-    {%- if v.startswith(p) -%}{%- set v = v[p|length:].lstrip(' ：:') -%}{%- endif -%}
+  {%- set ns = namespace(v=(value or '').strip()) -%}
+  {%- for _ in range(3) -%}
+    {%- for p in prefixes -%}
+      {%- if ns.v.startswith(p) -%}{%- set ns.v = ns.v[p|length:].lstrip(' ：:') -%}{%- endif -%}
+    {%- endfor -%}
   {%- endfor -%}
-  {{ v }}
+  {{ ns.v }}
 {%- endmacro %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
@@ -26,12 +28,12 @@
         <div class="ifa-chain-flow__arrow">▶</div>
         <div class="ifa-chain-flow__node ifa-chain-flow__node--mid">
           <span class="ifa-chain-flow__tag">中游</span>
-          <span class="ifa-chain-flow__text">{{ strip_prefix(ch.midstream_impact, ['中游影响', '中游', '中游影响：']) or '—' }}</span>
+          <span class="ifa-chain-flow__text">{{ strip_prefix(ch.midstream_impact, ['中游影响', '中游 影响', '中游影响：', '中游', '影响']) or '—' }}</span>
         </div>
         <div class="ifa-chain-flow__arrow">▶</div>
         <div class="ifa-chain-flow__node ifa-chain-flow__node--down">
           <span class="ifa-chain-flow__tag">下游/A股</span>
-          <span class="ifa-chain-flow__text">{{ strip_prefix(ch.downstream_a_share, ['下游 / A 股', '下游/A股', '下游 / A股', '下游', 'A 股端', 'A股端']) or '—' }}</span>
+          <span class="ifa-chain-flow__text">{{ strip_prefix(ch.downstream_a_share, ['下游 / A 股', '下游/A 股', '下游/A股', '下游 / A股', '下游', '/A 股', '/A股', 'A 股端', 'A股端', 'A 股']) or '—' }}</span>
         </div>
       </div>
       {% if ch.takeaway %}
