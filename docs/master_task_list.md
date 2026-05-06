@@ -1,14 +1,52 @@
-# UI Bug Fix Task List
+# Outstanding Work — Master Task List
 
-**Source**: GitHub issue [#16](https://github.com/yunpli/ifa-claude/issues/16) — 51 UI bugs catalogued from 4/30 baseline regen across 4 families × multiple slots.
+**Two parallel workstreams**:
+1. **Stock Edge tuning** — 调参主工作（前期遗留，10/12 done）
+2. **UI bug fixes** — 4/30 baseline review 发现的 51 个 UI bugs
 
-**Strategy**: Phase order = **E → L → T → C → V** (Engineering, LLM prompts, Templates/Builder, CSS, Verification). Each phase ends with a baseline regen and visual diff against prior version. Engineering bugs first because they change report structure/content; everything downstream is meaningless until structure is stable.
+**Source documents**:
+- Stock Edge: `docs/stock_edge_tuning_work_list.md` (living plan)
+- UI bugs: GitHub issue [#16](https://github.com/yunpli/ifa-claude/issues/16)
+
+**Strategy**: Phase order = **S → E → L → T → C → V** (Stock Edge precursor, then UI: Engineering, LLM prompts, Templates/Builder, CSS, Verification). Each phase ends with a baseline regen / equivalent acceptance + diff against prior version.
+
+Stock Edge first because:
+- It's the longest-running deferred work (Tier 3 still has T3.2/T3.3 + a known engineering precondition)
+- Production-impacting (controls 5d/10d/20d decision scores)
+- Independent from UI work — can be parallelized once decision is made
+- The "调代理不调生产" precondition (S0 below) blocks all downstream tuning until verified
+
+Or **alternative scheduling**:
+- If UI fixes are user-facing-urgent, do UI first (Phase E-V), Stock Edge second
+- If Stock Edge tuning has an analyst pipeline waiting, do it in parallel
+
+User to choose.
 
 **Acceptance gate per phase**:
 1. All tasks in phase done + commit pushed
-2. Re-generate full 9-report 4/30 baseline
-3. Spot-check vs prior version (compare HTML diff)
+2. Re-generate full 9-report 4/30 baseline (UI phases) OR pass tune gates (Stock Edge phase)
+3. Spot-check vs prior version (compare HTML diff / lift metrics)
 4. User sign-off before next phase
+
+---
+
+## Phase S — Stock Edge tuning (3 tasks · est. 3-4 days)
+
+Source: `docs/stock_edge_tuning_work_list.md`. 10/12 done (Tier 1+2 complete, Tier 3 partial). Remaining:
+
+| # | ID | Task | Acceptance |
+|---|---|---|---|
+| **S0** | (precondition) | **Verify "optimizer 调代理不调生产" bug** is fixed (memory: `project_stock_edge_optimizer_surrogate_bug.md`). Before this is verified, ANY tuning result is suspect because optimizer's `_evaluate_overlay` may still be optimizing a 9-term tanh surrogate instead of `compute_strategy_matrix → build_decision_layer`. | After: cite specific commit / file / function showing optimizer wires to production decision layer. If still broken, FIX FIRST before S1/S2. |
+| S1 | T3.2 | ML 模型跨日期复用（2 days complex） — 同股票邻近 PIT 日期共享 sklearn fit；缓存 key = (ts_code, fit_window_start..fit_window_end)；命中率监控 | After: T3.2 acceptance criteria in tuning work list. |
+| S2 | T3.3 | 扩 panel 到 Top 100 × 24 dates（数小时 wall time）— 跑 2400 rows、K=6 folds、产 production-grade variant YAML | After: 20d val rank IC K-fold median ≥ +0.05 + 全部 folds 正向 + bootstrap CI 下界 > 0 + ≥75% regime 桶改善。Pass auto_promote_if_passing. |
+
+**Phase S exit gate**: T3.2 + T3.3 acceptance per `docs/stock_edge_tuning_work_list.md` §0.1. Production variant YAML promoted via `auto_promote_if_passing` + git tag + ledger entry.
+
+**Notes**:
+- T3.2 + T3.3 are sequential (T3.3 depends on T3.2 to be feasible at scale)
+- T3.4 (decision ledger) already done (`b394fdb`)
+- T3.1 (DB I/O batching) already done (`167573e`)
+- Latest results (2026-05-05 K=4 × 50 stocks × 12 dates panel): 5d positive 2/4 folds, 10d positive 2/4, **20d positive 4/4 with median +0.034** (close to +0.05 target)
 
 ---
 
@@ -121,14 +159,19 @@ Catch regressions, double-check accuracy.
 
 | Phase | Tasks | Est. time | Acceptance |
 |---|---|---|---|
-| E (Engineering) | 5 | 4-6h | report structure stable |
-| L (LLM prompts) | 9 | 6-8h | content concise, no hallucination filler |
-| T (Templates / Builder) | 8 | 6-8h | self-fuse working, numbers formatted |
-| C (CSS / Layout) | 12 | 4-6h | mobile + print + TOC + typography |
-| V (Verification) | 4 | 2-3h | nothing regressed, all P0 gone |
-| **Total** | **38 tasks** | **22-31h** | – |
+| **S (Stock Edge tuning)** | 3 | 3-4 days | T3.2 + T3.3 done; production variant YAML auto-promoted; 20d K-fold median ≥ +0.05 |
+| E (UI Engineering) | 5 | 4-6h | report structure stable |
+| L (UI LLM prompts) | 9 | 6-8h | content concise, no hallucination filler |
+| T (UI Templates / Builder) | 8 | 6-8h | self-fuse working, numbers formatted |
+| C (UI CSS / Layout) | 12 | 4-6h | mobile + print + TOC + typography |
+| V (UI Verification) | 4 | 2-3h | nothing regressed, all P0 gone |
+| **Total** | **41 tasks** | **5-7 days** | – |
 
-Note: 51 issue items collapse to 38 tasks because many issues share fixes (e.g., S3 self-fuse pattern in Phase T covers MC1 + A4 + others).
+Note:
+- Stock Edge phase S is **wall-clock days**, not active hours, due to ML training time
+- UI phases (E-V) sum 22-31 active hours of work
+- S0 (precondition verification) is critical: if optimizer surrogate bug is still present, tuning results are meaningless — must investigate first
+- 51 UI issue items collapse to 38 tasks because many issues share fixes (e.g., S3 self-fuse pattern in Phase T covers MC1 + A4 + others)
 
 ---
 
