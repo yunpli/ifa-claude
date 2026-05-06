@@ -106,26 +106,72 @@ def fetch_index_family(client: TuShareClient, *, on_date: dt.date,
 
         # Current snapshot — branch on data source
         if use_realtime:
-            # Today realtime via sina backend
+            # Slot cutoff — noon must reflect 11:30 close, evening must reflect 15:00 close.
+            # If the report happens to run at 14:00 (between sessions) for noon,
+            # using ts.realtime_quote PRICE would pull the 14:00 print (afternoon
+            # session in progress), corrupting "noon" semantics. Same issue at
+            # evening slot if realtime keeps ticking after-hours indications.
+            # Solution: pull rt_min_daily 5MIN bars and pick the bar at the
+            # slot cutoff (or the latest bar before cutoff if cutoff not yet hit).
+            cutoff_hhmm = "11:30" if slot == "noon" else "15:00"
+            cutoff_str = f"{on_date.strftime('%Y-%m-%d')} {cutoff_hhmm}:00"
+            picked_close: float | None = None
+            picked_time: str | None = None
             try:
-                rt = ts.realtime_quote(ts_code=ts_code, src="sina")
-                if rt is not None and not rt.empty:
-                    row = rt.iloc[0]
-                    rt_date = str(row.get("DATE") or "")
-                    rt_price = _f(row.get("PRICE"))
-                    rt_pre = _f(row.get("PRE_CLOSE"))
-                    rt_amount = _f(row.get("AMOUNT"))
-                    expected_date = on_date.strftime("%Y%m%d")
-                    if rt_date == expected_date and rt_price and rt_pre:
-                        snap.close = rt_price
-                        snap.pct_change = (rt_price - rt_pre) / rt_pre * 100
-                        # rt AMOUNT is 元 → convert to 千元 (downstream expects 千元 from index_daily)
-                        snap.amount = (rt_amount / 1000.0) if rt_amount is not None else None
-                        snap.trade_date = on_date
-                        snap.history_close.append(rt_price)
-                        snap.history_dates.append(expected_date)
+                df_min = client.call("rt_min_daily", ts_code=ts_code, freq="5MIN")
+                if df_min is not None and not df_min.empty:
+                    time_col = "time" if "time" in df_min.columns else ("trade_time" if "trade_time" in df_min.columns else None)
+                    if time_col is not None:
+                        df_min = df_min.sort_values(time_col).reset_index(drop=True)
+                        df_min = df_min[df_min[time_col] <= cutoff_str]
+                        if not df_min.empty:
+                            last_bar = df_min.iloc[-1]
+                            picked_close = _f(last_bar.get("close"))
+                            picked_time = str(last_bar.get(time_col))
             except Exception:
                 pass
+
+            # Pre-close (T-1 EOD) — needed to compute pct_change from the picked bar
+            if picked_close is not None:
+                pre_close: float | None = None
+                try:
+                    prev_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d")
+                    prev_start = (on_date - dt.timedelta(days=10)).strftime("%Y%m%d")
+                    df_pre = client.call("index_daily", ts_code=ts_code,
+                                          start_date=prev_start, end_date=prev_end)
+                    if df_pre is not None and not df_pre.empty:
+                        df_pre = df_pre.sort_values("trade_date")
+                        pre_close = _f(df_pre.iloc[-1].get("close"))
+                except Exception:
+                    pass
+                if pre_close:
+                    snap.close = picked_close
+                    snap.pct_change = (picked_close - pre_close) / pre_close * 100
+                    snap.amount = None  # rt_min_daily doesn't aggregate session amount cleanly
+                    snap.trade_date = on_date
+                    snap.history_close.append(picked_close)
+                    snap.history_dates.append(picked_time or on_date.strftime("%Y%m%d"))
+
+            # Fallback to realtime_quote if minute bars missing (rare — early morning before 09:35)
+            if snap.close is None:
+                try:
+                    rt = ts.realtime_quote(ts_code=ts_code, src="sina")
+                    if rt is not None and not rt.empty:
+                        row = rt.iloc[0]
+                        rt_date = str(row.get("DATE") or "")
+                        rt_price = _f(row.get("PRICE"))
+                        rt_pre = _f(row.get("PRE_CLOSE"))
+                        rt_amount = _f(row.get("AMOUNT"))
+                        expected_date = on_date.strftime("%Y%m%d")
+                        if rt_date == expected_date and rt_price and rt_pre:
+                            snap.close = rt_price
+                            snap.pct_change = (rt_price - rt_pre) / rt_pre * 100
+                            snap.amount = (rt_amount / 1000.0) if rt_amount is not None else None
+                            snap.trade_date = on_date
+                            snap.history_close.append(rt_price)
+                            snap.history_dates.append(expected_date)
+                except Exception:
+                    pass
 
             # Evening fallback: if realtime didn't yield (e.g., post-close API delay), try EOD daily for on_date
             if snap.close is None and slot == "evening":
@@ -143,17 +189,50 @@ def fetch_index_family(client: TuShareClient, *, on_date: dt.date,
                 except Exception:
                     pass
         else:
-            # EOD path: morning OR historical replay
-            # Find the row matching on_date (for morning that's T-1 already passed in; for historical that's the target date)
-            if df_hist is not None and not df_hist.empty:
-                last = df_hist.iloc[-1]
-                last_td = _d(str(last.get("trade_date")))
-                if last_td == on_date:
-                    snap.close = _f(last.get("close"))
-                    snap.pct_change = _f(last.get("pct_chg"))
-                    snap.amount = _f(last.get("amount"))
-                    snap.trade_date = last_td
-                # else: stale — keep None
+            # EOD / historical replay path:
+            #   morning           → use df_hist last row (T-1 EOD)
+            #   historical noon   → pick 11:30 bar from stk_mins (NOT the EOD close)
+            #   historical evening → df_hist last row (15:00 EOD)
+            if not is_today and slot == "noon":
+                # Historical noon — pick the 11:30 bar so replay matches production cutoff
+                try:
+                    start_dt = f"{on_date.strftime('%Y-%m-%d')} 09:30:00"
+                    end_dt = f"{on_date.strftime('%Y-%m-%d')} 11:30:00"
+                    df_min = client.call("stk_mins", ts_code=ts_code, freq="5min",
+                                          start_date=start_dt, end_date=end_dt)
+                    if df_min is not None and not df_min.empty:
+                        time_col = "time" if "time" in df_min.columns else ("trade_time" if "trade_time" in df_min.columns else None)
+                        if time_col is not None:
+                            df_min = df_min.sort_values(time_col)
+                            last_bar = df_min.iloc[-1]
+                            picked_close = _f(last_bar.get("close"))
+                            # pre-close from prior trading day's index_daily
+                            prev_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d")
+                            prev_start = (on_date - dt.timedelta(days=10)).strftime("%Y%m%d")
+                            df_pre = client.call("index_daily", ts_code=ts_code,
+                                                  start_date=prev_start, end_date=prev_end)
+                            pre_close = None
+                            if df_pre is not None and not df_pre.empty:
+                                pre_close = _f(df_pre.sort_values("trade_date").iloc[-1].get("close"))
+                            if picked_close and pre_close:
+                                snap.close = picked_close
+                                snap.pct_change = (picked_close - pre_close) / pre_close * 100
+                                snap.trade_date = on_date
+                                snap.history_close.append(picked_close)
+                                snap.history_dates.append(str(last_bar.get(time_col)))
+                except Exception:
+                    pass
+            else:
+                # Morning, or historical evening — last row of index_daily on/before on_date
+                if df_hist is not None and not df_hist.empty:
+                    last = df_hist.iloc[-1]
+                    last_td = _d(str(last.get("trade_date")))
+                    if last_td == on_date:
+                        snap.close = _f(last.get("close"))
+                        snap.pct_change = _f(last.get("pct_chg"))
+                        snap.amount = _f(last.get("amount"))
+                        snap.trade_date = last_td
+                    # else: stale — keep None
         out.append(snap)
     return out
 

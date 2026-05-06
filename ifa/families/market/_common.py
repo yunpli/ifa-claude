@@ -207,17 +207,26 @@ def enrich_market_focus(
         spark_caption = f"近 {history_days} 日趋势（日 K 收盘）"
 
     def _fetch_intraday_5min(ts_code: str, *, until_hhmm: str | None = None) -> tuple[list[float], list[str]]:
-        """Fetch intraday 5min bars.
+        """Fetch intraday 5min bars, hard-cut at slot's official cutoff.
 
-        is_today=True  → pro.rt_min_daily (today's bars from open, realtime)
-        is_today=False → pro.stk_mins (historical minute bars, range query)
+        is_today=True  → pro.rt_min_daily (today's bars from open, realtime).
+                         Even if the report is generated at 14:00 for a noon
+                         slot, we cut at 11:30 — afternoon bars must NOT leak
+                         into the noon view.
+        is_today=False → pro.stk_mins (historical minute bars, range query).
+                         End time of the range is also slot-aware so historical
+                         replay matches production cutoff exactly.
         """
         try:
+            # Slot-aware end time for the historical range query as well —
+            # otherwise stk_mins returns through 15:00 and noon replay would
+            # see afternoon bars.
+            range_end = until_hhmm or "15:00"
             if is_today:
                 df = tushare.call("rt_min_daily", ts_code=ts_code, freq="5MIN")
             else:
                 start_dt = f"{on_date.strftime('%Y-%m-%d')} 09:30:00"
-                end_dt = f"{on_date.strftime('%Y-%m-%d')} 15:00:00"
+                end_dt = f"{on_date.strftime('%Y-%m-%d')} {range_end}:00"
                 df = tushare.call("stk_mins", ts_code=ts_code, freq="5min",
                                    start_date=start_dt, end_date=end_dt)
             if df is None or df.empty:
@@ -226,9 +235,10 @@ def enrich_market_focus(
             if time_col is None:
                 return [], []
             df = df.sort_values(time_col).reset_index(drop=True)
-            if until_hhmm:
-                cutoff = f"{on_date.strftime('%Y-%m-%d')} {until_hhmm}:00"
-                df = df[df[time_col] <= cutoff]
+            # Always apply slot cutoff (covers both is_today rt_min_daily and
+            # any extra rows stk_mins may emit at boundary).
+            cutoff = f"{on_date.strftime('%Y-%m-%d')} {range_end}:00"
+            df = df[df[time_col] <= cutoff]
             closes = [float(v) if pd.notna(v) else None for v in df["close"]]
             times = df[time_col].astype(str).tolist()
             return closes, times
@@ -258,7 +268,7 @@ def enrich_market_focus(
             out["history_close"] = closes
             out["history_dates"] = times
         elif slot == "evening":
-            closes, times = _fetch_intraday_5min(spec.ts_code, until_hhmm=None)
+            closes, times = _fetch_intraday_5min(spec.ts_code, until_hhmm="15:00")
             out["history_close"] = closes
             out["history_dates"] = times
         else:
