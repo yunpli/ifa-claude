@@ -80,7 +80,7 @@ def find_reusable_analysis(
     finds exact stock + mode + data cutoff reusable assets.
     """
     with engine.connect() as conn:
-        row = conn.execute(
+        rows = conn.execute(
             text("""
                 SELECT record_id, ts_code, analysis_type, triggered_at, data_cutoff,
                        status, conclusion_label, conclusion_text, key_levels_json,
