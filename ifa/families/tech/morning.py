@@ -155,6 +155,7 @@ def _build_s1_tone(ctx: TechCtx) -> dict:
 """
     parsed, resp, status = _safe_chat_json(
         ctx.llm, system=prompts.SYSTEM_PERSONA, user=user, max_tokens=1800,
+        required_fields=["headline", "top3"],
     )
     moid = _persist_model_output(ctx, section_key="tech_morning.s1_tone",
                                  prompt_name="tech_morning.s1_tone",

@@ -139,6 +139,7 @@ def _build_s1_tone(ctx: AssetCtx) -> dict:
 """
     parsed, resp, status = _safe_chat_json(
         ctx.llm, system=prompts.SYSTEM_PERSONA, user=user, max_tokens=1800,
+        required_fields=["headline", "top3"],
     )
     moid = _persist_model_output(ctx, section_key="asset_morning.s1_tone",
                                  prompt_name="asset_morning.s1_tone",

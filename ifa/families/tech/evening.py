@@ -137,6 +137,7 @@ def _build_e1_headline(ctx: TechCtx, morning_hyps: list[dict]) -> dict:
 """
     parsed, resp, status = _safe_chat_json(
         ctx.llm, system=prompts.SYSTEM_PERSONA, user=user, max_tokens=1400,
+        required_fields=["headline", "top3"],
     )
     moid = _persist_model_output(ctx, section_key="tech_evening.s1_headline",
                                  prompt_name="tech_evening.s1_headline",

@@ -93,8 +93,19 @@ class RuntimeCtx:
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
 def _safe_chat_json(llm: LLMClient, *, system: str, user: str,
-                     max_tokens: int = 2400) -> tuple[dict | list | None, Any, str]:
-    """Call LLM, parse JSON. Returns (parsed_or_none, raw_response, status)."""
+                     max_tokens: int = 2400,
+                     required_fields: list[str] | None = None,
+                     ) -> tuple[dict | list | None, Any, str]:
+    """Call LLM, parse JSON, optionally validate required fields. Returns
+    (parsed_or_none, raw_response, status).
+
+    If required_fields is provided, every listed key must be present and
+    non-empty in the parsed dict — else we send ONE retry telling the LLM
+    exactly which fields it skipped. List-valued fields ({"top3":[…]}) must
+    have len ≥ 3 to count as populated; this prevents the LLM from returning
+    an empty list and silently failing the schema.
+    """
+    import re
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": user},
@@ -103,17 +114,26 @@ def _safe_chat_json(llm: LLMClient, *, system: str, user: str,
         resp = llm.chat(messages=messages, max_tokens=max_tokens, temperature=0.2)
     except Exception as exc:
         return None, None, f"error: {type(exc).__name__}: {exc}"
-    content = resp.content.strip()
-    if content.startswith("```"):
-        import re
-        m = re.search(r"```(?:json|JSON)?\s*(.*?)```", content, re.DOTALL)
-        if m:
-            content = m.group(1).strip()
-    try:
-        parsed = json.loads(content)
-        return parsed, resp, "parsed"
-    except json.JSONDecodeError:
-        # one stricter retry
+
+    def _strip_fence(text: str) -> str:
+        text = text.strip()
+        if text.startswith("```"):
+            m = re.search(r"```(?:json|JSON)?\s*(.*?)```", text, re.DOTALL)
+            if m:
+                text = m.group(1).strip()
+        return text
+
+    def _try_parse(text: str):
+        try:
+            return json.loads(text), None
+        except json.JSONDecodeError as e:
+            return None, e
+
+    parsed, _err = _try_parse(_strip_fence(resp.content))
+    status = "parsed" if parsed is not None else "parse_failed"
+
+    # JSON-parse retry path (legacy)
+    if parsed is None:
         retry = llm.chat(
             messages=messages + [
                 {"role": "assistant", "content": resp.content[:1000]},
@@ -122,16 +142,73 @@ def _safe_chat_json(llm: LLMClient, *, system: str, user: str,
             max_tokens=max_tokens,
             temperature=0.0,
         )
-        rcontent = retry.content.strip()
-        if rcontent.startswith("```"):
-            import re
-            m = re.search(r"```(?:json|JSON)?\s*(.*?)```", rcontent, re.DOTALL)
-            if m:
-                rcontent = m.group(1).strip()
-        try:
-            return json.loads(rcontent), retry, "fallback_used"
-        except json.JSONDecodeError:
+        parsed, _ = _try_parse(_strip_fence(retry.content))
+        if parsed is None:
             return None, retry, "parse_failed"
+        resp = retry
+        status = "fallback_used"
+
+    # Schema-completeness retry — up to 3 attempts with backoff before
+    # giving up and letting downstream fallback synthesize.
+    if required_fields and isinstance(parsed, dict):
+        import time
+
+        def _missing(p):
+            out = []
+            for f in required_fields:
+                v = p.get(f) if isinstance(p, dict) else None
+                if v is None or (isinstance(v, (list, str)) and len(v) == 0):
+                    out.append(f)
+                elif f == "top3" and isinstance(v, list) and len(v) < 3:
+                    out.append(f)
+            return out
+
+        max_schema_retries = 3
+        backoff_secs = [2, 4, 8]
+        attempt = 0
+        while attempt < max_schema_retries:
+            miss = _missing(parsed)
+            if not miss:
+                break
+            attempt += 1
+            sleep_s = backoff_secs[min(attempt - 1, len(backoff_secs) - 1)]
+            time.sleep(sleep_s)
+            try:
+                retry = llm.chat(
+                    messages=messages + [
+                        {"role": "assistant", "content": json.dumps(parsed, ensure_ascii=False)[:1500]},
+                        {"role": "user", "content": (
+                            f"[第 {attempt}/{max_schema_retries} 次重试] 你之前漏了必填字段："
+                            + "、".join(miss)
+                            + "。请重新输出**完整**的 JSON 对象（保留你已有的字段，补上漏的）。"
+                            + ("`top3` 必须是恰好 3 条字符串数组，每条 ≤22 个汉字，写今日盘中要做的具体动作（盯哪个龙头/板块/位置）。不能空，也不能少于 3 条。"
+                               if "top3" in miss else "")
+                            + " 只返回 JSON，不要解释、不要 markdown 围栏。"
+                        )},
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=0.0,
+                )
+            except Exception:
+                continue
+            retried, _ = _try_parse(_strip_fence(retry.content))
+            if isinstance(retried, dict):
+                merged = dict(parsed)
+                for k, v in retried.items():
+                    if v not in (None, "", []):
+                        merged[k] = v
+                parsed = merged
+                resp = retry
+                still_miss = _missing(parsed)
+                if not still_miss:
+                    return parsed, resp, f"schema_retry_ok_attempt{attempt}"
+        # Exited loop with miss still non-empty
+        if _missing(parsed):
+            status = f"schema_retry_partial_after{attempt}"
+        else:
+            status = f"schema_retry_ok_attempt{attempt}"
+
+    return parsed, resp, status
 
 
 def _persist_model_output(ctx: RuntimeCtx, *, section_key: str, prompt_name: str,
@@ -241,6 +318,7 @@ slot: {SLOT}
 """
     parsed, resp, status = _safe_chat_json(
         ctx.llm, system=prompts.SYSTEM_PERSONA, user=user, max_tokens=1800,
+        required_fields=["headline", "top3"],
     )
     moid = _persist_model_output(ctx, section_key="macro_morning.s1_tone",
                                  prompt_name="macro_morning.s1_tone",

@@ -122,6 +122,7 @@ slot: morning
 """
     parsed, resp, status = _safe_chat_json(
         ctx.llm, system=prompts.SYSTEM_PERSONA, user=user, max_tokens=2200,
+        required_fields=["headline", "top3"],
     )
     moid = _persist_model_output(ctx, section_key="market_morning.s1_tone",
                                   prompt_name="market_morning.s1_tone",

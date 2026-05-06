@@ -139,6 +139,7 @@ def _build_n1_tone(ctx: MarketCtx, morning_hyps: list[dict]) -> dict:
 """
     parsed, resp, status = _safe_chat_json(
         ctx.llm, system=prompts.SYSTEM_PERSONA, user=user, max_tokens=2200,
+        required_fields=["headline", "top3"],
     )
     moid = _persist_model_output(ctx, section_key="market_noon.s1_tone",
                                   prompt_name="market_noon.s1_tone",
@@ -273,6 +274,7 @@ def _build_n11_review_hooks(ctx: MarketCtx, prior: list[dict]) -> dict:
 """
     parsed, resp, status = _safe_chat_json(
         ctx.llm, system=prompts.SYSTEM_PERSONA, user=user, max_tokens=1400,
+        required_fields=["review_hooks"],
     )
     moid = _persist_model_output(ctx, section_key="market_noon.s11_review_hooks",
                                   prompt_name="market_noon.s11_review_hooks",

@@ -148,6 +148,7 @@ def _build_e1_headline(ctx: EveningCtx) -> dict:
 """
     parsed, resp, status = _safe_chat_json(
         ctx.llm, system=prompts.SYSTEM_PERSONA, user=user, max_tokens=1400,
+        required_fields=["headline", "top3"],
     )
     moid = _persist_model_output(ctx, section_key="macro_evening.s1_headline",
                                  prompt_name="macro_evening.s1_headline",
