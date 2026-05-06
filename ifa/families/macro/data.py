@@ -405,9 +405,17 @@ class MarketDay:
 
 def fetch_market_day(client: TuShareClient, *, on_date: dt.date,
                       slot: str = "morning") -> MarketDay:
-    """Whole-A snapshot for macro morning/noon/evening.
+    """Whole-A snapshot for macro morning/evening.
 
-    Slot routing mirrors market.fetch_index_family:
+    Note: macro family currently has no noon report — the slot="noon" branch
+    below is unreachable from production runners. Kept for two reasons:
+      1. API parity with market family (which DOES have noon)
+      2. Future-proof if macro ever adds a noon report
+    The evening realtime path (rt_min_daily + rt_k breadth) is the live value:
+    it covers the ~15:00→17:00 window when TuShare EOD batch hasn't published
+    yet, without which an early-evening run would surface T-1 data.
+
+    Slot routing:
       today + (noon|evening) → rt_min_daily 5MIN bars cut at 11:30 / 15:00,
                                  paired with prior-day index_daily for pre_close
                                  to compute pct_change.

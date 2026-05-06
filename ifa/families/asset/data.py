@@ -320,12 +320,17 @@ def fetch_a_share_sectors(client: TuShareClient, *, on_date: dt.date,
                            engine=None) -> list[SectorBar]:
     """SW industry indexes.
 
+    Note: asset family has no noon report — the slot="noon" branch is
+    unreachable from production runners. Kept for API parity with market
+    family. The evening realtime path is the live value: covers the
+    ~15:00→17:00 window when TuShare sw_daily EOD hasn't published yet.
+
     Slot routing:
       today + (noon|evening) → MV-weighted realtime aggregation from member
                                  rt_k snapshots (via market._sw_realtime).
       morning / historical replay → sw_daily EOD with staleness gate.
 
-    Note: SW codes (`801xxx.SI`) are not supported by rt_min_daily / stk_mins,
+    SW codes (`801xxx.SI`) are not supported by rt_min_daily / stk_mins,
     so intraday sector value must be synthesized from constituents.
     """
     from ifa.core.report.timezones import BJT

@@ -51,6 +51,11 @@ def fetch_board_performance(
 ) -> dict[str, list[BoardSnapshot]]:
     """SW L2 layer boards over ~10 days, keyed by layer_id.
 
+    Note: tech family has no noon report — the slot="noon" branch is
+    unreachable from production runners. Kept for API parity. The evening
+    realtime path covers the ~15:00→17:00 window before TuShare sw_daily
+    EOD publishes.
+
     Slot routing:
       today + (noon|evening) → realtime close/pct from member rt_k aggregation
         (history sparkline still uses sw_daily T-1 EOD series, with realtime
@@ -536,6 +541,9 @@ class SectorBar:
 def fetch_tech_sw_sectors(client: TuShareClient, *, on_date: dt.date,
                             slot: str = "morning", engine=None) -> list[SectorBar]:
     """SW L1 broad TMT reference indices.
+
+    Note: tech has no noon report — slot="noon" is unreachable. Evening
+    realtime path covers the 15:00→17:00 EOD-publish lag.
 
     Slot routing:
       today + (noon|evening) → MV-weighted realtime via member rt_k
