@@ -15,9 +15,10 @@ uv.lock.local
 *.pem
 *.key
 
-# Local runtime artifacts (generated reports, logs, snapshots)
+# Local runtime artifacts (generated reports, logs, snapshots, caches)
 out/
 logs/
+var/
 *.log
 
 # IDE / OS
