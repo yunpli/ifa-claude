@@ -640,12 +640,14 @@ def run_asset_morning(
     on_log(f"[run {str(run.report_run_id)[:8]}] starting Asset morning report for {report_date}")
 
     try:
+        from ifa.core.calendar import prev_trading_day
+        prev_td = prev_trading_day(engine, report_date)  # post-holiday-safe
         on_log("resolving main contracts via fut_daily(trade_date=…) volume rank…")
-        snapshots, used_date = data.resolve_main_contracts(tushare, on_date=report_date - dt.timedelta(days=1))
+        snapshots, used_date = data.resolve_main_contracts(tushare, on_date=prev_td)
         n_ok = sum(1 for s in snapshots.values() if s.data_status == "ok")
         on_log(f"  main contracts resolved: {n_ok}/{len(snapshots)} on {used_date}")
         on_log("attaching 10-day price histories per contract…")
-        data.attach_histories(tushare, snapshots, end_date=report_date - dt.timedelta(days=1), days=10)
+        data.attach_histories(tushare, snapshots, end_date=prev_td, days=10)
         strengths = data.category_strengths(snapshots)
         anomalies = data.detect_anomalies(snapshots)
         on_log(f"  category strengths computed for {len(strengths)} categories; {len(anomalies)} anomaly flags")

@@ -779,7 +779,9 @@ def run_tech_morning(
     on_log(f"[run {str(run.report_run_id)[:8]}] starting Tech morning report for {report_date} user={user}")
 
     try:
-        prev_day = report_date - dt.timedelta(days=1)
+        from ifa.core.calendar import prev_trading_day
+        # Calendar T-1 fails on Mon / post-holiday opens — must be prev TRADING day.
+        prev_day = prev_trading_day(engine, report_date)
         on_log("fetching SW L2 sector performance for tech 5 layers…")
         boards_by_layer = data.fetch_board_performance(tushare, on_date=prev_day, history_days=10, slot="morning")
         on_log("resolving tech sector members (SW PIT)…")

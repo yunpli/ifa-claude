@@ -844,13 +844,15 @@ def run_macro_morning(
     on_log(f"[run {str(run.report_run_id)[:8]}] starting morning report for {report_date} cutoff {fmt_bjt(data_cutoff_at)} BJT")
 
     try:
+        from ifa.core.calendar import prev_trading_day
+        prev_td = prev_trading_day(engine, report_date)  # post-holiday-safe
         # Pre-fetch all data
         on_log("fetching macro panel (cn_gdp/cpi/ppi/pmi/m/sf_month)…")
         panel = data.fetch_macro_panel(tushare)
         on_log("fetching liquidity snapshot (shibor/lpr/fx/hsgt/margin)…")
-        liquidity = data.fetch_liquidity_snapshot(tushare, ref_date=report_date - dt.timedelta(days=1))
+        liquidity = data.fetch_liquidity_snapshot(tushare, ref_date=prev_td)
         on_log("fetching cross-asset (HK / 沪深 / 期货)…")
-        cross_asset = data.fetch_cross_asset(tushare, ref_date=report_date - dt.timedelta(days=1))
+        cross_asset = data.fetch_cross_asset(tushare, ref_date=prev_td)
         on_log("reading macro_text_derived_indicators + macro_policy_event_memory…")
         text_derived = data.fetch_text_derived(engine, since_days=120)
         policy_events = data.fetch_active_policy_events(engine, since_days=14)

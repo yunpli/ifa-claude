@@ -329,7 +329,7 @@ def _fetch_realtime_breadth_snapshot(client: TuShareClient, *, on_date: dt.date)
 
 
 def fetch_breadth(client: TuShareClient, *, on_date: dt.date,
-                   slot: str = "morning") -> BreadthSnap:
+                   slot: str = "morning", engine=None) -> BreadthSnap:
     """Whole-A breadth aggregate.
 
     slot/today routing:
@@ -377,16 +377,34 @@ def fetch_breadth(client: TuShareClient, *, on_date: dt.date,
                 snap.avg_pct_change = float(df["pct_chg"].mean())
         except Exception:
             pass
-    # previous day amount
-    for back in range(1, 8):
-        prev_end = (on_date - dt.timedelta(days=back)).strftime("%Y%m%d")
+    # Previous trading day's amount.
+    # Using prev_trading_day (trade_cal-backed) instead of brute-force calendar
+    # day stepping — long holidays (Spring Festival 7+ days) would have failed
+    # the old `range(1, 8)` loop.
+    try:
+        from ifa.core.calendar import prev_trading_day
+        prev_td = prev_trading_day(engine, on_date) if engine is not None else None
+    except Exception:
+        prev_td = None
+    if prev_td is not None:
         try:
-            df_prev = client.call("daily", trade_date=prev_end)
+            df_prev = client.call("daily", trade_date=prev_td.strftime("%Y%m%d"))
             if df_prev is not None and not df_prev.empty:
                 snap.total_amount_prev = float(df_prev["amount"].sum()) / 1e5 / 1e4
-                break
         except Exception:
-            continue
+            pass
+    else:
+        # Defensive fallback when engine unavailable — extended to 14 days to
+        # survive Spring Festival.
+        for back in range(1, 14):
+            prev_end = (on_date - dt.timedelta(days=back)).strftime("%Y%m%d")
+            try:
+                df_prev = client.call("daily", trade_date=prev_end)
+                if df_prev is not None and not df_prev.empty:
+                    snap.total_amount_prev = float(df_prev["amount"].sum()) / 1e5 / 1e4
+                    break
+            except Exception:
+                continue
     # Limit-up / limit-down structure on the day.
     # Skip the limit_list_d overwrite when the realtime path supplied counts —
     # limit_list_d is post-close and would either be empty (today, mid-session)
@@ -413,11 +431,22 @@ def fetch_breadth(client: TuShareClient, *, on_date: dt.date,
                 snap.broke_limit_pct = broke / max(snap.limit_up_count + broke, 1)
     except Exception:
         pass
-    # 连板高度: scan last 5 trading days of limit_list_d, group by ts_code
+    # 连板高度: scan last 5 TRADING days of limit_list_d, group by ts_code.
+    # Calendar-day window would conflate weekends/holidays with no-streak days.
     try:
         streaks_by_code: dict[str, int] = defaultdict(int)
-        for back in range(0, 5):
-            d = on_date - dt.timedelta(days=back)
+        from ifa.core.calendar import trading_days_between
+        try:
+            window = trading_days_between(engine, on_date - dt.timedelta(days=14), on_date) if engine is not None else None
+            scan_dates = (window[-5:] if window else None)
+        except Exception:
+            scan_dates = None
+        if scan_dates is None:
+            # Fallback when trade_cal unavailable — keep the old calendar walk
+            # but extend to 10 days so weekends + short holidays don't shrink the
+            # window below 5 trading days.
+            scan_dates = [on_date - dt.timedelta(days=back) for back in range(0, 10)]
+        for d in scan_dates:
             try:
                 df_d = client.call("limit_list_d", trade_date=d.strftime("%Y%m%d"))
             except Exception:

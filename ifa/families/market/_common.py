@@ -127,7 +127,7 @@ def prefetch_market_data(
     on_log(f"fetching index family + history (slot={slot}, on_date={on_date})…")
     indices = mdata.fetch_index_family(tushare, on_date=on_date, history_days=10, slot=slot)
     on_log("computing whole-A breadth + 涨跌停 + 连板高度…")
-    breadth = mdata.fetch_breadth(tushare, on_date=on_date, slot=slot)
+    breadth = mdata.fetch_breadth(tushare, on_date=on_date, slot=slot, engine=engine)
     on_log("fetching SW industry rotation (sw_daily)…")
     sw_rotation = mdata.fetch_sw_rotation(tushare, on_date=on_date)
     on_log("fetching main-line candidates (SW L2 dynamic)…")

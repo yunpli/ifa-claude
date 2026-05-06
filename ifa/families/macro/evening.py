@@ -449,7 +449,7 @@ def run_macro_evening(
         on_log("fetching cross-asset (today best-effort)…")
         cross_asset = data.fetch_cross_asset(tushare, ref_date=report_date)
         on_log("fetching today's A-share market state…")
-        market = data.fetch_market_day(tushare, on_date=report_date, slot="evening")
+        market = data.fetch_market_day(tushare, on_date=report_date, slot="evening", engine=engine)
         on_log("reading text-derived + active policy events…")
         text_derived = data.fetch_text_derived(engine, since_days=120)
         policy_events = data.fetch_active_policy_events(engine, since_days=14)

@@ -83,12 +83,32 @@ def _load_member_map(engine: Engine, *, on_date: dt.date,
     return members
 
 
-def _load_mv_weights(client: TuShareClient, *, on_date: dt.date) -> dict[str, float]:
-    """T-1 daily_basic total_mv (单位 万元) keyed by ts_code. Returns {} on failure."""
-    for back in range(1, 8):
-        td = (on_date - dt.timedelta(days=back)).strftime("%Y%m%d")
+def _load_mv_weights(client: TuShareClient, *, on_date: dt.date,
+                       engine: Engine | None = None) -> dict[str, float]:
+    """T-1 daily_basic total_mv (单位 万元) keyed by ts_code. Returns {} on failure.
+
+    Trade-day-aware: prev_trading_day handles 调休 + holidays correctly.
+    Falls back to a 14-calendar-day brute-force walk if trade_cal unavailable
+    (covers Spring Festival 7-day holiday which would have failed the old
+    range(1, 8) loop)."""
+    candidates: list[dt.date] = []
+    if engine is not None:
         try:
-            df = client.call("daily_basic", trade_date=td)
+            from ifa.core.calendar import prev_trading_day
+            prev = prev_trading_day(engine, on_date)
+            candidates.append(prev)
+            # also queue prev-prev as fallback in case T-1 daily_basic isn't out yet
+            try:
+                candidates.append(prev_trading_day(engine, prev))
+            except Exception:
+                pass
+        except Exception:
+            pass
+    if not candidates:
+        candidates = [on_date - dt.timedelta(days=b) for b in range(1, 14)]
+    for td in candidates:
+        try:
+            df = client.call("daily_basic", trade_date=td.strftime("%Y%m%d"))
             if df is not None and not df.empty and "total_mv" in df.columns:
                 return {r.ts_code: float(r.total_mv) for r in df.itertuples()
                         if r.total_mv is not None and not pd.isna(r.total_mv)}
@@ -137,7 +157,7 @@ def compute_sw_realtime_snapshot(
                      "trade_date": None, "member_count": 0} for c in sw_codes}
     rt_idx = rt.set_index("ts_code")[["close", "pre_close"]]
     members = _load_member_map(engine, on_date=on_date, level=level)
-    weights = _load_mv_weights(client, on_date=on_date)
+    weights = _load_mv_weights(client, on_date=on_date, engine=engine)
     prior = _load_sw_prior_close(client, on_date=on_date, sw_codes=sw_codes)
 
     result: dict[str, dict] = {}

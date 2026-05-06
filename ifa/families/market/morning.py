@@ -321,7 +321,10 @@ def run_market_morning(
     on_log(f"[run {str(run.report_run_id)[:8]}] starting Market morning report for {report_date} user={user}")
 
     try:
-        prev = report_date - dt.timedelta(days=1)
+        from ifa.core.calendar import prev_trading_day
+        # Morning report's "previous day" must be the previous TRADING day.
+        # Calendar T-1 fails on Mondays (= Sunday) and post-holiday opens (= holiday).
+        prev = prev_trading_day(engine, report_date)
         from ifa.core.report.freshness import preflight_freshness_check
         for line in preflight_freshness_check(engine, family="market", expected_date=prev):
             on_log(f"[freshness] ⚠ {line}")

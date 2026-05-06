@@ -404,7 +404,7 @@ class MarketDay:
 
 
 def fetch_market_day(client: TuShareClient, *, on_date: dt.date,
-                      slot: str = "morning") -> MarketDay:
+                      slot: str = "morning", engine=None) -> MarketDay:
     """Whole-A snapshot for macro morning/evening.
 
     Note: macro family currently has no noon report — the slot="noon" branch
@@ -577,13 +577,30 @@ def fetch_market_day(client: TuShareClient, *, on_date: dt.date,
                 md.flat_count = int((df["pct_chg"] == 0).sum())
         except Exception:
             pass
-    # Previous-day amount — always EOD (well-defined)
-    try:
-        prev_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d")
-        df_prev = client.call("daily", trade_date=prev_end)
-        if df_prev is not None and not df_prev.empty:
-            md.total_amount_prev = float(df_prev["amount"].sum()) / 1e5 / 1e4
-    except Exception:
-        pass
+    # Previous TRADING day's amount — calendar-T-1 fails on Mon / post-holiday.
+    prev_td: dt.date | None = None
+    if engine is not None:
+        try:
+            from ifa.core.calendar import prev_trading_day
+            prev_td = prev_trading_day(engine, on_date)
+        except Exception:
+            prev_td = None
+    if prev_td is None:
+        # Fallback: walk back up to 14 calendar days for trade_cal-less envs
+        for back in range(1, 14):
+            try:
+                df_prev = client.call("daily", trade_date=(on_date - dt.timedelta(days=back)).strftime("%Y%m%d"))
+                if df_prev is not None and not df_prev.empty:
+                    md.total_amount_prev = float(df_prev["amount"].sum()) / 1e5 / 1e4
+                    break
+            except Exception:
+                continue
+    else:
+        try:
+            df_prev = client.call("daily", trade_date=prev_td.strftime("%Y%m%d"))
+            if df_prev is not None and not df_prev.empty:
+                md.total_amount_prev = float(df_prev["amount"].sum()) / 1e5 / 1e4
+        except Exception:
+            pass
 
     return md
