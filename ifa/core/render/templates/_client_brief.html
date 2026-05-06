@@ -41,12 +41,8 @@
       </div>
     </div>
   </div>
-  <div class="ifa-client-brief__nav" aria-label="报告阅读路线">
-    {% for item in report.sections[:6] %}
-      {% if item.type != 'disclaimer' %}
-      <span>{{ "%02d"|format(item.order) }} · {{ item.title }}</span>
-      {% endif %}
-    {% endfor %}
-  </div>
+  {# Removed inline 01-06 nav strip — duplicated the global "目录" TOC pills
+     rendered just below in report.html (the global TOC covers ALL sections,
+     this one only showed first 6 — confusing). #}
 </section>
 {% endif %}
