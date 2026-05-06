@@ -1,55 +1,61 @@
 """Pre-flight ETL freshness check for report generation.
 
-Before a family fetches data, we ask the DB: "do the raw tables this report
-depends on actually have data for the expected trade date?" If not, the
-report will run anyway (the data layer's staleness gates will leave fields
-None and the banner will warn) — but operators get a clear log line listing
-exactly which table is behind and how stale it is.
+Before a family fetches data, ask the DB: "do the raw tables this report
+depends on have data through the most recent trading day?"
+
+Trading-day-aware: we use `smartmoney.trade_cal` (via ifa.core.calendar) to
+translate "落后" into trading days, not calendar days. This naturally handles
+weekends, May Day, Chinese New Year, 调休 — without per-call --skip-on-holiday
+gymnastics.
+
+Concretely, for a report scheduled on `expected_date`:
+  - if expected_date is itself a trading day → reference = expected_date
+  - else → reference = prev_trading_day(expected_date)
+  - lag = number of trading days between latest(table.trade_date) and reference
+  - lag = 0  → fresh, no warning
+  - lag ≥ 1 → ETL is behind by N trading days; warn
 
 This is intentionally informational, not a hard fail:
-- Holidays cause legitimate "missing today" rows; failing would block manual
-  historical replay.
-- The data layer already fails closed at the snap-field level.
-- Banner staleness warning already surfaces to the reader.
-
-Use from a family runner:
-
-    from ifa.core.report.freshness import preflight_freshness_check
-    issues = preflight_freshness_check(engine, family="market", expected_date=on_date)
-    for line in issues:
-        on_log(f"[freshness] {line}")
+- Historical replay (manual run for a past date) reads tables that legitimately
+  have no rows past that past date — failing would block the use case.
+- The data layer's per-snap staleness gate already fails closed at field level.
+- Banner staleness warning (Bug #4) already surfaces to the reader.
 """
 from __future__ import annotations
 
 import datetime as dt
-from typing import Iterable
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from ifa.core.calendar import (
+    is_trading_day,
+    prev_trading_day,
+    trading_days_between,
+)
 
-# Per-family list of (table, friendly_name, allowed_lag_days).
-# allowed_lag_days = 0 means "must have today's row to be fresh".
-# allowed_lag_days = N means "any row within last N days is acceptable" — use
-# for tables that publish monthly / weekly rather than daily.
+
+# Per-family list of (table, friendly_name, allowed_lag_trading_days).
+# allowed_lag = 0 → must have through the reference trading day.
+# allowed_lag = N → any lag up to N trading days is acceptable.
 _FAMILY_TABLES: dict[str, list[tuple[str, str, int]]] = {
     "market": [
-        ("smartmoney.raw_daily",      "全A日行情",     0),
-        ("smartmoney.raw_moneyflow",  "全A资金流",     0),
-        ("smartmoney.raw_index_daily","指数日行情",     0),
-        ("smartmoney.raw_sw_daily",   "申万板块日行情", 0),
+        ("smartmoney.raw_daily",       "全A日行情",       0),
+        ("smartmoney.raw_moneyflow",   "全A资金流",       0),
+        ("smartmoney.raw_index_daily", "指数日行情",       0),
+        ("smartmoney.raw_sw_daily",    "申万板块日行情",   0),
     ],
     "macro": [
-        ("smartmoney.raw_index_daily","指数日行情",   0),
-        ("smartmoney.raw_daily",      "全A日行情",   0),
+        ("smartmoney.raw_index_daily", "指数日行情",   0),
+        ("smartmoney.raw_daily",       "全A日行情",   0),
     ],
     "asset": [
-        ("smartmoney.raw_sw_daily",   "申万板块日行情", 0),
+        ("smartmoney.raw_sw_daily",    "申万板块日行情", 0),
     ],
     "tech": [
-        ("smartmoney.raw_sw_daily",   "申万板块日行情", 0),
-        ("smartmoney.raw_daily",      "全A日行情",     0),
-        ("smartmoney.raw_moneyflow",  "全A资金流",     0),
+        ("smartmoney.raw_sw_daily",    "申万板块日行情", 0),
+        ("smartmoney.raw_daily",       "全A日行情",     0),
+        ("smartmoney.raw_moneyflow",   "全A资金流",     0),
     ],
 }
 
@@ -63,32 +69,65 @@ def _max_trade_date(engine: Engine, table: str) -> dt.date | None:
         return None
 
 
+def _resolve_reference_trading_day(engine: Engine, expected_date: dt.date) -> dt.date:
+    """If expected_date is a trading day, use it; otherwise take the most
+    recent trading day on or before it."""
+    try:
+        if is_trading_day(engine, expected_date):
+            return expected_date
+    except Exception:
+        # trade_cal lookup failed — fall through to prev_trading_day which has
+        # its own fallback path; if that also fails we just return expected_date
+        # and lag will be in calendar days at worst.
+        pass
+    try:
+        return prev_trading_day(engine, expected_date)
+    except Exception:
+        return expected_date
+
+
+def _trading_day_lag(engine: Engine, *, latest: dt.date, reference: dt.date) -> int:
+    """Number of trading days strictly after `latest` up to and including
+    `reference`. Returns 0 when latest >= reference."""
+    if latest >= reference:
+        return 0
+    try:
+        days = trading_days_between(engine, latest + dt.timedelta(days=1), reference)
+        return len(days)
+    except Exception:
+        # Fall back to calendar-day diff if trade_cal not available
+        return (reference - latest).days
+
+
 def preflight_freshness_check(
     engine: Engine,
     *,
     family: str,
     expected_date: dt.date,
 ) -> list[str]:
-    """Return a list of human-readable warning strings (empty when all fresh).
+    """Return human-readable warning strings (empty when all fresh).
 
     Strings have the shape:
-      "申万板块日行情 (smartmoney.raw_sw_daily) latest=2026-04-30, 期望 2026-05-06，落后 4 天"
+      "申万板块日行情 (smartmoney.raw_sw_daily) latest=2026-04-30,
+       期望最近交易日 2026-05-06，落后 1 个交易日"
 
-    Caller decides what to do — log and continue, or escalate to fail-fast.
+    A trading-day lag of 0 means "ETL is up to date with the most recent
+    trading day, even if today happens to be a weekend/holiday."
     """
     spec = _FAMILY_TABLES.get(family, [])
     if not spec:
         return []
+    reference = _resolve_reference_trading_day(engine, expected_date)
     issues: list[str] = []
     for table, friendly, allowed_lag in spec:
         latest = _max_trade_date(engine, table)
         if latest is None:
             issues.append(f"{friendly} ({table}) 无数据可读 — 检查 ETL 是否曾运行")
             continue
-        lag_days = (expected_date - latest).days
-        if lag_days > allowed_lag:
+        lag = _trading_day_lag(engine, latest=latest, reference=reference)
+        if lag > allowed_lag:
             issues.append(
-                f"{friendly} ({table}) latest={latest}, 期望 {expected_date}，"
-                f"落后 {lag_days} 天"
+                f"{friendly} ({table}) latest={latest}, 期望最近交易日 {reference}，"
+                f"落后 {lag} 个交易日"
             )
     return issues
