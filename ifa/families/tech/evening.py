@@ -99,7 +99,7 @@ def _load_morning_hypotheses(engine: Engine, *, report_date: dt.date) -> list[di
 
 # ─── S1: evening headline commentary ───────────────────────────────────────
 
-def _build_e1_headline(ctx: TechCtx) -> dict:
+def _build_e1_headline(ctx: TechCtx, morning_hyps: list[dict]) -> dict:
     sw_blob = "; ".join(f"{b.name} {b.pct_change:+.2f}%"
                          for b in ctx.sw_sectors if b.pct_change is not None)
     layer_summary = []
@@ -110,6 +110,10 @@ def _build_e1_headline(ctx: TechCtx) -> dict:
         if with_data:
             avg = sum(b.pct_change for b in with_data) / len(with_data)
             layer_summary.append(f"  {L.layer_id}: 均 {avg:+.2f}%, 个数 {len(with_data)}/{len(boards)}")
+    morn_block = (
+        "\n".join(f"[{i+1}] {h.get('hypothesis','')}" for i, h in enumerate(morning_hyps[:6]))
+        if morning_hyps else "(无 — 早报未生成或假设为空)"
+    )
     user = f"""
 === 今日 5 层板块 ===
 {chr(10).join(layer_summary)}
@@ -119,6 +123,11 @@ def _build_e1_headline(ctx: TechCtx) -> dict:
 
 === 涨停 tech 个股数 ===
 {len(ctx.limit_up)}
+
+=== 早报 Tech 假设（{len(morning_hyps)} 条；E4 单独逐条复盘）===
+{morn_block}
+
+注意：本节是收盘 headline，需基于今日实际收盘对早报方向做总结，不要写"早报假设未提供"——上面已给。
 
 === 任务 ===
 {prompts.EVENING_HEADLINE_INSTRUCTIONS}
@@ -453,7 +462,7 @@ def run_tech_evening(
 
         sections: list[dict] = []
         for label, builder in [
-            ("E1 headline",      lambda: _build_e1_headline(ctx)),
+            ("E1 headline",      lambda: _build_e1_headline(ctx, morning_hyps)),
             ("E2 layer map",     lambda: _build_e2_layer_map(ctx)),
             ("E3 board recap",   lambda: _build_e3_board_recap(ctx)),
             ("E4 review",        lambda: _build_e4_review(ctx, morning_hyps)),

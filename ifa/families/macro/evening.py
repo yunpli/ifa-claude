@@ -120,6 +120,11 @@ def _build_e1_headline(ctx: EveningCtx) -> dict:
         f"{a.name} {a.pct_change:+.2f}%" if a.pct_change is not None else f"{a.name} 数据缺失"
         for a in ctx.cross_asset[:6]
     )
+    morning_hyps = ctx.morning_hypotheses or []
+    morn_block = (
+        "\n".join(f"[{i+1}] {h.get('hypothesis','')}" for i, h in enumerate(morning_hyps[:6]))
+        if morning_hyps else "(无 — 早报未生成或假设为空)"
+    )
     user = f"""
 === 今日 A 股市场 ===
 {market_blob}
@@ -129,6 +134,11 @@ def _build_e1_headline(ctx: EveningCtx) -> dict:
 
 === 活跃政策事件（最近 3 天） ===
 {json.dumps([{"dim":p.policy_dimension,"sig":p.policy_signal,"title":p.event_title} for p in ctx.policy_events[:8]], ensure_ascii=False)}
+
+=== 早报假设（{len(morning_hyps)} 条；E2 单独逐条复盘）===
+{morn_block}
+
+注意：本节是收盘 headline，需基于今日实际收盘对早报方向做总结，不要写"早报假设未提供"——上面已给。
 
 === 任务 ===
 {prompts.EVENING_HEADLINE_INSTRUCTIONS}

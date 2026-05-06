@@ -96,7 +96,7 @@ def _load_hypotheses(engine, *, report_date: dt.date, slot_report_type: str) -> 
 
 # ─── E1 evening headline ──────────────────────────────────────────────────
 
-def _build_e1_headline(ctx: MarketCtx) -> dict:
+def _build_e1_headline(ctx: MarketCtx, morning_hyps: list[dict], noon_hyps: list[dict]) -> dict:
     breadth = ctx.breadth
     indices = "; ".join(f"{s.name} {s.pct_change:+.2f}%"
                           for s in ctx.indices if s.pct_change is not None)
@@ -105,6 +105,14 @@ def _build_e1_headline(ctx: MarketCtx) -> dict:
     aux_blob = {f: {"headline": ctx.aux_summaries.get(f).headline if ctx.aux_summaries.get(f) else None,
                      "tone_or_state": ctx.aux_summaries.get(f).tone_or_state if ctx.aux_summaries.get(f) else None}
                 for f in ("macro", "asset", "tech")}
+    morn_block = (
+        "\n".join(f"[{i+1}] {h.get('hypothesis','')}" for i, h in enumerate(morning_hyps[:6]))
+        if morning_hyps else "(无 — 早报未生成或假设为空)"
+    )
+    noon_block = (
+        "\n".join(f"[{i+1}] {h.get('hypothesis','')}" for i, h in enumerate(noon_hyps[:6]))
+        if noon_hyps else "(无 — 中报未生成或假设为空)"
+    )
     user = f"""
 === 今日 A 股市场（收盘） ===
 指数: {indices}
@@ -117,6 +125,14 @@ def _build_e1_headline(ctx: MarketCtx) -> dict:
 
 === 三辅报告 ===
 {json.dumps(aux_blob, ensure_ascii=False, indent=2)}
+
+=== 早报假设（{len(morning_hyps)} 条；E7 单独逐条复盘）===
+{morn_block}
+
+=== 中报假设（{len(noon_hyps)} 条；E8 单独逐条复盘）===
+{noon_block}
+
+注意：本节是收盘 headline，需基于今日实际收盘对早/中报方向做总结，不要写"早报假设未提供"——上面已给。
 
 === 任务 ===
 {prompts.EVENING_HEADLINE_INSTRUCTIONS}
@@ -391,6 +407,7 @@ def run_market_evening(
         imp_data, reg_data = enrich_market_focus(
             tushare=tushare, on_date=report_date,
             important=prefetched["important_focus"], regular=prefetched["regular_focus"],
+            slot="evening",
         )
         on_log("loading morning + noon hypotheses…")
         morning_hyps = _load_hypotheses(engine, report_date=report_date, slot_report_type="morning_long")
@@ -404,7 +421,7 @@ def run_market_evening(
 
         sections: list[dict] = []
         for label, builder in [
-            ("E1 headline",     lambda: _build_e1_headline(ctx)),
+            ("E1 headline",     lambda: _build_e1_headline(ctx, morning_hyps, noon_hyps)),
             ("E2 index panel",  lambda: build_index_panel_section(ctx, order=2,
                                        title="指数与市场结构复盘",
                                        key="market_evening.s2_index_panel")),

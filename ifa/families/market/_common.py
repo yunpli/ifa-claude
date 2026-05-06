@@ -156,9 +156,18 @@ def enrich_market_focus(
     *, tushare: TuShareClient, on_date: dt.date,
     important: list[FocusStock], regular: list[FocusStock],
     history_days: int = 10,
+    slot: str = "morning",
 ) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Pull daily/daily_basic/moneyflow + 10-day close history for ALL focus stocks
-    (no tech-only filter)."""
+    """Pull daily/daily_basic/moneyflow + slot-appropriate sparkline data.
+
+    Sparkline 口径（per slot）:
+      - morning: 过去 N 个交易日 EOD 收盘 (`daily`)
+      - noon:    今日 09:30..11:30 上午分时 5MIN K (`rt_min_daily`)
+      - evening: 今日 09:30..15:00 全天分时 5MIN K (`rt_min_daily`)
+
+    Each row's `history_close` holds the close-series, `history_caption` holds the
+    label ("近 10 日趋势 / 今日上午分时 / 今日全天分时") for UI.
+    """
     end = on_date.strftime("%Y%m%d")
     start_h = (on_date - dt.timedelta(days=history_days * 2 + 5)).strftime("%Y%m%d")
     all_codes = list({s.ts_code for s in important + regular})
@@ -185,6 +194,30 @@ def enrich_market_focus(
         if not df_mf.empty else {}
     )
 
+    # Slot-aware sparkline caption
+    if slot == "noon":
+        spark_caption = "今日上午分时（5MIN）"
+    elif slot == "evening":
+        spark_caption = "今日全天分时（5MIN）"
+    else:
+        spark_caption = f"近 {history_days} 日趋势（日 K 收盘）"
+
+    def _fetch_intraday_5min(ts_code: str, *, until_hhmm: str | None = None) -> tuple[list[float], list[str]]:
+        """Use `pro.rt_min_daily` for today's 5-min bars from open. until_hhmm e.g. '11:30'."""
+        try:
+            df = tushare.call("rt_min_daily", ts_code=ts_code, freq="5MIN")
+            if df is None or df.empty:
+                return [], []
+            df = df.sort_values("time").reset_index(drop=True)
+            if until_hhmm:
+                cutoff = f"{on_date.strftime('%Y-%m-%d')} {until_hhmm}:00"
+                df = df[df["time"] <= cutoff]
+            closes = [float(v) if pd.notna(v) else None for v in df["close"]]
+            times = df["time"].astype(str).tolist()
+            return closes, times
+        except Exception:
+            return [], []
+
     def _build(spec: FocusStock) -> dict[str, Any]:
         d = by_d.get(spec.ts_code)
         db = by_db.get(spec.ts_code)
@@ -201,16 +234,38 @@ def enrich_market_focus(
             "moneyflow_net": by_mf.get(spec.ts_code),
             "history_close": [],
             "history_dates": [],
+            "history_caption": spark_caption,
         }
-        try:
-            hd = tushare.call("daily", ts_code=spec.ts_code,
-                               start_date=start_h, end_date=end)
-            if hd is not None and not hd.empty:
-                hd = hd.sort_values("trade_date").tail(history_days)
-                out["history_close"] = [float(v) if pd.notna(v) else None for v in hd["close"]]
-                out["history_dates"] = hd["trade_date"].astype(str).tolist()
-        except Exception:
-            pass
+        if slot == "noon":
+            closes, times = _fetch_intraday_5min(spec.ts_code, until_hhmm="11:30")
+            out["history_close"] = closes
+            out["history_dates"] = times
+        elif slot == "evening":
+            closes, times = _fetch_intraday_5min(spec.ts_code, until_hhmm=None)
+            out["history_close"] = closes
+            out["history_dates"] = times
+        else:
+            try:
+                hd = tushare.call("daily", ts_code=spec.ts_code,
+                                   start_date=start_h, end_date=end)
+                if hd is not None and not hd.empty:
+                    hd = hd.sort_values("trade_date").tail(history_days)
+                    out["history_close"] = [float(v) if pd.notna(v) else None for v in hd["close"]]
+                    out["history_dates"] = hd["trade_date"].astype(str).tolist()
+            except Exception:
+                pass
+        # If intraday fetch returned empty (data not yet available), fallback to EOD daily
+        if not out["history_close"] and slot in ("noon", "evening"):
+            try:
+                hd = tushare.call("daily", ts_code=spec.ts_code,
+                                   start_date=start_h, end_date=end)
+                if hd is not None and not hd.empty:
+                    hd = hd.sort_values("trade_date").tail(history_days)
+                    out["history_close"] = [float(v) if pd.notna(v) else None for v in hd["close"]]
+                    out["history_dates"] = hd["trade_date"].astype(str).tolist()
+                    out["history_caption"] = f"近 {history_days} 日趋势（日 K，分时数据未到）"
+            except Exception:
+                pass
         return out
 
     imp_data = {s.ts_code: _build(s) for s in important}
@@ -591,13 +646,15 @@ def build_focus_deep_section(ctx: MarketCtx, *, order: int, title: str, key: str
         rows.append({
             "stock_code": spec.ts_code, "stock_name": spec.display_name,
             "layer_id": spec.layer, "sub_theme": spec.sub_theme,
-            "close_display": f"{d['close']:,.2f}" if d.get("close") is not None else "—",
-            "pct_display": _fmt_pct(d.get("pct_change")),
+            # None (not "—") when missing — template hides empty fields
+            "close_display": f"{d['close']:,.2f}" if d.get("close") is not None else None,
+            "pct_display": _fmt_pct(d.get("pct_change")) if d.get("pct_change") is not None else None,
             "pct_dir": _direction(d.get("pct_change")),
-            "mf_display": _fmt_count(d.get("moneyflow_net")) + " 元" if d.get("moneyflow_net") is not None else "—",
+            "mf_display": (_fmt_count(d.get("moneyflow_net")) + " 元") if d.get("moneyflow_net") is not None else None,
             "spark_svg": spark,
-            "status": info.get("status") or "—",
-            "today_observation": info.get("today_observation") or "—",
+            "spark_caption": d.get("history_caption") or "",
+            "status": info.get("status") or None,
+            "today_observation": info.get("today_observation") or None,
             "scenario_plans": info.get("scenario_plans") or [],
             "risk_note": info.get("risk_note") or "",
         })
@@ -652,12 +709,13 @@ def build_focus_brief_section(ctx: MarketCtx, *, order: int, title: str, key: st
         rows.append({
             "stock_code": spec.ts_code, "stock_name": spec.display_name,
             "layer_id": spec.layer, "sub_theme": spec.sub_theme,
-            "close_display": f"{d['close']:,.2f}" if d.get("close") is not None else "—",
-            "pct_display": _fmt_pct(d.get("pct_change")),
+            "close_display": f"{d['close']:,.2f}" if d.get("close") is not None else None,
+            "pct_display": _fmt_pct(d.get("pct_change")) if d.get("pct_change") is not None else None,
             "pct_dir": _direction(d.get("pct_change")),
             "spark_svg": spark,
-            "state": info.get("state") or "—",
-            "today_hint": info.get("today_hint") or "—",
+            "spark_caption": d.get("history_caption") or "",
+            "state": info.get("state") or None,
+            "today_hint": info.get("today_hint") or None,
         })
     return {
         "key": key, "title": f"{title} · @{ctx.user}",

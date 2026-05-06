@@ -1,4 +1,5 @@
 {% set c = s.content_json %}
+{% set spark_caption = (c.rows[0].spark_caption if c.rows and c.rows[0].spark_caption else '') %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
   {% if c.rows %}
@@ -9,7 +10,7 @@
         <th style="width:10%">所在层</th>
         <th style="width:11%">收盘</th>
         <th style="width:9%; text-align:right">涨跌</th>
-        <th style="width:14%">趋势</th>
+        <th style="width:14%">趋势{% if spark_caption %}<span style="font-size:10px;color:var(--ink-muted);font-weight:400;">（{{ spark_caption }}）</span>{% endif %}</th>
         <th style="width:10%">状态</th>
         <th>今日提示</th>
       </tr>

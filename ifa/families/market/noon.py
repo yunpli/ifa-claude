@@ -91,7 +91,7 @@ def _load_morning_hypotheses(engine, *, report_date: dt.date) -> list[dict]:
 
 # ─── S1 noon tone ─────────────────────────────────────────────────────────
 
-def _build_n1_tone(ctx: MarketCtx) -> dict:
+def _build_n1_tone(ctx: MarketCtx, morning_hyps: list[dict]) -> dict:
     breadth = ctx.breadth
     indices = "; ".join(f"{s.name} {s.pct_change:+.2f}%"
                           for s in ctx.indices if s.pct_change is not None)
@@ -104,6 +104,17 @@ def _build_n1_tone(ctx: MarketCtx) -> dict:
     main_top = ", ".join(
         f"{s.name} {s.pct_change:+.2f}%" for s in ctx.main_lines[:6] if s.pct_change is not None
     )
+    if morning_hyps:
+        hyp_lines = "\n".join(
+            f"[{i+1}] {h.get('hypothesis', '')}" for i, h in enumerate(morning_hyps[:8])
+        )
+        hyp_block = (
+            f"=== 早报假设（{len(morning_hyps)} 条，已在 S3 单独逐条验证）===\n"
+            f"{hyp_lines}\n\n"
+            "注意：午间总判断需结合早报假设的整体方向，不要写『早报假设未提供』——本节已传入。\n"
+        )
+    else:
+        hyp_block = "=== 早报假设 ===\n(无 — 早报未生成或未成功)\n"
     user = f"""
 === 报告时点 ===
 {ctx.run.report_date} 午间 cutoff {fmt_bjt(ctx.run.data_cutoff_at)} 北京时间
@@ -116,6 +127,8 @@ def _build_n1_tone(ctx: MarketCtx) -> dict:
 
 === 主线候选 (THS 概念) ===
 {main_top}
+
+{hyp_block}
 
 === 任务 ===
 {prompts.NOON_TONE_INSTRUCTIONS}
@@ -319,6 +332,7 @@ def run_market_noon(
         imp_data, reg_data = enrich_market_focus(
             tushare=tushare, on_date=report_date,
             important=prefetched["important_focus"], regular=prefetched["regular_focus"],
+            slot="noon",
         )
         on_log("loading morning hypotheses…")
         morning_hyps = _load_morning_hypotheses(engine, report_date=report_date)
@@ -331,7 +345,7 @@ def run_market_noon(
 
         sections: list[dict] = []
         for label, builder in [
-            ("N1 tone",         lambda: _build_n1_tone(ctx)),
+            ("N1 tone",         lambda: _build_n1_tone(ctx, morning_hyps)),
             ("N2 index panel",  lambda: build_index_panel_section(ctx, order=2,
                                        title="上午指数与市场结构",
                                        key="market_noon.s2_index_panel")),

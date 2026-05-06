@@ -332,6 +332,7 @@ def run_market_morning(
         imp_data, reg_data = enrich_market_focus(
             tushare=tushare, on_date=prev,
             important=prefetched["important_focus"], regular=prefetched["regular_focus"],
+            slot="morning",
         )
         ctx = MarketCtx(
             engine=engine, llm=llm, tushare=tushare, run=run, user=user,

@@ -125,6 +125,11 @@ def _build_e1_headline(ctx: AssetEveningCtx) -> dict:
     sectors_blob = ", ".join(
         f"{b.name} {b.pct_change:+.2f}%" for b in ctx.sector_bars[:10] if b.pct_change is not None
     )
+    morning_hyps = ctx.morning_hypotheses or []
+    morn_block = (
+        "\n".join(f"[{i+1}] {h.get('hypothesis','')}" for i, h in enumerate(morning_hyps[:6]))
+        if morning_hyps else "(无 — 早报未生成或假设为空)"
+    )
     user = f"""
 === 商品大类强弱 ===
 {chr(10).join(cat_blob)}
@@ -134,6 +139,11 @@ def _build_e1_headline(ctx: AssetEveningCtx) -> dict:
 
 === 异常品种数 ===
 {len(ctx.anomalies)}
+
+=== 早报假设（{len(morning_hyps)} 条；E4 单独逐条复盘）===
+{morn_block}
+
+注意：本节是收盘 headline，需基于今日实际收盘对早报方向做总结，不要写"早报假设未提供"——上面已给。
 
 === 任务 ===
 {prompts.EVENING_HEADLINE_INSTRUCTIONS}
