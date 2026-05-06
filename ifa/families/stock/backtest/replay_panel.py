@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, QueuePool
 
 from ifa.families.stock.context import StockEdgeRequest, build_context
 from ifa.families.stock.data import build_local_snapshot
@@ -203,9 +203,29 @@ def _build_chunk_for_date(
     The shared `_PanelGateway` caches sector queries by l2_code so stocks in the
     same sector share the heavy CTE peer query instead of re-running it.
     """
-    engine = create_engine(engine_url, poolclass=NullPool)
+    # QueuePool with size=2 reuses connections within a worker; ~30 queries per row
+    # × 30 stocks per chunk × 6 dates = ~5400 queries per worker. Reusing connections
+    # avoids ~5400 × ~5ms connect overhead = ~25s per worker.
+    engine = create_engine(engine_url, poolclass=QueuePool, pool_size=2, max_overflow=2, pool_recycle=3600)
     try:
         gateway = _PanelGateway(engine)
+        # T3.1: batch-load all stock-keyed tables for this chunk in 3 queries
+        # (replaces 3 × len(ts_codes) per-stock queries)
+        try:
+            params = _params_for_panel(base_params, skip_llm=skip_llm)
+            data_cfg = params.get("data", {})
+            tech_window = int(data_cfg.get("technical_lookback_days", 60))
+            default_lookback = int(params.get("runtime", {}).get("default_lookback_days", 7))
+            gateway.preload_chunk(
+                list(ts_codes),
+                as_of_date,
+                daily_window=max(default_lookback, tech_window),
+                basic_window=max(20, default_lookback),
+                moneyflow_window=max(20, default_lookback),
+            )
+        except Exception:
+            # If preload fails, fall back to per-stock queries (no perf gain but correct)
+            pass
         rows: list[PanelRow] = []
         failed = 0
         for ts_code in ts_codes:
@@ -230,7 +250,10 @@ def _build_one_row(
     target_pct_by_horizon: dict[int, float],
 ) -> PanelRow | None:
     """Stand-alone single-row builder (used by tests and one-off profiling)."""
-    engine = create_engine(engine_url, poolclass=NullPool)
+    # QueuePool with size=2 reuses connections within a worker; ~30 queries per row
+    # × 30 stocks per chunk × 6 dates = ~5400 queries per worker. Reusing connections
+    # avoids ~5400 × ~5ms connect overhead = ~25s per worker.
+    engine = create_engine(engine_url, poolclass=QueuePool, pool_size=2, max_overflow=2, pool_recycle=3600)
     try:
         gateway = _PanelGateway(engine)
         return _build_one_row_with_gateway(
@@ -348,6 +371,134 @@ class _PanelGateway(LocalDataGateway):
         # Per-instance caches; one gateway = one worker = many (ts_code, date) within a date batch
         self._sector_lookup_cache: dict[tuple[str, dt.date], dict[str, Any]] = {}
         self._sector_data_cache: dict[tuple[str, dt.date], tuple[list, Any, Any, list, Any]] = {}
+        # T3.1 batch caches: per-(table, ts_code) DataFrame slices preloaded at chunk start
+        self._daily_bars_cache: dict[str, pd.DataFrame] = {}
+        self._daily_basic_cache: dict[str, pd.DataFrame] = {}
+        self._moneyflow_cache: dict[str, pd.DataFrame] = {}
+        self._chunk_as_of: dt.date | None = None
+
+    def preload_chunk(
+        self,
+        ts_codes: list[str],
+        as_of_date: dt.date,
+        *,
+        daily_window: int = 60,
+        basic_window: int = 20,
+        moneyflow_window: int = 20,
+    ) -> None:
+        """Batch-load 3 stock-keyed tables for all stocks in chunk in 3 queries.
+
+        Replaces ~300 individual queries (100 stocks × 3 tables) with 3 batch queries
+        per chunk. Worker reuses the cache for all subsequent load_daily_bars /
+        load_daily_basic / load_moneyflow calls.
+        """
+        self._chunk_as_of = as_of_date
+        self._daily_bars_cache.clear()
+        self._daily_basic_cache.clear()
+        self._moneyflow_cache.clear()
+        if not ts_codes:
+            return
+
+        # Use a date-window approach: pull all rows in (as_of - max_window_days .. as_of)
+        # for every stock at once, then per-stock filter+truncate happens in load_*.
+        # Take a generous lookback to cover the largest needed window across callers.
+        history_days = max(daily_window, basic_window, moneyflow_window) * 3   # safety
+        start_date = as_of_date - dt.timedelta(days=history_days)
+
+        with self.engine.connect() as conn:
+            # daily bars (deepest window)
+            df_daily = pd.read_sql_query(
+                text("""
+                    SELECT ts_code, trade_date, open, high, low, close, pre_close,
+                           change_, pct_chg, vol, amount
+                    FROM smartmoney.raw_daily
+                    WHERE ts_code = ANY(:codes)
+                      AND trade_date <= :as_of
+                      AND trade_date >= :start
+                """),
+                conn,
+                params={"codes": list(ts_codes), "as_of": as_of_date, "start": start_date},
+            )
+            df_basic = pd.read_sql_query(
+                text("""
+                    SELECT ts_code, trade_date, close, turnover_rate, turnover_rate_f,
+                           volume_ratio, pe, pe_ttm, pb, ps, ps_ttm, total_mv, circ_mv
+                    FROM smartmoney.raw_daily_basic
+                    WHERE ts_code = ANY(:codes)
+                      AND trade_date <= :as_of
+                      AND trade_date >= :start
+                """),
+                conn,
+                params={"codes": list(ts_codes), "as_of": as_of_date, "start": start_date},
+            )
+            df_flow = pd.read_sql_query(
+                text("""
+                    SELECT ts_code, trade_date, buy_lg_amount, sell_lg_amount,
+                           buy_elg_amount, sell_elg_amount, net_mf_amount
+                    FROM smartmoney.raw_moneyflow
+                    WHERE ts_code = ANY(:codes)
+                      AND trade_date <= :as_of
+                      AND trade_date >= :start
+                """),
+                conn,
+                params={"codes": list(ts_codes), "as_of": as_of_date, "start": start_date},
+            )
+        for df, cache in (
+            (df_daily, self._daily_bars_cache),
+            (df_basic, self._daily_basic_cache),
+            (df_flow, self._moneyflow_cache),
+        ):
+            if df.empty:
+                continue
+            df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
+            for code, sub in df.groupby("ts_code"):
+                cache[str(code)] = sub.sort_values("trade_date").reset_index(drop=True)
+
+    def _serve_from_cache(
+        self,
+        cache: dict[str, pd.DataFrame],
+        name: str,
+        ts_code: str,
+        as_of: dt.date,
+        lookback_rows: int,
+        min_rows: int,
+        required: bool,
+    ) -> LoadResult | None:
+        """If chunk pre-loaded for this (ts_code, as_of), serve from cache."""
+        if self._chunk_as_of != as_of or ts_code not in cache:
+            return None
+        full = cache[ts_code]
+        sub = full[full["trade_date"] <= as_of].tail(lookback_rows).reset_index(drop=True)
+        if sub.empty:
+            return None
+        status = "ok" if len(sub) >= min_rows else "partial"
+        return LoadResult(
+            name=name,
+            data=sub,
+            source="postgres_cached",
+            status=status,
+            rows=len(sub),
+            as_of=sub["trade_date"].iloc[-1],
+            required=required,
+        )
+
+    def load_daily_bars(self, ts_code, as_of_trade_date, *, lookback_rows=60, min_rows=20, required=True):
+        cached = self._serve_from_cache(self._daily_bars_cache, "daily_bars", ts_code, as_of_trade_date, lookback_rows, min_rows, required)
+        if cached is not None:
+            return cached
+        return super().load_daily_bars(ts_code, as_of_trade_date, lookback_rows=lookback_rows, min_rows=min_rows, required=required)
+
+    def load_daily_basic(self, ts_code, as_of_trade_date, *, lookback_rows=20, min_rows=5, required=True):
+        cached = self._serve_from_cache(self._daily_basic_cache, "daily_basic", ts_code, as_of_trade_date, lookback_rows, min_rows, required)
+        if cached is not None:
+            return cached
+        return super().load_daily_basic(ts_code, as_of_trade_date, lookback_rows=lookback_rows, min_rows=min_rows, required=required)
+
+    def load_moneyflow(self, ts_code, as_of_trade_date, *, lookback_rows=20, min_rows=3, required=False):
+        cached = self._serve_from_cache(self._moneyflow_cache, "moneyflow", ts_code, as_of_trade_date, lookback_rows, min_rows, required)
+        if cached is not None:
+            return cached
+        return super().load_moneyflow(ts_code, as_of_trade_date, lookback_rows=lookback_rows, min_rows=min_rows, required=required)
 
     def load_model_context(self, ts_code, as_of_trade_date, sector_data):
         return LoadResult(
