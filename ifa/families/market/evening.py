@@ -396,6 +396,11 @@ def run_market_evening(
     insert_report_run(engine, run)
     on_log(f"[run {str(run.report_run_id)[:8]}] starting Market evening report for {report_date} user={user}")
 
+    # Pre-flight DB freshness check (informational — does NOT abort the run)
+    from ifa.core.report.freshness import preflight_freshness_check
+    for line in preflight_freshness_check(engine, family="market", expected_date=report_date):
+        on_log(f"[freshness] ⚠ {line}")
+
     try:
         prefetched = prefetch_market_data(
             tushare=tushare, engine=engine, on_date=report_date,

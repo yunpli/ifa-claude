@@ -320,6 +320,10 @@ def run_market_noon(
     insert_report_run(engine, run)
     on_log(f"[run {str(run.report_run_id)[:8]}] starting Market noon report for {report_date} user={user}")
 
+    from ifa.core.report.freshness import preflight_freshness_check
+    for line in preflight_freshness_check(engine, family="market", expected_date=report_date):
+        on_log(f"[freshness] ⚠ {line}")
+
     try:
         # For noon report, use TODAY's data (best-effort intraday)
         prefetched = prefetch_market_data(

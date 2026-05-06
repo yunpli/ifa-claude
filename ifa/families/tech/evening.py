@@ -422,6 +422,10 @@ def run_tech_evening(
     insert_report_run(engine, run)
     on_log(f"[run {str(run.report_run_id)[:8]}] starting Tech evening report for {report_date} user={user}")
 
+    from ifa.core.report.freshness import preflight_freshness_check
+    for line in preflight_freshness_check(engine, family="tech", expected_date=report_date):
+        on_log(f"[freshness] ⚠ {line}")
+
     try:
         on_log("fetching SW L2 sector performance for tech 5 layers (today)…")
         boards_by_layer = data.fetch_board_performance(tushare, on_date=report_date, history_days=10, slot="evening", engine=engine)

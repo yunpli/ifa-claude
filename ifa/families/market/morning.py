@@ -322,6 +322,9 @@ def run_market_morning(
 
     try:
         prev = report_date - dt.timedelta(days=1)
+        from ifa.core.report.freshness import preflight_freshness_check
+        for line in preflight_freshness_check(engine, family="market", expected_date=prev):
+            on_log(f"[freshness] ⚠ {line}")
         prefetched = prefetch_market_data(
             tushare=tushare, engine=engine, on_date=prev,
             aux_report_type="morning_long",
