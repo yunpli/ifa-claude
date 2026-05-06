@@ -32,24 +32,35 @@ _RT_K_CACHE: dict[tuple, pd.DataFrame] = {}
 
 
 def _load_whole_a_rt_k(client: TuShareClient, *, on_date: dt.date) -> pd.DataFrame | None:
-    """Fetch rt_k for entire A-share market (3 exchange wildcards). Cached per
-    on_date within a process so repeated calls during one report are free."""
+    """Fetch rt_k for entire A-share market (3 exchange wildcards).
+
+    Fail-closed: if any of the 3 wildcards fails or returns implausibly few
+    rows, return None so the caller propagates "no data" rather than computing
+    sector aggregates from 2/3 of the universe (which would be silently wrong).
+
+    Cached per on_date within a process — three families share one pull.
+    """
     key = ("rt_k", on_date)
     if key in _RT_K_CACHE:
-        return _RT_K_CACHE[key]
+        cached = _RT_K_CACHE[key]
+        return cached if cached is not None and not cached.empty else None
+    min_rows = {"6*.SH": 1000, "0*.SZ": 1000, "3*.SZ": 1000}
     chunks = []
     for pattern in ("6*.SH", "0*.SZ", "3*.SZ"):
         try:
             df = client.call("rt_k", ts_code=pattern)
-            if df is not None and not df.empty:
-                chunks.append(df)
         except Exception:
-            continue
-    if not chunks:
-        _RT_K_CACHE[key] = pd.DataFrame()
-        return None
+            _RT_K_CACHE[key] = None
+            return None
+        if df is None or df.empty or len(df) < min_rows[pattern]:
+            _RT_K_CACHE[key] = None
+            return None
+        chunks.append(df)
     df = pd.concat(chunks, ignore_index=True).drop_duplicates(subset=["ts_code"])
     df = df[df["pre_close"].notna() & df["close"].notna() & (df["pre_close"] > 0)]
+    if df.empty or len(df) < 3000:
+        _RT_K_CACHE[key] = None
+        return None
     _RT_K_CACHE[key] = df
     return df
 

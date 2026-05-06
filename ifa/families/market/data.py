@@ -268,20 +268,26 @@ def _fetch_realtime_breadth_snapshot(client: TuShareClient, *, on_date: dt.date)
 
     Returns dict shaped like the EOD `daily` aggregate or None on failure.
     """
+    # Fail-closed: all 3 exchange wildcards must succeed with non-trivial row
+    # counts. If any partial failure, return None so caller leaves breadth
+    # fields as None — the report renderer will display "—" rather than
+    # silently aggregating from 2/3 of the market.
+    patterns = ("6*.SH", "0*.SZ", "3*.SZ")
+    # Sanity floors observed empirically (sh ~2300, sz ~1500, gem ~1400).
+    # Use 1000 as a conservative lower bound to catch obvious truncation.
+    min_rows = {"6*.SH": 1000, "0*.SZ": 1000, "3*.SZ": 1000}
     chunks = []
-    for pattern in ("6*.SH", "0*.SZ", "3*.SZ"):
+    for pattern in patterns:
         try:
             df = client.call("rt_k", ts_code=pattern)
-            if df is not None and not df.empty:
-                chunks.append(df)
         except Exception:
-            continue
-    if not chunks:
-        return None
+            return None
+        if df is None or df.empty or len(df) < min_rows[pattern]:
+            return None
+        chunks.append(df)
     df = pd.concat(chunks, ignore_index=True).drop_duplicates(subset=["ts_code"])
-    # Stocks must have valid pre_close + close
     df = df[df["pre_close"].notna() & df["close"].notna() & (df["pre_close"] > 0)]
-    if df.empty:
+    if df.empty or len(df) < 3000:  # whole-A floor
         return None
     df["pct_chg"] = (df["close"] - df["pre_close"]) / df["pre_close"] * 100
     out = {
@@ -342,8 +348,13 @@ def fetch_breadth(client: TuShareClient, *, on_date: dt.date,
                        max_consec_streak=None)
     end = on_date.strftime("%Y%m%d")
     is_today = on_date == _today_bjt()
-    used_realtime = False
-    if is_today and slot in ("noon", "evening"):
+    realtime_intended = is_today and slot in ("noon", "evening")
+    if realtime_intended:
+        # Today's intraday — rt_k aggregation is the only correct source.
+        # If it fails (network error, partial wildcard fetch, row-floor violation),
+        # leave fields None. NEVER fall back to EOD `daily`: today's `daily`
+        # either returns empty (no harm) or — worst case — could surface T-1
+        # data labeled as today (unforgivable in production).
         agg = _fetch_realtime_breadth_snapshot(client, on_date=on_date)
         if agg is not None:
             snap.total_amount = agg["total_amount"]
@@ -354,8 +365,8 @@ def fetch_breadth(client: TuShareClient, *, on_date: dt.date,
             snap.limit_up_count = agg["limit_up_count"]
             snap.limit_down_count = agg["limit_down_count"]
             snap.trade_date = on_date
-            used_realtime = True
-    if not used_realtime:
+        # else: snap fields stay None — renderer shows "—"
+    else:
         try:
             df = client.call("daily", trade_date=end)
             if df is not None and not df.empty:
@@ -376,14 +387,19 @@ def fetch_breadth(client: TuShareClient, *, on_date: dt.date,
                 break
         except Exception:
             continue
-    # Limit-up / limit-down structure on the day
+    # Limit-up / limit-down structure on the day.
+    # Skip the limit_list_d overwrite when the realtime path supplied counts —
+    # limit_list_d is post-close and would either be empty (today, mid-session)
+    # or stale (last published day). Keep the rt_k+stk_limit numbers.
+    skip_limit_overwrite = realtime_intended and snap.limit_up_count is not None
     try:
         df_lim = client.call("limit_list_d", trade_date=end)
         if df_lim is not None and not df_lim.empty:
             ups = df_lim[df_lim["limit"] == "U"]
             downs = df_lim[df_lim["limit"] == "D"]
-            snap.limit_up_count = len(ups)
-            snap.limit_down_count = len(downs)
+            if not skip_limit_overwrite:
+                snap.limit_up_count = len(ups)
+                snap.limit_down_count = len(downs)
             # Use up_stat (e.g. "1/2") to detect 炸板 (succeeded < attempted)
             broke = 0
             for stat in ups["up_stat"].fillna("").astype(str):
