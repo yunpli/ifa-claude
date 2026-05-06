@@ -614,6 +614,8 @@ def auto_promote_if_passing(
     backup: bool = True,
     horizon_selective: bool = True,
     require_gates_for_horizon: tuple[str, ...] = ("G4", "G5", "G9"),
+    artifact_path: str | None = None,
+    log_to_db: bool = True,
 ) -> dict[str, Any]:
     """If gates pass, write a YAML variant from base + overlay.
 
@@ -674,7 +676,8 @@ def auto_promote_if_passing(
     base_dict = _read_yaml(base_yaml)
     promoted = apply_param_overlay(base_dict, filtered_overlay)
     backup_path: Path | None = None
-    if variant_output == base_yaml and backup:
+    applied_to_baseline = (variant_output == base_yaml)
+    if applied_to_baseline and backup:
         stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d_%H%M%S")
         backup_path = base_yaml.with_suffix(base_yaml.suffix + f".bak_{stamp}")
         shutil.copy2(base_yaml, backup_path)
@@ -682,4 +685,84 @@ def auto_promote_if_passing(
     variant_output.write_text(yaml.safe_dump(promoted, allow_unicode=True, sort_keys=False), encoding="utf-8")
     out["variant_path"] = str(variant_output)
     out["backup_path"] = str(backup_path) if backup_path else None
+    out["git_tag"] = _build_git_tag(out["horizons_applied"])
+
+    if log_to_db:
+        try:
+            _write_promotion_ledger(
+                decision=decision,
+                artifact_path=artifact_path,
+                base_yaml_path=str(base_yaml),
+                variant_yaml_path=str(variant_output),
+                backup_yaml_path=str(backup_path) if backup_path else None,
+                horizons_applied=out["horizons_applied"],
+                horizons_kept_baseline=out["horizons_kept_baseline"],
+                git_tag=out["git_tag"],
+                applied_to_baseline=applied_to_baseline,
+            )
+        except Exception as exc:
+            out.setdefault("warnings", []).append(f"ledger_write_failed: {exc}")
+
     return out
+
+
+def _build_git_tag(horizons_applied: list[str]) -> str:
+    """Deterministic tag name; not auto-applied (caller can `git tag $TAG` if desired)."""
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
+    horizons = "-".join(sorted(horizons_applied)) if horizons_applied else "none"
+    return f"stock-edge-tune-{stamp}-{horizons}"
+
+
+def _write_promotion_ledger(
+    *,
+    decision: PromotionDecision,
+    artifact_path: str | None,
+    base_yaml_path: str,
+    variant_yaml_path: str,
+    backup_yaml_path: str | None,
+    horizons_applied: list[str],
+    horizons_kept_baseline: list[str],
+    git_tag: str,
+    applied_to_baseline: bool,
+) -> None:
+    """Insert a row into stock.tuning_promotion_log for audit (T3.4)."""
+    from ifa.core.db import get_engine
+    from sqlalchemy import text
+
+    eng = get_engine()
+    gates_summary = [
+        {"gate_id": g.gate_id, "name": g.name, "passed": g.passed, "value": g.value, "threshold": g.threshold}
+        for g in decision.gates
+    ]
+    with eng.begin() as conn:
+        conn.execute(
+            text("""
+                INSERT INTO stock.tuning_promotion_log (
+                    artifact_path, base_yaml_path, variant_yaml_path, backup_yaml_path,
+                    accepted, horizons_applied, horizons_kept_baseline, gates_summary,
+                    rank_ic_summary, bootstrap_ci, regime_breakdown,
+                    git_tag, applied_to_baseline
+                ) VALUES (
+                    :artifact_path, :base_yaml, :variant_yaml, :backup_yaml,
+                    :accepted,
+                    CAST(:ha AS JSONB), CAST(:hkb AS JSONB), CAST(:gates AS JSONB),
+                    CAST(:rank_ic AS JSONB), CAST(:bootstrap AS JSONB), CAST(:regime AS JSONB),
+                    :git_tag, :applied_to_baseline
+                )
+            """),
+            {
+                "artifact_path": artifact_path,
+                "base_yaml": base_yaml_path,
+                "variant_yaml": variant_yaml_path,
+                "backup_yaml": backup_yaml_path,
+                "accepted": bool(decision.accepted),
+                "ha": json.dumps(horizons_applied),
+                "hkb": json.dumps(horizons_kept_baseline),
+                "gates": json.dumps(gates_summary),
+                "rank_ic": json.dumps(decision.rank_ic_summary),
+                "bootstrap": json.dumps(decision.bootstrap_ci),
+                "regime": json.dumps(decision.regime_breakdown),
+                "git_tag": git_tag,
+                "applied_to_baseline": applied_to_baseline,
+            },
+        )
