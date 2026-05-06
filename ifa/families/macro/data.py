@@ -252,14 +252,21 @@ def fetch_cross_asset(client: TuShareClient, *, ref_date: dt.date) -> list[Asset
             df = df.sort_values("trade_date")
             row = df.iloc[-1]
             row_td = dt.datetime.strptime(str(row["trade_date"]), "%Y%m%d").date()
-            # Staleness defense: only treat as "current" if matches on_date.
-            # When stale, still report latest but mark period as the real date so
-            # renderer can prefix "截至 YYYY-MM-DD" rather than implying today.
-            close = float(row["close"]) if pd.notna(row.get("close")) else None
-            pct = float(row.get("pct_chg")) if pd.notna(row.get("pct_chg")) else None
-            if pct is None and close is not None and len(df) >= 2:
-                prev = float(df.iloc[-2]["close"])
-                pct = (close - prev) / prev * 100 if prev else None
+            # Strict staleness gate: ONLY surface close+pct when the returned
+            # row's trade_date matches ref_date. When stale (e.g., evening
+            # early-run before TuShare's HK/fut EOD batch), latest/pct_change
+            # stay None so neither the LLM prompt nor the renderer can mistake
+            # T-1 data for today. period reports the actual returned date for
+            # downstream display logic.
+            if row_td == ref_date:
+                close = float(row["close"]) if pd.notna(row.get("close")) else None
+                pct = float(row.get("pct_chg")) if pd.notna(row.get("pct_chg")) else None
+                if pct is None and close is not None and len(df) >= 2:
+                    prev = float(df.iloc[-2]["close"])
+                    pct = (close - prev) / prev * 100 if prev else None
+            else:
+                close = None
+                pct = None
             out.append(AssetSnapshot(
                 name=name, code=code, latest=close, pct_change=pct,
                 period=row_td.strftime("%Y-%m-%d"),
