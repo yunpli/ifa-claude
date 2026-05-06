@@ -6,22 +6,23 @@
   <div class="ifa-client-brief__main">
     <div>
       <div class="ifa-client-brief__eyebrow">{{ hero.title }}</div>
-      {# Headline as a small lead — the actual "三件事" must be the numbered list. #}
-      {% if c.headline %}
-      <p class="ifa-client-brief__lead">{{ c.headline }}</p>
-      {% endif %}
       {% if c.top3 %}
-      <ol class="ifa-client-brief__top3">
-        {% for line in c.top3 %}<li>{{ line }}</li>{% endfor %}
-      </ol>
+        {# Modern: small lead + numbered 三件事 list. #}
+        {% if c.headline %}
+        <p class="ifa-client-brief__lead">{{ c.headline }}</p>
+        {% endif %}
+        <ol class="ifa-client-brief__top3">
+          {% for line in c.top3 %}<li>{{ line }}</li>{% endfor %}
+        </ol>
       {% else %}
-      {# Legacy fallback when section 1 hasn't been migrated to top3 schema yet. #}
-      <h2 class="ifa-client-brief__headline">
-        {{ c.headline or c.label or c.tech_state or c.market_state or c.commodity_state or '今日核心判断' }}
-      </h2>
-      <p class="ifa-client-brief__summary">
-        {{ c.summary or c.text or c.review_summary or '先看本摘要，再看下方风险、观察清单和证据表格。' }}
-      </p>
+        {# Legacy fallback when section 1 hasn't been migrated to top3 schema yet.
+           NO lead here — would duplicate the h2 below. #}
+        <h2 class="ifa-client-brief__headline">
+          {{ c.headline or c.label or c.tech_state or c.market_state or c.commodity_state or '今日核心判断' }}
+        </h2>
+        <p class="ifa-client-brief__summary">
+          {{ c.summary or c.text or c.review_summary or '先看本摘要，再看下方风险、观察清单和证据表格。' }}
+        </p>
       {% endif %}
     </div>
     <div class="ifa-client-brief__rail">

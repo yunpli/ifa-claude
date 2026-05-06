@@ -148,8 +148,13 @@ slot: morning
         "strongest_layer": parsed.get("main_line_state"),
         "risk_level": parsed.get("risk_level"),
         "headline": parsed.get("headline"),
+        "top3": parsed.get("top3") or [],
         "summary": parsed.get("summary"),
         "validation_points": parsed.get("validation_points") or [],
+        # Override generic "Tech 状态" label so market morning shows
+        # "市场状态 · 进攻/修复/..." instead.
+        "state_label": "市场状态",
+        "layer_label": "主线状态",
     }
     return {
         "key": "market_morning.s1_tone", "title": "今日 A 股总判断",

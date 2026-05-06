@@ -1,14 +1,14 @@
 {% set c = s.content_json %}
-<section class="ifa-section">
+<section class="ifa-section ifa-section--elevated">
   {% include "_section_head.html" %}
   <div class="ifa-tone">
     <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
       <span class="ifa-tone__pill" data-tone="{{ c.tech_state_short or '' }}">
-        Tech 状态 · {{ c.tech_state or '—' }}
+        {{ c.state_label or 'Tech 状态' }} · {{ c.tech_state or '—' }}
       </span>
       {% if c.strongest_layer %}
       <span class="ifa-tone__pill" style="background:var(--rule-soft); color:var(--ink-2);">
-        最强层 · {{ c.strongest_layer | upper }}
+        {{ c.layer_label or '最强层' }} · {{ c.strongest_layer | upper }}
       </span>
       {% endif %}
       {% if c.risk_level %}
@@ -17,18 +17,26 @@
       </span>
       {% endif %}
     </div>
-    <p class="ifa-tone__headline">{{ c.headline }}</p>
-    <p class="ifa-tone__summary">{{ c.summary }}</p>
+    {% if c.headline %}<p class="ifa-tone__headline">{{ c.headline }}</p>{% endif %}
+    {% if c.top3 %}
+    <ol class="ifa-tone__top3">
+      {% for line in c.top3 %}<li>{{ line }}</li>{% endfor %}
+    </ol>
+    {% endif %}
+    {% if c.summary %}<p class="ifa-tone__summary">{{ c.summary }}</p>{% endif %}
     {% if c.validation_points %}
-    <ul class="ifa-tone__bullets">
-      {% for v in c.validation_points %}
-      <li class="ifa-tone__bullet">
-        <span class="ifa-tone__bullet-dim">{{ v.metric }}</span>
-        <span class="ifa-tone__bullet-text">{{ v.threshold }}</span>
-        <span class="ifa-tone__bullet-conf">{{ v.window or '' }}</span>
-      </li>
-      {% endfor %}
-    </ul>
+    <details class="ifa-tone__details">
+      <summary>查看验证点（{{ c.validation_points|length }} 条）</summary>
+      <ul class="ifa-tone__bullets">
+        {% for v in c.validation_points %}
+        <li class="ifa-tone__bullet">
+          <span class="ifa-tone__bullet-dim">{{ v.metric }}</span>
+          <span class="ifa-tone__bullet-text">{{ v.threshold }}</span>
+          <span class="ifa-tone__bullet-conf">{{ v.window or '' }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+    </details>
     {% endif %}
   </div>
 </section>

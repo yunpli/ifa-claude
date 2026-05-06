@@ -157,8 +157,11 @@ def _build_n1_tone(ctx: MarketCtx, morning_hyps: list[dict]) -> dict:
         "strongest_layer": parsed.get("afternoon_basis"),
         "risk_level": parsed.get("risk_appetite"),
         "headline": parsed.get("headline"),
+        "top3": parsed.get("top3") or [],
         "summary": parsed.get("summary"),
         "validation_points": parsed.get("validation_points") or [],
+        "state_label": "市场状态",
+        "layer_label": "下午基调",
     }
     return {
         "key": "market_noon.s1_tone", "title": "午间总判断",
