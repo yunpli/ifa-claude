@@ -96,6 +96,17 @@ def _persist_model_output(ctx: MarketCtx, *, section_key: str, prompt_name: str,
                            parsed: Any, resp: Any, status: str):
     if resp is None:
         return None
+    # DB CHECK constraint allows only ['parsed','parse_failed','fallback_used','error'].
+    # Map schema-retry trace statuses (V2.2 schema retry layer) to allowed values.
+    status_db = status
+    if status.startswith("schema_retry_ok"):
+        status_db = "parsed"
+    elif status.startswith("schema_retry_partial"):
+        status_db = "fallback_used"
+    elif status.startswith("error"):
+        status_db = "error"
+    elif status_db not in ("parsed", "parse_failed", "fallback_used", "error"):
+        status_db = "fallback_used"
     return insert_model_output(
         ctx.engine,
         report_run_id=ctx.run.report_run_id,
@@ -105,7 +116,7 @@ def _persist_model_output(ctx: MarketCtx, *, section_key: str, prompt_name: str,
         model_name=resp.model,
         endpoint=resp.endpoint,
         parsed_json=parsed if isinstance(parsed, (dict, list)) else None,
-        status=status,
+        status=status_db,
         prompt_tokens=resp.prompt_tokens,
         completion_tokens=resp.completion_tokens,
         latency_seconds=resp.latency_seconds,
