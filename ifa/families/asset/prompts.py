@@ -20,12 +20,12 @@ SYSTEM_PERSONA = (
 TONE_INSTRUCTIONS = """根据用户提供的商品/期货核心快照、各大类强弱、近期跨资产、商品相关新闻，
 生成 Asset 早报的"今日 Asset 总体结论"判断卡。
 
-要求：
+硬性要求：
 1. tone 必须取：周期支撑 / 通胀扰动 / 避险升温 / 成本压力 / 信号不强（之一）。
 2. tone_short 简化：周期支撑 / 通胀 / 避险 / 成本 / 信号弱（用于 CSS data-tone）。
-3. headline 一句话总结 50 字以内，必须包含明确判断。
-4. summary 150 字以内段落，给出主导链条和 A 股映射的核心逻辑。
-5. bullets 4-6 条，每条 dimension（能源/贵金属/有色/黑色/化工/农产品）+ judgment + a_share_implication + data_timing（夜盘/上一交易日/最近可得）+ confidence。
+3. **headline ≤ 28 个汉字**，ONE 句，必须是清晰判断（不能模糊化）。
+4. **summary ≤ 80 字**，最多 2 句，只讲"主导链条 + A 股映射"。**不允许再罗列商品价格**（§02/§03 已展示）。
+5. bullets 4-6 条，每条 dimension（能源/贵金属/有色/黑色/化工/农产品）+ judgment（≤14 字）+ a_share_implication（≤20 字）+ data_timing（夜盘/上一交易日/最近可得）+ confidence。
 6. 不写"建议买入/卖出"等指令性语言。"""
 
 TONE_SCHEMA = """{
@@ -88,16 +88,18 @@ ANOMALY_SCHEMA = """{
 
 # ─── S5: 商品 → A 股板块映射 ──────────────────────────────────────────────
 MAPPING_INSTRUCTIONS = """根据上文已生成的核心看板、大类强弱、异常品种、新闻事件，
-输出"商品价格对 A 股板块映射"表。
+输出"商品价格对 A 股板块映射"表。HNW 客户大多不懂"成本传导/Beta 暴露"等术语，**用大白话写**。
 
-要求：
+硬性要求：
 1. 选 5-7 条今日最相关的商品变量。
-2. 每行 macro_variable（如"原油上涨"/"铜走强"/"黑色走弱"）+ data_timing + beneficiaries（数组）+ pressured_areas（数组）+ watch_point_today + signal_strength(strong/medium/weak)+ confidence(high/medium/low)。
-3. 不给个股建议。
-4. 弱信号必须明确写"弱相关/观察"。"""
+2. 每行 macro_variable（如"原油上涨"/"铜走强"/"黑色走弱"）+ data_timing + beneficiaries（数组）+ pressured_areas（数组）+ **plain_reason** + watch_point_today + signal_strength(strong/medium/weak) + confidence(high/medium/low)。
+3. **plain_reason ≤ 26 字**，用大白话写"为什么 X 涨会带动 Y 涨"——例如"原油涨 = 中石化、中石油有更多利润；煤炭涨 = 火电厂成本变高、电力受影响"。**绝对不要用"成本传导"/"Beta 暴露"/"映射"这种术语**。
+4. watch_point_today ≤ 30 字，告诉读者"今日盘中盯什么具体板块/位置"。
+5. 不给个股建议。
+6. 弱信号必须明确写"弱相关/观察"。"""
 
 MAPPING_SCHEMA = """{
-  "rows":[{"macro_variable":"...","data_timing":"...","beneficiaries":["..."],"pressured_areas":["..."],"watch_point_today":"...","signal_strength":"medium","confidence":"medium"}]
+  "rows":[{"macro_variable":"...","data_timing":"...","beneficiaries":["..."],"pressured_areas":["..."],"plain_reason":"≤26字大白话因果","watch_point_today":"...","signal_strength":"medium","confidence":"medium"}]
 }"""
 
 # ─── S6: 产业链成本与利润传导 ─────────────────────────────────────────────
@@ -142,15 +144,20 @@ HYPOTHESES_SCHEMA = """{
 }"""
 
 # ─── EVENING — 一句话复盘 ─────────────────────────────────────────────────
-EVENING_HEADLINE_INSTRUCTIONS = """基于今日商品/期货变化、A 股相关板块表现、跨资产、商品新闻，写晚盘一句话开篇。
+EVENING_HEADLINE_INSTRUCTIONS = """基于今日商品/期货变化、A 股相关板块表现、跨资产、商品新闻，写晚盘开篇。
 
-要求：
-1. label 取"晚盘 Asset 综述"。
-2. text 200-260 字，第一句必须是判断式总结（强/弱/分化、传导有效/无效），后续给出 3 条左右因果链。"""
+硬性要求：
+1. **headline** ≤ 28 个汉字，ONE 句，必须是判断式（强/弱/分化、传导有效/无效），不能罗列数据。
+2. **top3** 必须是 3 条**前瞻性 / 决策含义**短语（"今日表现 → 明日含义"），每条 ≤ 22 个汉字；**不要重复 §02 数字**，§02 数据已经展示给读者。
+3. **summary** 可选，≤ 80 字，给一句"为什么 today 这样发展"的因果，不允许超过 2 句。
+4. label 取"晚盘 Asset 综述"。
+5. 不要编造数据；只允许引用 user 提供的实数。"""
 
 EVENING_HEADLINE_SCHEMA = """{
   "label":"晚盘 Asset 综述",
-  "text":"200-260字"
+  "headline":"≤28字一句话判断",
+  "top3":["前瞻条1 ≤22字","前瞻条2","前瞻条3"],
+  "summary":"≤80字因果"
 }"""
 
 # ─── EVENING — 早报假设 Review ────────────────────────────────────────────

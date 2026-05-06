@@ -798,8 +798,13 @@ def run_tech_morning(
         mf_by_code = data.fetch_money_flow_top(tushare, on_date=prev_day, ts_codes=all_tech_codes)
         on_log("fetching US tech overnight…")
         us_stocks = data.fetch_us_tech_overnight(tushare, ref_date=prev_day)
-        on_log("fetching tech news (last 24h)…")
-        news_df = data.fetch_tech_news(tushare, end_bjt=to_bjt(data_cutoff_at), lookback_hours=24)
+        # Morning needs to cover prev-trade-day close → this morning, which
+        # spans the overnight window (~17:00 prev-day → ~09:00 today). 24h
+        # window starting from a 09:10 cutoff cuts off at prev-day 09:10 — too
+        # tight to catch 4/29 18:00+ headlines that are most relevant to today.
+        # Use 36h to comfortably cover overnight + prev-day evening publishings.
+        on_log("fetching tech news (last 36h, covers prev-close → this morning)…")
+        news_df = data.fetch_tech_news(tushare, end_bjt=to_bjt(data_cutoff_at), lookback_hours=36)
         on_log(f"  {len(news_df)} news after filter")
         on_log("fetching SW tech sector indexes…")
         sw_sectors = data.fetch_tech_sw_sectors(tushare, on_date=prev_day, slot="morning")
@@ -820,6 +825,10 @@ def run_tech_morning(
             on_log=on_log,
         )
 
+        # NOTE: S8 "潜在蓄势待发标的池" removed entirely per user direction
+        # (UI bug T2 / issue #16) — the section was structurally low-value
+        # and consistently rendered an empty placeholder. Sections renumber
+        # automatically because we use explicit `order` on each builder.
         sections: list[dict] = []
         for label, builder in [
             ("S1 tone",        lambda: _build_s1_tone(ctx)),
@@ -829,7 +838,6 @@ def run_tech_morning(
             ("S5 news",        lambda: _build_s5_news(ctx)),
             ("S6 directions",  lambda: _build_s6_directions(ctx, sections)),
             ("S7 leaders",     lambda: _build_s7_leaders(ctx)),
-            ("S8 candidates",  lambda: _build_s8_candidates(ctx)),
             ("S9 focus deep",  lambda: _build_s9_focus_deep(ctx)),
             ("S10 focus brief",lambda: _build_s10_focus_brief(ctx)),
             ("S11 hypotheses", lambda: _build_s11_hypotheses(ctx, sections)),

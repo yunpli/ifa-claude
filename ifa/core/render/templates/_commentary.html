@@ -1,8 +1,29 @@
 {% set c = s.content_json %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
-  <div class="ifa-commentary" style="border-left-color: var(--accent); background: linear-gradient(180deg, var(--paper-tint) 0%, var(--paper) 100%);">
-    {% if c.label %}<span class="ifa-commentary__label">{{ c.label }}</span>{% endif %}
-    <div>{{ c.text }}</div>
-  </div>
+  {% if c.headline or c.top3 %}
+    {# New headline-card format: structured headline + top3 + summary #}
+    <div class="ifa-headline-card">
+      {% if c.label %}<span class="ifa-headline-card__label">{{ c.label }}</span>{% endif %}
+      {% if c.headline %}
+        <h3 class="ifa-headline-card__headline">{{ c.headline }}</h3>
+      {% endif %}
+      {% if c.top3 %}
+        <ol class="ifa-headline-card__top3">
+          {% for line in c.top3 %}<li>{{ line }}</li>{% endfor %}
+        </ol>
+      {% endif %}
+      {% if c.summary %}
+        <p class="ifa-headline-card__summary">{{ c.summary }}</p>
+      {% elif c.text and not c.headline %}
+        <p class="ifa-headline-card__summary">{{ c.text }}</p>
+      {% endif %}
+    </div>
+  {% else %}
+    {# Legacy commentary format #}
+    <div class="ifa-commentary" style="border-left-color: var(--accent); background: linear-gradient(180deg, var(--paper-tint) 0%, var(--paper) 100%);">
+      {% if c.label %}<span class="ifa-commentary__label">{{ c.label }}</span>{% endif %}
+      <div>{{ c.text }}</div>
+    </div>
+  {% endif %}
 </section>

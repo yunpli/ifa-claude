@@ -1,7 +1,13 @@
 {% set c = s.content_json %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
-  <p class="ifa-section__intro">参考 NVIDIA / Jensen 的 AI Five-Layer Cake 框架，将 A 股科技板块映射到产业链 5 层。</p>
+  <p class="ifa-section__intro">{{ c.intro_plain or '从底层电力 / 算力基建到上层应用，AI 产业链分 5 层观察 A 股科技板块的强弱与传导。' }}</p>
+  {% if c.highlight %}
+  <div class="ifa-layer-highlight">
+    <span class="ifa-layer-highlight__lbl">今日重点</span>
+    <span class="ifa-layer-highlight__txt">{{ c.highlight }}</span>
+  </div>
+  {% endif %}
   <div class="ifa-layer-stack">
     {% for L in c.layers %}
     <div class="ifa-layer-row" data-layer="{{ L.layer_id }}">
@@ -37,6 +43,9 @@
   </div>
 </section>
 <style>
+.ifa-layer-highlight{display:flex;align-items:baseline;gap:14px;margin:6px 0 14px;padding:8px 14px;background:linear-gradient(90deg,var(--accent-soft) 0%,transparent 100%);border-left:3px solid var(--accent);}
+.ifa-layer-highlight__lbl{font-size:10.5px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--accent);}
+.ifa-layer-highlight__txt{font-family:var(--font-serif);font-size:14.5px;color:var(--ink);font-weight:600;line-height:1.5;}
 .ifa-layer-stack{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
 .ifa-layer-row{border:1px solid var(--rule);border-left:4px solid var(--accent);background:var(--paper-tint);padding:14px 16px;border-radius:2px;}
 .ifa-layer-row[data-layer="energy"]{border-left-color:#c4892a;}

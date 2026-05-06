@@ -26,13 +26,13 @@ SYSTEM_PERSONA = (
 TONE_INSTRUCTIONS = """根据用户给的 5 层 AI 板块表现、上一交易日热点、隔夜美股科技、商品/政策上下文，
 生成"今日 Tech 总体判断"。
 
-要求：
+硬性要求：
 1. tech_state 必须取：主线候选 / 轮动候选 / 补涨候选 / 分歧 / 退潮风险 / 暂非市场核心（之一）。
 2. tech_state_short 简化：主线 / 轮动 / 补涨 / 分歧 / 退潮 / 边缘（用于 CSS data-tone）。
 3. strongest_layer 取：energy / chips / infra / models / apps / mixed（最值得观察的层级）。
 4. risk_level: low / medium / high（高位兑现 / 缩量 / 情绪过热）。
-5. headline: 50字以内一句话，必须包含明确判断 + 验证点。
-6. summary: 150-180 字，给出主导逻辑 + 关键变量 + 验证窗口。
+5. **headline ≤ 28 个汉字**，ONE 句，必须包含明确判断（不要使用"等待确认"作为唯一判断）。
+6. **summary ≤ 80 字**，最多 2 句。讲清"主导层 + 最关键的一个验证点"，**不要罗列 5 层数据**（§02 已展示）。
 7. validation_points: 数组（3-4 条），每条 metric（如"光模块龙头开盘成交"）+ threshold（什么状态算验证）+ window（开盘后/上午/全天）。
 8. 不写买卖指令；可以使用'若…则板块进入扩散''若…失败则进入退潮风险'等情景化表达。"""
 
@@ -47,15 +47,19 @@ TONE_SCHEMA = """{
 }"""
 
 # ─── S2: AI Five-Layer Cake 板块地图 ───────────────────────────────────────
-LAYER_MAP_INSTRUCTIONS = """对 5 层（energy/chips/infra/models/apps）每一层，给出今日观察评级与解读。
+LAYER_MAP_INSTRUCTIONS = """对 5 层（energy/chips/infra/models/apps）每一层，给出今日观察评级与解读。同时给一段 intro 解释 AI Five-Layer Cake 概念，让非技术读者懂。
 
-要求：
-1. 输出 layers 数组，按 ['energy','chips','infra','models','apps'] 顺序对齐 candidate_index。
-2. 每层对象：layer_id / yesterday_strength（强/中/弱/数据缺失）/ today_attention（高/中/低）/ key_observation（30-50 字今日开盘后看什么）/ rotation_role（主线/中军/补涨/扩散候选/边缘）。
-3. 必须基于用户提供的板块 pct_change 与近 5 日序列；不能凭空判断"强"。
-4. 不写买卖指令。"""
+硬性要求：
+1. **intro_plain ≤ 50 字 ONE 句**，用大白话告诉读者：这 5 层是 AI 产业链的从底层电力 / 算力基建到上层应用，越靠下越基础设施类、越靠上越接近终端用户和业绩兑现。**不要写"NVIDIA / Jensen 框架"这种小圈子术语**——HNW 客户不会查这个。
+2. **highlight ≤ 24 字 ONE 句**，告诉读者今日哪一层最值得关注（强/弱/异动）。
+3. 输出 layers 数组，按 ['energy','chips','infra','models','apps'] 顺序对齐 candidate_index。
+4. 每层对象：layer_id / yesterday_strength（强/中/弱/数据缺失）/ today_attention（高/中/低）/ key_observation（≤30 字今日开盘后看什么，**不要说"待观察"这种废话**）/ rotation_role（主线/中军/补涨/扩散候选/边缘）。
+5. 必须基于用户提供的板块 pct_change 与近 5 日序列；不能凭空判断"强"。
+6. 不写买卖指令。"""
 
 LAYER_MAP_SCHEMA = """{
+  "intro_plain":"≤50字大白话解释",
+  "highlight":"≤24字今日哪一层最值得关注",
   "results":[{"candidate_index":0,"layer_id":"energy","yesterday_strength":"中","today_attention":"中","key_observation":"...","rotation_role":"补涨"}]
 }"""
 
@@ -162,14 +166,18 @@ HYPOTHESES_SCHEMA = """{
 EVENING_HEADLINE_INSTRUCTIONS = """基于今日 tech 板块表现 + 涨停个股 + 申万 TMT 行业表现 + 跨资产 + 政策 + 美股，
 写晚盘开篇。
 
-要求：
+硬性要求：
 1. label 取"晚盘 Tech 综述"。
-2. text 200-260 字，第一句必须是判断式总结（主线 / 轮动 / 分歧 / 退潮 / 弱），后续给 3 条因果链。
-3. 引用具体板块/个股表现。"""
+2. **headline ≤ 28 个汉字**，ONE 句，判断式（主线 / 轮动 / 分歧 / 退潮 / 弱）。
+3. **top3** 必须是 3 条**前瞻性 / 决策含义**短语，每条 ≤ 22 字；不要重复 §02/§03 已展示的板块数据。
+4. **summary ≤ 80 字**，最多 2 句，讲清"今日因果 + 明日观察"。
+5. 不能编造数据；只允许引用 user 提供的实数。"""
 
 EVENING_HEADLINE_SCHEMA = """{
   "label":"晚盘 Tech 综述",
-  "text":"200-260字"
+  "headline":"≤28字一句话判断",
+  "top3":["前瞻条1 ≤22字","前瞻条2","前瞻条3"],
+  "summary":"≤80字"
 }"""
 
 # ─── EVENING — 早报假设 Review ─────────────────────────────────────────────

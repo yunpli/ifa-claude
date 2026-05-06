@@ -24,12 +24,12 @@ SYSTEM_PERSONA = (
 TONE_INSTRUCTIONS = """根据用户提供的宏观面板（GDP/CPI/PPI/PMI/M1/M2/社融）、利率/汇率/资金面快照、隔夜跨资产、活跃政策事件，
 生成"今日宏观底色"判断卡，面向 A 股投资人。
 
-要求：
+硬性要求：
 1. tone 必须取：偏积极 / 偏中性 / 偏谨慎 / 背景变量（之一）。
 2. tone_short 简化标签：积极 / 中性 / 谨慎 / 背景变量（之一）。
-3. headline 一句话总结，不超过 50 字，必须包含明确判断（不是描述天气式的话）。
-4. summary 150 字以内段落，给出底色的核心理由 + 最值得关注的 2-3 个变量。
-5. bullets：3-5 条关键判断，每条 dimension（政策/增长/通胀/流动性/汇率/跨资产/科技政策）+ judgment（一句判断）+ a_share_implication（对 A 股含义）+ data_timing（最近一期已披露/上一交易日确认/隔夜至cutoff/政策记忆）+ confidence（high/medium/low）。
+3. **headline ≤ 28 个汉字**，ONE 句，必须是明确判断；不允许"修复线索仍待验证"这种模糊语。
+4. **summary ≤ 80 字**，最多 2 句。**只讲一条最重要的宏观主线**——是 PPI 转正？还是社融斜率？还是政策？挑一个，不要并列三个"最值得跟踪"。
+5. bullets：3-5 条关键判断，每条 dimension（政策/增长/通胀/流动性/汇率/跨资产/科技政策）+ judgment（≤14 字）+ a_share_implication（≤20 字对 A 股含义）+ data_timing（最近一期已披露/上一交易日确认/隔夜至cutoff/政策记忆）+ confidence（high/medium/low）。
 6. 不写"建议买入/卖出"等指令性语言。
 7. 如果某些变量数据不足，明确说明，不要硬解读。"""
 
@@ -173,10 +173,13 @@ HYPOTHESES_SCHEMA = """{
 # ─── EVENING — 早盘假设复盘 ─────────────────────────────────────────────────
 REVIEW_INSTRUCTIONS = """根据用户给的"早报假设列表"以及"今日 A 股市场状态（指数涨跌、成交、板块、跨资产）"，逐条复盘。
 
-要求：
-1. 每条 hypothesis 对应一个 review 对象：review_result(validated|partial|failed|not_applicable) + review_result_display(中文：验证 / 部分验证 / 未验证 / 暂无法判断) + evidence_text(一句市场证据) + lesson(一句话教训或下一步)。
+硬性要求：
+1. 每条 hypothesis 对应一个 review 对象：review_result(validated|partial|failed|not_applicable) + review_result_display(中文：验证 / 部分验证 / 未验证 / 暂无法判断) + evidence_text(一句市场证据，≤30 字) + lesson(一句话教训或下一步，≤30 字)。
 2. 严格按输入顺序返回。
-3. 不能编造市场数据，所有引用必须来自用户提供的市场快照。"""
+3. 不能编造市场数据，所有引用必须来自用户提供的市场快照。
+4. **重要**：only use "暂无法判断" / "not_applicable" if the user-provided market snapshot **truly lacks** the comparison anchor. 如果 user 提供了**指数 / 成交 / 跨资产 / 任何板块**数据，**至少要给出 partial 判断**——例如指数下跌 0.06% 就足以验证 "今日 A 股是否上涨"类假设，绝不能写"无法判断"。
+5. evidence_text **不要写 "缺少 X / Y / Z 板块表现，无法判断"** 这种内部 ops 抱怨；用户不在乎我们没有什么数据，只在乎用现有数据给出最强的判断。
+6. 如果证据 partial 反向，给 partial 而非 not_applicable。"""
 
 REVIEW_SCHEMA = """{
   "results":[{"candidate_index":0,"review_result":"validated","review_result_display":"验证","evidence_text":"...","lesson":"..."}]
@@ -209,13 +212,17 @@ WATCHLIST_SCHEMA = """{
 }"""
 
 # ─── EVENING — 一句话晚报开篇 ───────────────────────────────────────────────
-EVENING_HEADLINE_INSTRUCTIONS = """基于今日 A 股市场状态、跨资产、政策事件，写一段晚报开篇评论。
+EVENING_HEADLINE_INSTRUCTIONS = """基于今日 A 股市场状态、跨资产、政策事件，写晚报开篇。
 
-要求：
+硬性要求：
 1. label 取"晚盘综述"。
-2. text 200-260 字，第一句必须是判断式总结（不是流水账），后面给 3 条左右因果链或风险提醒。"""
+2. **headline ≤ 28 个汉字**，ONE 句，判断式总结（不能流水账）。
+3. **top3** 必须是 3 条**前瞻性 / 决策含义**短语，每条 ≤ 22 字。每条要回答"明日重点关注什么"或"今日什么数据改变了我们的看法"。**不要复制 §03/§04 已经展示的市场数据**。
+4. **summary ≤ 80 字**，最多 2 句因果或风险提醒。"""
 
 EVENING_HEADLINE_SCHEMA = """{
   "label":"晚盘综述",
-  "text":"200-260字"
+  "headline":"≤28字一句话判断",
+  "top3":["前瞻条1 ≤22字","前瞻条2","前瞻条3"],
+  "summary":"≤80字"
 }"""

@@ -1,0 +1,29 @@
+{# review-hooks card grid: each hook = a verifiable question for the next slot #}
+{% if s.content_json.hooks %}
+<section class="ifa-section">
+  {% include "_section_head.html" %}
+  <div class="ifa-review-hooks">
+    {% for h in s.content_json.hooks %}
+    <article class="ifa-review-hook">
+      <header class="ifa-review-hook__head">
+        <span class="ifa-review-hook__num">{{ '%02d'|format(loop.index) }}</span>
+        <h3 class="ifa-review-hook__q">{{ h.question or '—' }}</h3>
+      </header>
+      {% if h.why_it_matters %}
+      <p class="ifa-review-hook__why"><strong>为什么重要</strong>{{ h.why_it_matters }}</p>
+      {% endif %}
+      {% if h.threshold %}
+      <p class="ifa-review-hook__threshold"><strong>验证阈值</strong>{{ h.threshold }}</p>
+      {% endif %}
+      {% if h.related %}
+      <div class="ifa-review-hook__tags">
+        {% for tag in h.related.split('、') if tag %}
+          <span class="ifa-pill">{{ tag.strip() }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

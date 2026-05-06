@@ -39,6 +39,7 @@ from ifa.core.report import (
 from ifa.core.report.run import (
     ReportRun,
     finalize_report_run,
+    insert_judgment,
     insert_report_run,
     insert_section,
 )
@@ -274,13 +275,28 @@ def _build_n11_review_hooks(ctx: MarketCtx, prior: list[dict]) -> dict:
                                   prompt_name="market_noon.s11_review_hooks",
                                   parsed=parsed, resp=resp, status=status)
     hooks = (parsed.get("review_hooks") if isinstance(parsed, dict) else None) or []
-    text_lines = [f"<strong>{h.get('question')}</strong>—{h.get('why_it_matters')}" for h in hooks]
-    body = "<br><br>".join(text_lines) if text_lines else "今日午后无明显需要晚报重点 review 的问题。"
+    # Persist hooks as hypotheses so evening §08 中报判断 Review can load them.
+    # Each hook = one verifiable assumption; question → judgment_text,
+    # why_it_matters → validation_method.
+    for h in hooks:
+        try:
+            insert_judgment(
+                ctx.engine, report_run_id=ctx.run.report_run_id,
+                section_key="market_noon.s11_review_hooks",
+                judgment_type="hypothesis",
+                judgment_text=(h.get("question") or "").strip()[:600],
+                target=(h.get("related") or h.get("focus") or "")[:300],
+                horizon=(h.get("horizon") or "today_pm"),
+                confidence=(h.get("confidence") or "medium").lower(),
+                validation_method=(h.get("why_it_matters") or h.get("threshold") or "")[:600],
+            )
+        except Exception:
+            pass
     return {
         "key": "market_noon.s11_review_hooks",
         "title": "晚报需要重点 Review 的问题",
-        "order": 11, "type": "commentary",
-        "content_json": {"label": "午报埋钩", "text": body},
+        "order": 11, "type": "review_hooks",
+        "content_json": {"label": "午报埋钩", "hooks": hooks},
         "prompt_name": "market_noon.s11_review_hooks", "model_output_id": moid,
     }
 

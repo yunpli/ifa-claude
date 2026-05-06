@@ -1,4 +1,11 @@
 {% set c = s.content_json %}
+{% macro strip_prefix(value, prefixes) -%}
+  {%- set v = (value or '').strip() -%}
+  {%- for p in prefixes -%}
+    {%- if v.startswith(p) -%}{%- set v = v[p|length:].lstrip(' ：:') -%}{%- endif -%}
+  {%- endfor -%}
+  {{ v }}
+{%- endmacro %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
   <div class="ifa-chain-grid">
@@ -8,8 +15,14 @@
         <span class="ifa-chain-card__name">{{ ch.name }}</span>
         <span class="ifa-chain-card__signal" data-signal="{{ ch.upstream_signal or '—' }}">上游 {{ ch.upstream_signal or '—' }}</span>
       </div>
-      <div class="ifa-chain-card__row"><span class="ifa-chain-card__lbl">中游影响</span><span>{{ ch.midstream_impact or '—' }}</span></div>
-      <div class="ifa-chain-card__row"><span class="ifa-chain-card__lbl">下游 / A 股</span><span>{{ ch.downstream_a_share or '—' }}</span></div>
+      <div class="ifa-chain-card__row">
+        <span class="ifa-chain-card__lbl">中游影响</span>
+        <span>{{ strip_prefix(ch.midstream_impact, ['中游影响', '中游', '中游影响：']) or '—' }}</span>
+      </div>
+      <div class="ifa-chain-card__row">
+        <span class="ifa-chain-card__lbl">下游 / A 股</span>
+        <span>{{ strip_prefix(ch.downstream_a_share, ['下游 / A 股', '下游/A股', '下游 / A股', '下游', 'A 股端', 'A股端']) or '—' }}</span>
+      </div>
       <div class="ifa-chain-card__takeaway">{{ ch.takeaway or '—' }}</div>
     </div>
     {% endfor %}

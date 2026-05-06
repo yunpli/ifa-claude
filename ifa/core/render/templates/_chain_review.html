@@ -1,4 +1,12 @@
 {% set c = s.content_json %}
+{# Strip duplicated label prefix that LLM occasionally emits ("A 股端A股端...") #}
+{% macro strip_prefix(value, prefixes) -%}
+  {%- set v = (value or '').strip() -%}
+  {%- for p in prefixes -%}
+    {%- if v.startswith(p) -%}{%- set v = v[p|length:].lstrip() -%}{%- endif -%}
+  {%- endfor -%}
+  {{ v }}
+{%- endmacro %}
 <section class="ifa-section">
   {% include "_section_head.html" %}
   <div class="ifa-chain-grid">
@@ -7,8 +15,14 @@
       <div class="ifa-chain-card__head">
         <span class="ifa-chain-card__name">{{ ch.name }}</span>
       </div>
-      <div class="ifa-chain-card__row"><span class="ifa-chain-card__lbl">商品端</span><span>{{ ch.commodity_recap or '—' }}</span></div>
-      <div class="ifa-chain-card__row"><span class="ifa-chain-card__lbl">A 股端</span><span>{{ ch.a_share_recap or '—' }}</span></div>
+      <div class="ifa-chain-card__row">
+        <span class="ifa-chain-card__lbl">商品端</span>
+        <span>{{ strip_prefix(ch.commodity_recap, ['商品端', '商品端：', '商品端 ']) or '—' }}</span>
+      </div>
+      <div class="ifa-chain-card__row">
+        <span class="ifa-chain-card__lbl">A 股端</span>
+        <span>{{ strip_prefix(ch.a_share_recap, ['A 股端', 'A股端', 'A 股端：', 'A股端：']) or '—' }}</span>
+      </div>
       <div class="ifa-chain-card__takeaway">{{ ch.takeaway or '—' }}</div>
     </div>
     {% endfor %}

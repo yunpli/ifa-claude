@@ -465,13 +465,15 @@ def run_tech_evening(
         )
 
         sections: list[dict] = []
+        # E6 "潜在蓄势待发池表现复盘" removed (paired with morning S8 removal,
+        # UI bug T2 / issue #16). Same rationale: empty placeholder w/ low
+        # client value.
         for label, builder in [
             ("E1 headline",      lambda: _build_e1_headline(ctx, morning_hyps)),
             ("E2 layer map",     lambda: _build_e2_layer_map(ctx)),
             ("E3 board recap",   lambda: _build_e3_board_recap(ctx)),
             ("E4 review",        lambda: _build_e4_review(ctx, morning_hyps)),
             ("E5 leaders",       lambda: _build_e5_leaders(ctx)),
-            ("E6 candidates",    lambda: _build_e6_candidates(ctx)),
             ("E7 focus deep",    lambda: _build_e7_focus_deep(ctx)),
             ("E8 focus brief",   lambda: _build_e8_focus_brief(ctx)),
             ("E9 news",          lambda: _build_e9_news(ctx)),

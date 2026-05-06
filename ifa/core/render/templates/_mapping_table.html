@@ -15,10 +15,13 @@
     <tbody>
       {% for r in c.rows %}
       <tr>
-        <td><span class="ifa-matrix__dim">{{ r.macro_variable }}</span></td>
+        <td>
+          <div class="ifa-matrix__dim">{{ r.macro_variable }}</div>
+          {% if r.plain_reason %}<div class="ifa-matrix__reason">{{ r.plain_reason }}</div>{% endif %}
+        </td>
         <td class="ifa-matrix__areas">{{ r.data_timing or '—' }}</td>
-        <td class="ifa-matrix__areas">{% for a in r.beneficiaries or [] %}<span>{{ a }}</span>{% endfor %}</td>
-        <td class="ifa-matrix__areas">{% for a in r.pressured_areas or [] %}<span>{{ a }}</span>{% endfor %}</td>
+        <td class="ifa-matrix__areas">{% for a in r.beneficiaries or [] %}<span class="ifa-pill" data-tone="up">{{ a }}</span>{% endfor %}{% if not r.beneficiaries %}<span class="ifa-muted">—</span>{% endif %}</td>
+        <td class="ifa-matrix__areas">{% for a in r.pressured_areas or [] %}<span class="ifa-pill" data-tone="down">{{ a }}</span>{% endfor %}{% if not r.pressured_areas %}<span class="ifa-muted">—</span>{% endif %}</td>
         <td>{{ r.watch_point_today or '—' }}</td>
         <td style="text-align:center; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-muted)">{{ r.signal_strength or '—' }}</td>
       </tr>

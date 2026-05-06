@@ -372,20 +372,28 @@ def fetch_us_tech_overnight(client: TuShareClient, *, ref_date: dt.date) -> list
 _TECH_KEYWORDS = [
     # AI / 模型
     "OpenAI", "Anthropic", "ChatGPT", "GPT", "Gemini", "Claude", "Llama",
-    "大模型", "AI 应用", "AI模型", "智能体", "Agent", "AGI",
+    "大模型", "AI 应用", "AI模型", "智能体", "Agent", "AGI", "AI",
+    "人工智能", "机器学习", "生成式",
     # 芯片 / 半导体
     "NVIDIA", "英伟达", "AMD", "Broadcom", "博通", "TSMC", "台积电", "Micron", "美光",
     "ASML", "光刻机", "GPU", "ASIC", "FPGA", "HBM", "半导体", "芯片", "晶圆",
     "存储芯片", "EDA", "封测", "国产替代", "出口管制", "半导体设备",
+    "存储", "DRAM", "NAND",
     # 算力基建
     "光模块", "CPO", "PCB", "服务器", "数据中心", "IDC", "液冷",
-    "算力", "云计算", "AI 服务器",
+    "算力", "云计算", "AI 服务器", "网络设备",
     # 应用 / 机器人
     "机器人", "Optimus", "智能驾驶", "FSD", "端侧 AI", "AR", "VR", "MR",
+    "无人驾驶", "智能汽车", "智能座舱",
     # 能源 / 电力
-    "数据中心电力", "AI 电力", "储能", "特高压", "电网",
+    "数据中心电力", "AI 电力", "储能", "特高压", "电网", "电力设备",
+    "新能源", "锂电", "光伏",
+    # 通信
+    "5G", "6G", "通信", "卫星互联网", "低空经济",
     # 政策
     "新质生产力", "人工智能+", "AI+", "科技自立",
+    # 港股科技 (asset evening news shows these)
+    "恒生科技", "互联网", "平台经济",
 ]
 
 

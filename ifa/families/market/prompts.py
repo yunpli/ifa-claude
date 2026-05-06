@@ -36,14 +36,14 @@ SYSTEM_PERSONA = (
 MORNING_TONE_INSTRUCTIONS = """根据用户提供的指数 / 全 A 广度 / 北向 / 两融 / 涨跌停结构 / 申万行业 / 主线候选板块 + 三辅报告（宏观 / Asset / Tech）摘要，
 生成 A 股早报的 "今日 A 股总判断" 卡。
 
-要求：
+硬性要求：
 1. market_state 必须取：进攻 / 修复 / 震荡 / 防守 / 退潮 / 结构性机会（之一）。
 2. market_state_short 简化：进攻 / 修复 / 震荡 / 防守 / 退潮 / 结构（用于 CSS data-tone）。
 3. main_line_state 取：明确 / 轮动 / 分化 / 退潮 / 待确立。
 4. risk_appetite 取：高 / 中 / 低。
 5. risk_level 取：low / medium / high（盘前可见的破坏性风险等级）。
-6. headline 一句话（≤55字）必须包含明确判断 + 验证点。
-7. summary 180-220 字段落，引用具体数据支撑判断；分别讲清 "为什么这样判断 / 谁是潜在主线 / 关键变量 / 验证窗口"。
+6. **headline ≤ 28 个汉字**，ONE 句，必须包含明确判断（不是天气式描述）。
+7. **summary ≤ 100 字**，最多 3 句。讲清"为什么这样判断 + 1 个最关键验证变量"，**不要复述 §02 已展示的指数/广度数据**。
 8. validation_points: 4-5 条 metric / threshold / window，描述今日盘后哪些状态可以反向证伪。
 9. 必须把三辅报告对今日的影响纳入判断；指出 Tech / Asset 各自是否可能成为今日主线。
 10. 不写买卖指令；情景化表达。"""
@@ -85,16 +85,17 @@ ROTATION_SCHEMA = """{
 
 SENTIMENT_INSTRUCTIONS = """对全市场短线情绪指标（涨停家数 / 跌停家数 / 炸板率 / 连板高度 / 高标分布 / 上涨占比 / 成交额变化）进行综合解读。
 
-要求：
+硬性要求：
 1. cycle_phase 取：启动 / 扩散 / 高潮 / 分歧 / 退潮 / 弱启动 / 数据不足。
 2. ladder_health 取：健康 / 一般 / 偏弱 / 失血。
-3. commentary 120-160 字，引用具体涨停/连板/炸板等数字。
-4. risk_note：30 字内今日盘中需要警惕的情绪风险点。"""
+3. **commentary ≤ 80 字**，最多 2 句。每个判断必须有上下文（vs 近期均值、vs 全市场分布）；不能简单写"79 家涨停 = 做多情绪"。如果数据偏弱，要直说"局部赚钱效应"而非全市场情绪。
+4. risk_note：30 字内今日盘中需要警惕的情绪风险点。
+5. **不要重复 cells 已经展示的数字**——它们直接显示在指标格子里。"""
 
 SENTIMENT_SCHEMA = """{
   "cycle_phase":"启动 | 扩散 | 高潮 | 分歧 | 退潮 | 弱启动 | 数据不足",
   "ladder_health":"健康 | 一般 | 偏弱 | 失血",
-  "commentary":"120-160字",
+  "commentary":"≤80字两句",
   "risk_note":"30字内"
 }"""
 
@@ -183,11 +184,11 @@ HYPOTHESES_SCHEMA = """{
 
 NOON_TONE_INSTRUCTIONS = """根据上午盘真实数据 + 早报假设，给出 "午间总判断" 卡。
 
-要求：
+硬性要求：
 1. market_state / main_line_state / risk_appetite 同早报词表。
 2. afternoon_basis 取：继续进攻 / 等待确认 / 防守 / 控制仓位 / 兑现观察 / 数据不足。
-3. headline ≤50 字，必须直说 "上午是否验证了早报、下午基调是什么"。
-4. summary 180-220 字，引用上午真实数字。
+3. **headline ≤ 28 个汉字**，ONE 句，必须直说 "上午是否验证了早报、下午基调是什么"，不允许出现 "早报假设未提供" 这种填充。
+4. **summary ≤ 100 字**，最多 3 句。**不要罗列指数/广度/涨停数字**（§02/§05 已展示）；只解释"上午发生了什么 → 下午意味着什么"。
 5. validation_points 3-5 条，下午要看什么。
 6. 不写买卖指令。"""
 
@@ -223,13 +224,21 @@ NOON_SCENARIO_SCHEMA = """{
   "scenarios":[{"scenario_label":"...","condition":"...","recommended_focus":"...","priority":"medium"}]
 }"""
 
-NOON_REVIEW_HOOKS_INSTRUCTIONS = """生成 3-5 条 "晚报需要重点 review 的问题"。
+NOON_REVIEW_HOOKS_INSTRUCTIONS = """生成 3-5 条 "晚报需要重点 review 的问题"。每一条都必须是一个**可在晚报阶段用具体阈值验证**的 forward-looking 假设。
 
-要求：
-1. 每条 question + why_it_matters。"""
+硬性要求：
+1. **question** ≤ 40 个汉字，必须是疑问句，聚焦一个点位/板块/资金信号是否会保持/失守。
+2. **why_it_matters** ≤ 30 个汉字，写"如果 X 那么对市场判断意味着 Y"。
+3. **threshold** 写一句具体的可验证规则（例如"上证 14:30 仍 +1% 上方"或"涨停封单超 800 亿"）。
+4. **related** 用顿号 "、" 分隔板块/标的（不要紧贴成一个长串）。
+5. **horizon** 在 ["today_pm","today_close","next_day"] 中选一个。
+6. **confidence** 在 ["low","medium","high"] 中选一个。
+7. 不写无验证规则的"主观感觉"问题。"""
 
 NOON_REVIEW_HOOKS_SCHEMA = """{
-  "review_hooks":[{"question":"...","why_it_matters":"..."}]
+  "review_hooks":[
+    {"question":"...","why_it_matters":"...","threshold":"...","related":"板块A、板块B","horizon":"today_pm|today_close|next_day","confidence":"low|medium|high"}
+  ]
 }"""
 
 
@@ -237,16 +246,19 @@ NOON_REVIEW_HOOKS_SCHEMA = """{
 
 EVENING_HEADLINE_INSTRUCTIONS = """基于全天数据 + 早报判断 + 中报校准 + 三辅报告，写晚盘开篇。
 
-要求：
+硬性要求：
 1. label 取 "今日 A 股复盘"。
-2. text 240-300 字，第一句必须直接判断今天的行情 (进攻 / 修复 / 分化 / 防守 / 退潮)，
-   后续给出 3-4 条因果链：主线归因 / 资金 / 情绪 / 三辅判断的兑现度。
-3. 引用具体数字。
-4. 末尾给出明日基调（延续 / 分歧 / 防守 / 观察）。"""
+2. **headline ≤ 28 个汉字**，ONE 句，直接判断（进攻 / 修复 / 分化 / 防守 / 退潮）。
+3. **top3** 3 条**前瞻性 / 决策含义**短语，每条 ≤ 22 字。聚焦"明日基调 / 早报命中度 / 三辅兑现"，不要重复 §02/§03 已展示的数字。
+4. **summary ≤ 100 字**，最多 3 句。讲清"主线归因 + 明日观察"。
+5. 引用具体数字时只用 1-2 个最关键的。
+6. 末尾给出明日基调（延续 / 分歧 / 防守 / 观察）。"""
 
 EVENING_HEADLINE_SCHEMA = """{
   "label":"今日 A 股复盘",
-  "text":"240-300字"
+  "headline":"≤28字一句话判断",
+  "top3":["前瞻条1 ≤22字","前瞻条2","前瞻条3"],
+  "summary":"≤100字"
 }"""
 
 DAY_TRAJECTORY_INSTRUCTIONS = """对 "全天走势节奏" 做四段式归因（开盘 / 上午 / 午后 / 尾盘），每段一句话给出主导力量。
