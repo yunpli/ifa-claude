@@ -320,8 +320,15 @@ def run_market_noon(
     insert_report_run(engine, run)
     on_log(f"[run {str(run.report_run_id)[:8]}] starting Market noon report for {report_date} user={user}")
 
+    # Noon's "today" data comes from realtime APIs (rt_k / rt_min_daily / stk_limit),
+    # NOT from raw_daily/sw_daily etc. — those are EOD endpoints TuShare publishes
+    # ~17:00, hours after this report runs. The DB freshness check therefore
+    # validates *historical context* (sparkline + ranking) is up-to-date through
+    # the previous trading day, not today.
+    from ifa.core.calendar import prev_trading_day
     from ifa.core.report.freshness import preflight_freshness_check
-    for line in preflight_freshness_check(engine, family="market", expected_date=report_date):
+    _prev = prev_trading_day(engine, report_date)
+    for line in preflight_freshness_check(engine, family="market", expected_date=_prev):
         on_log(f"[freshness] ⚠ {line}")
 
     try:
