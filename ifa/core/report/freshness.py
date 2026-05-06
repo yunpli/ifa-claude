@@ -35,28 +35,62 @@ from ifa.core.calendar import (
 )
 
 
-# Per-family list of (table, friendly_name, allowed_lag_trading_days).
-# allowed_lag = 0 → must have through the reference trading day.
-# allowed_lag = N → any lag up to N trading days is acceptable.
-_FAMILY_TABLES: dict[str, list[tuple[str, str, int]]] = {
-    "market": [
-        ("smartmoney.raw_daily",       "全A日行情",       0),
-        ("smartmoney.raw_moneyflow",   "全A资金流",       0),
-        ("smartmoney.raw_index_daily", "指数日行情",       0),
-        ("smartmoney.raw_sw_daily",    "申万板块日行情",   0),
-    ],
-    "macro": [
-        ("smartmoney.raw_index_daily", "指数日行情",   0),
-        ("smartmoney.raw_daily",       "全A日行情",   0),
-    ],
-    "asset": [
-        ("smartmoney.raw_sw_daily",    "申万板块日行情", 0),
-    ],
-    "tech": [
-        ("smartmoney.raw_sw_daily",    "申万板块日行情", 0),
-        ("smartmoney.raw_daily",       "全A日行情",     0),
-        ("smartmoney.raw_moneyflow",   "全A资金流",     0),
-    ],
+# Per-family AND per-slot list of (table, friendly_name, allowed_lag_trading_days).
+# Slot-aware so noon doesn't warn about tables it doesn't actually depend on
+# (e.g., raw_moneyflow is only consumed by evening's fund_flow_top section).
+# Tables that fail to populate for noon's reference date won't be flagged
+# unless noon legitimately reads them.
+_FAMILY_TABLES: dict[str, dict[str, list[tuple[str, str, int]]]] = {
+    "market": {
+        # Morning + noon both read historical context for sparkline + SW MV weights.
+        # Noon does NOT use raw_moneyflow (no fund_flow_top section), no top_list,
+        # no top_inst — drop them.
+        "morning": [
+            ("smartmoney.raw_daily",       "全A日行情",       0),
+            ("smartmoney.raw_index_daily", "指数日行情",       0),
+            ("smartmoney.raw_sw_daily",    "申万板块日行情",   0),
+        ],
+        "noon": [
+            ("smartmoney.raw_daily",       "全A日行情",       0),
+            ("smartmoney.raw_index_daily", "指数日行情",       0),
+            ("smartmoney.raw_sw_daily",    "申万板块日行情",   0),
+        ],
+        # Evening adds fund_flow_top (moneyflow), dragon_tiger (top_list/top_inst).
+        "evening": [
+            ("smartmoney.raw_daily",       "全A日行情",       0),
+            ("smartmoney.raw_moneyflow",   "全A资金流",       0),
+            ("smartmoney.raw_index_daily", "指数日行情",       0),
+            ("smartmoney.raw_sw_daily",    "申万板块日行情",   0),
+        ],
+    },
+    "macro": {
+        "morning": [
+            ("smartmoney.raw_index_daily", "指数日行情",   0),
+        ],
+        "evening": [
+            ("smartmoney.raw_index_daily", "指数日行情",   0),
+            ("smartmoney.raw_daily",       "全A日行情",   0),
+        ],
+    },
+    "asset": {
+        "morning": [
+            ("smartmoney.raw_sw_daily",    "申万板块日行情", 0),
+        ],
+        "evening": [
+            ("smartmoney.raw_sw_daily",    "申万板块日行情", 0),
+        ],
+    },
+    "tech": {
+        "morning": [
+            ("smartmoney.raw_sw_daily",    "申万板块日行情", 0),
+            ("smartmoney.raw_daily",       "全A日行情",     0),
+        ],
+        "evening": [
+            ("smartmoney.raw_sw_daily",    "申万板块日行情", 0),
+            ("smartmoney.raw_daily",       "全A日行情",     0),
+            ("smartmoney.raw_moneyflow",   "全A资金流",     0),
+        ],
+    },
 }
 
 
@@ -104,8 +138,13 @@ def preflight_freshness_check(
     *,
     family: str,
     expected_date: dt.date,
+    slot: str = "evening",
 ) -> list[str]:
     """Return human-readable warning strings (empty when all fresh).
+
+    Slot-aware: each report slot only validates the tables it actually reads.
+    Noon doesn't load raw_moneyflow / top_list / top_inst etc. — checking
+    those would warn about ETL gaps that noon doesn't care about.
 
     Strings have the shape:
       "申万板块日行情 (smartmoney.raw_sw_daily) latest=2026-04-30,
@@ -114,7 +153,8 @@ def preflight_freshness_check(
     A trading-day lag of 0 means "ETL is up to date with the most recent
     trading day, even if today happens to be a weekend/holiday."
     """
-    spec = _FAMILY_TABLES.get(family, [])
+    family_spec = _FAMILY_TABLES.get(family, {})
+    spec = family_spec.get(slot, [])
     if not spec:
         return []
     reference = _resolve_reference_trading_day(engine, expected_date)

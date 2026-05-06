@@ -554,7 +554,7 @@ def run_asset_evening(
     on_log(f"[run {str(run.report_run_id)[:8]}] starting Asset evening report for {report_date}")
 
     from ifa.core.report.freshness import preflight_freshness_check
-    for line in preflight_freshness_check(engine, family="asset", expected_date=report_date):
+    for line in preflight_freshness_check(engine, family="asset", expected_date=report_date, slot="evening"):
         on_log(f"[freshness] ⚠ {line}")
 
     try:

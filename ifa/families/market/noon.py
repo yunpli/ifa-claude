@@ -328,7 +328,7 @@ def run_market_noon(
     from ifa.core.calendar import prev_trading_day
     from ifa.core.report.freshness import preflight_freshness_check
     _prev = prev_trading_day(engine, report_date)
-    for line in preflight_freshness_check(engine, family="market", expected_date=_prev):
+    for line in preflight_freshness_check(engine, family="market", expected_date=_prev, slot="noon"):
         on_log(f"[freshness] ⚠ {line}")
 
     try:

@@ -326,7 +326,7 @@ def run_market_morning(
         # Calendar T-1 fails on Mondays (= Sunday) and post-holiday opens (= holiday).
         prev = prev_trading_day(engine, report_date)
         from ifa.core.report.freshness import preflight_freshness_check
-        for line in preflight_freshness_check(engine, family="market", expected_date=prev):
+        for line in preflight_freshness_check(engine, family="market", expected_date=prev, slot="morning"):
             on_log(f"[freshness] ⚠ {line}")
         prefetched = prefetch_market_data(
             tushare=tushare, engine=engine, on_date=prev,
