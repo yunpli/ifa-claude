@@ -133,24 +133,27 @@ def prefetch_market_data(
     on_log("fetching main-line candidates (SW L2 dynamic)…")
     main_lines = mdata.fetch_main_lines(engine, on_date=on_date)
 
-    # Slot-aware: fund_flow_top + dragon_tiger consume moneyflow / top_list /
-    # top_inst — all EOD-only. Noon report doesn't display these sections, AND
-    # at noon TuShare doesn't have today's data anyway. Skip the fetches:
-    #   - saves API calls
-    #   - prevents stale objects from polluting compute_staleness_warning
-    #   - prevents freshness check from flagging tables noon doesn't depend on
+    # Slot-aware fetches:
+    # - fund_flow_top / dragon_tiger: only evening uses these (consume EOD
+    #   moneyflow / top_list / top_inst); morning + noon skip.
+    # - flows (north/south + margin): morning and evening use these — morning's
+    #   _build_s1_tone references flows.north_money for the "上一交易日北向"
+    #   blob. Only noon skips (noon doesn't depend on T-1 capital flows).
     if slot in ("evening",):
         on_log("fetching top fund-flow stocks…")
         fund_top = mdata.fetch_fund_flow_top(tushare, on_date=on_date, top_n=20)
         on_log("fetching dragon-tiger list…")
         dragon_tiger = mdata.fetch_dragon_tiger(tushare, on_date=on_date, top_n=15)
         mdata.enrich_stocks(tushare, on_date=on_date, stocks=fund_top + dragon_tiger)
+    else:
+        on_log(f"skipping fund_flow_top + dragon_tiger (not used in {slot} report)")
+        fund_top = []
+        dragon_tiger = []
+    if slot in ("morning", "evening"):
         on_log("fetching north/south + margin flows…")
         flows = mdata.fetch_flows(tushare, on_date=on_date)
     else:
-        on_log(f"skipping fund_flow_top + dragon_tiger + flows (not used in {slot} report)")
-        fund_top = []
-        dragon_tiger = []
+        on_log(f"skipping flows (not used in {slot} report)")
         flows = mdata.FlowsSnap(north_money=None, south_money=None, hsgt_date=None,
                                   margin_total=None, margin_change=None, margin_date=None)
     on_log(f"reading three-aux summary for {on_date} ({aux_report_type})…")
