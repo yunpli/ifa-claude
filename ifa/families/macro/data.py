@@ -144,6 +144,10 @@ def fetch_liquidity_snapshot(client: TuShareClient, *, ref_date: dt.date) -> Liq
     end = ref_date.strftime("%Y%m%d")
     start = (ref_date - dt.timedelta(days=20)).strftime("%Y%m%d")
 
+    # Staleness defense: data is only "current" if its publication date matches ref_date.
+    # If TuShare returns yesterday's row (today's not published yet), keep snap.*_date
+    # for renderer to prefix "T-1" rather than fabricating today.
+
     try:
         df = client.call("shibor", start_date=start, end_date=end).sort_values("date").tail(1)
         if not df.empty:
@@ -182,8 +186,6 @@ def fetch_liquidity_snapshot(client: TuShareClient, *, ref_date: dt.date) -> Liq
         df = client.call("moneyflow_hsgt", start_date=start, end_date=end).sort_values("trade_date").tail(1)
         if not df.empty:
             row = df.iloc[-1]
-            # values returned in 万元 in some versions, 亿元 in others — assume value is what the API returns;
-            # we display via formatter that knows the unit from the doc (北向: 万元 → display in 亿元 by /10000)
             nm = row.get("north_money")
             sm = row.get("south_money")
             snap.north_money = float(nm) / 10000 if pd.notna(nm) else None
@@ -249,6 +251,10 @@ def fetch_cross_asset(client: TuShareClient, *, ref_date: dt.date) -> list[Asset
                 continue
             df = df.sort_values("trade_date")
             row = df.iloc[-1]
+            row_td = dt.datetime.strptime(str(row["trade_date"]), "%Y%m%d").date()
+            # Staleness defense: only treat as "current" if matches on_date.
+            # When stale, still report latest but mark period as the real date so
+            # renderer can prefix "截至 YYYY-MM-DD" rather than implying today.
             close = float(row["close"]) if pd.notna(row.get("close")) else None
             pct = float(row.get("pct_chg")) if pd.notna(row.get("pct_chg")) else None
             if pct is None and close is not None and len(df) >= 2:
@@ -256,7 +262,7 @@ def fetch_cross_asset(client: TuShareClient, *, ref_date: dt.date) -> list[Asset
                 pct = (close - prev) / prev * 100 if prev else None
             out.append(AssetSnapshot(
                 name=name, code=code, latest=close, pct_change=pct,
-                period=str(row["trade_date"]),
+                period=row_td.strftime("%Y-%m-%d"),
             ))
         except Exception:
             out.append(AssetSnapshot(name=name, code=code))
@@ -408,6 +414,11 @@ def fetch_market_day(client: TuShareClient, *, on_date: dt.date) -> MarketDay:
     end = on_date.strftime("%Y%m%d")
     start = (on_date - dt.timedelta(days=8)).strftime("%Y%m%d")
 
+    # Staleness defense: only fill fields when returned trade_date matches on_date.
+    # Mismatched (T-1 returned for "today") leaves md.* as None so renderer can
+    # surface "数据未更新" rather than fabricating today's print.
+    is_today = on_date == dt.datetime.now(BJT).date()
+    last_actual_td: dt.date | None = None
     for code, attr_close, attr_pct in [
         ("000001.SH", "sh_close", "sh_pct"),
         ("399001.SZ", "sz_close", "sz_pct"),
@@ -420,11 +431,20 @@ def fetch_market_day(client: TuShareClient, *, on_date: dt.date) -> MarketDay:
                 continue
             df = df.sort_values("trade_date")
             row = df.iloc[-1]
+            row_td = dt.datetime.strptime(str(row["trade_date"]), "%Y%m%d").date()
+            if row_td != on_date:
+                # Stale relative to on_date; record actual date but skip price
+                last_actual_td = row_td
+                continue
             setattr(md, attr_close, float(row["close"]) if pd.notna(row.get("close")) else None)
             setattr(md, attr_pct, float(row.get("pct_chg")) if pd.notna(row.get("pct_chg")) else None)
-            md.trade_date = dt.datetime.strptime(str(row["trade_date"]), "%Y%m%d").date()
+            md.trade_date = row_td
+            last_actual_td = row_td
         except Exception:
             continue
+    if md.trade_date == on_date and last_actual_td and last_actual_td != on_date:
+        # Defensive: keep md.trade_date as the actual data date when no fields were filled
+        md.trade_date = last_actual_td
 
     # All-A turnover (sum daily.amount)
     try:

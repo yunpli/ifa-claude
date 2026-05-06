@@ -333,12 +333,19 @@ def fetch_a_share_sectors(client: TuShareClient, *, on_date: dt.date,
             continue
         df = df.sort_values("trade_date")
         row = df.iloc[-1]
-        out.append(SectorBar(
-            code=code, name=name,
-            close=_f(row["close"]),
-            pct_change=_f(row.get("pct_change")),
-            trade_date=dt.datetime.strptime(str(row["trade_date"]), "%Y%m%d").date(),
-        ))
+        row_td = dt.datetime.strptime(str(row["trade_date"]), "%Y%m%d").date()
+        # Staleness defense: only treat as on_date's print when matching;
+        # otherwise leave close/pct as None and record actual date so renderer
+        # can prefix "截至 …" rather than implying today.
+        if row_td == on_date:
+            out.append(SectorBar(
+                code=code, name=name,
+                close=_f(row["close"]),
+                pct_change=_f(row.get("pct_change")),
+                trade_date=row_td,
+            ))
+        else:
+            out.append(SectorBar(code=code, name=name, close=None, pct_change=None, trade_date=row_td))
         if sleep_between:
             time.sleep(sleep_between)
     return out

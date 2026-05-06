@@ -74,15 +74,18 @@ def fetch_board_performance(
             continue
         df = df.sort_values("trade_date").tail(history_days)
         latest = df.iloc[-1]
+        latest_td = _d(str(latest.get("trade_date")))
+        # Staleness defense: only fill close/pct when latest matches on_date
+        is_current = latest_td == on_date
         snap = BoardSnapshot(
             ts_code=code,
             name=name,
             layer_id=layer_id,
-            close=_f(latest.get("close")),
-            pct_change=_f(latest.get("pct_change")),  # sw_daily uses pct_change
-            volume=_f(latest.get("vol")),
-            turnover_rate=_f(latest.get("turnover_rate")),
-            trade_date=_d(str(latest.get("trade_date"))),
+            close=_f(latest.get("close")) if is_current else None,
+            pct_change=_f(latest.get("pct_change")) if is_current else None,
+            volume=_f(latest.get("vol")) if is_current else None,
+            turnover_rate=_f(latest.get("turnover_rate")) if is_current else None,
+            trade_date=latest_td,
             history_close=[_f(v) for v in df["close"]],
             history_dates=df["trade_date"].astype(str).tolist(),
         )
@@ -504,11 +507,13 @@ def fetch_tech_sw_sectors(client: TuShareClient, *, on_date: dt.date) -> list[Se
             out.append(SectorBar(code, name, None, None, None)); continue
         df = df.sort_values("trade_date")
         row = df.iloc[-1]
+        row_td = _d(str(row["trade_date"]))
+        is_current = row_td == on_date
         out.append(SectorBar(
             code=code, name=name,
-            close=_f(row.get("close")),
-            pct_change=_f(row.get("pct_change")),  # sw_daily uses pct_change
-            trade_date=_d(str(row["trade_date"])),
+            close=_f(row.get("close")) if is_current else None,
+            pct_change=_f(row.get("pct_change")) if is_current else None,  # sw_daily uses pct_change
+            trade_date=row_td,
         ))
     return out
 
