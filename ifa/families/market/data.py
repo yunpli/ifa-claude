@@ -48,33 +48,53 @@ class IndexSnap:
     history_dates: list[str] = field(default_factory=list)
 
 
+def _today_bjt() -> dt.date:
+    return dt.datetime.now(BJT).date()
+
+
 def fetch_index_family(client: TuShareClient, *, on_date: dt.date,
                         history_days: int = 10,
-                        use_realtime: bool = False) -> list[IndexSnap]:
+                        slot: str = "morning") -> list[IndexSnap]:
     """Fetch index snapshots + history sparkline.
 
-    Slot-aware behaviour (controlled by use_realtime):
-      - use_realtime=False (morning, on_date=T-1): current point is T-1 EOD via
-        index_daily; history is past N EOD. Trade_date verified == on_date.
-      - use_realtime=True (noon/evening, on_date=T): current point is realtime
-        via ts.realtime_quote (PRICE / PRE_CLOSE / AMOUNT); history sparkline is
-        past N EOD ending T-1 via index_daily; today appended at the tail.
-        Trade_date == on_date asserted by realtime DATE field.
+    Data source resolution (driven by on_date vs today and slot):
+      Production today (on_date == BJT today):
+        - morning  → EOD daily up to T-1; current = T-1 EOD
+        - noon     → EOD daily up to T-1; current = ts.realtime_quote (PRICE)
+                     today's price appended to sparkline tail
+        - evening  → EOD daily up to T (try); fallback to realtime if T missing
+      Historical replay (on_date < today):
+        - any slot → EOD daily up to on_date; current = EOD on on_date
+        - the data is settled, no realtime needed; staleness still verified
 
-    If trade_date mismatches on_date, snap.close stays None and a stale flag is set
-    (so downstream renderer can hide or mark stale instead of fabricating today).
+    snap.trade_date is set ONLY when verified == on_date; mismatched / missing
+    data leaves snap.close as None so downstream renderer shows missing rather
+    than fabricating today.
     """
     import tushare as ts
 
+    is_today = on_date == _today_bjt()
+    use_realtime = is_today and slot in ("noon", "evening")
     end = on_date.strftime("%Y%m%d")
-    hist_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d") if use_realtime else end
+    # For today/noon: history must end at T-1 (today's EOD not yet out).
+    # For today/evening: try T first (post-close), fallback handled below.
+    # For historical: end = on_date.
+    if not is_today:
+        hist_end = end
+    elif slot == "morning":
+        hist_end = end  # on_date is T-1 already (morning passes prev)
+    elif slot == "noon":
+        hist_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d")
+    else:  # evening today
+        hist_end = end
     start = (on_date - dt.timedelta(days=history_days * 2 + 5)).strftime("%Y%m%d")
+
     out: list[IndexSnap] = []
     for ts_code, name, role in MARKET_INDICES:
         snap = IndexSnap(ts_code=ts_code, name=name, role=role,
                          close=None, pct_change=None, amount=None, trade_date=None)
 
-        # Sparkline history (past N EOD)
+        # Sparkline history
         try:
             df_hist = client.call("index_daily", ts_code=ts_code, start_date=start, end_date=hist_end)
         except Exception:
@@ -84,8 +104,9 @@ def fetch_index_family(client: TuShareClient, *, on_date: dt.date,
             snap.history_close = [_f(v) for v in df_hist["close"]]
             snap.history_dates = df_hist["trade_date"].astype(str).tolist()
 
-        # Current snapshot
+        # Current snapshot — branch on data source
         if use_realtime:
+            # Today realtime via sina backend
             try:
                 rt = ts.realtime_quote(ts_code=ts_code, src="sina")
                 if rt is not None and not rt.empty:
@@ -94,22 +115,36 @@ def fetch_index_family(client: TuShareClient, *, on_date: dt.date,
                     rt_price = _f(row.get("PRICE"))
                     rt_pre = _f(row.get("PRE_CLOSE"))
                     rt_amount = _f(row.get("AMOUNT"))
-                    # Verify trade_date matches on_date
                     expected_date = on_date.strftime("%Y%m%d")
                     if rt_date == expected_date and rt_price and rt_pre:
                         snap.close = rt_price
-                        snap.pct_change = (rt_price - rt_pre) / rt_pre * 100 if rt_pre else None
-                        # rt AMOUNT is 元; downstream renderer expects 千元 (legacy from index_daily)
-                        # Convert: 元 → 千元 (÷1000) so amount unit stays consistent with sparkline
+                        snap.pct_change = (rt_price - rt_pre) / rt_pre * 100
+                        # rt AMOUNT is 元 → convert to 千元 (downstream expects 千元 from index_daily)
                         snap.amount = (rt_amount / 1000.0) if rt_amount is not None else None
                         snap.trade_date = on_date
-                        # Append today's close to sparkline tail
                         snap.history_close.append(rt_price)
                         snap.history_dates.append(expected_date)
             except Exception:
                 pass
+
+            # Evening fallback: if realtime didn't yield (e.g., post-close API delay), try EOD daily for on_date
+            if snap.close is None and slot == "evening":
+                try:
+                    df_eod = client.call("index_daily", ts_code=ts_code, start_date=end, end_date=end)
+                    if df_eod is not None and not df_eod.empty:
+                        last = df_eod.iloc[-1]
+                        if _d(str(last.get("trade_date"))) == on_date:
+                            snap.close = _f(last.get("close"))
+                            snap.pct_change = _f(last.get("pct_chg"))
+                            snap.amount = _f(last.get("amount"))
+                            snap.trade_date = on_date
+                            snap.history_close.append(snap.close)
+                            snap.history_dates.append(end)
+                except Exception:
+                    pass
         else:
-            # Use EOD for current point (morning report uses on_date=T-1)
+            # EOD path: morning OR historical replay
+            # Find the row matching on_date (for morning that's T-1 already passed in; for historical that's the target date)
             if df_hist is not None and not df_hist.empty:
                 last = df_hist.iloc[-1]
                 last_td = _d(str(last.get("trade_date")))
@@ -118,7 +153,7 @@ def fetch_index_family(client: TuShareClient, *, on_date: dt.date,
                     snap.pct_change = _f(last.get("pct_chg"))
                     snap.amount = _f(last.get("amount"))
                     snap.trade_date = last_td
-                # else: keep snap.* as None — staleness defense
+                # else: stale — keep None
         out.append(snap)
     return out
 

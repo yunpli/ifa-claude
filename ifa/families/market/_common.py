@@ -12,6 +12,7 @@ from sqlalchemy.engine import Engine
 
 from ifa.core.llm import LLMClient
 from ifa.core.render import sparkline_svg
+from ifa.core.report.timezones import BJT
 from ifa.core.report.run import (
     insert_judgment,
     insert_model_output,
@@ -123,10 +124,8 @@ def prefetch_market_data(
     on_log: Callable[[str], None],
     slot: str = "morning",
 ) -> dict[str, Any]:
-    # Use realtime for noon/evening (today's price live), EOD for morning (T-1 close)
-    use_rt = slot in ("noon", "evening")
-    on_log(f"fetching index family + history (slot={slot}, realtime={use_rt})…")
-    indices = mdata.fetch_index_family(tushare, on_date=on_date, history_days=10, use_realtime=use_rt)
+    on_log(f"fetching index family + history (slot={slot}, on_date={on_date})…")
+    indices = mdata.fetch_index_family(tushare, on_date=on_date, history_days=10, slot=slot)
     on_log("computing whole-A breadth + 涨跌停 + 连板高度…")
     breadth = mdata.fetch_breadth(tushare, on_date=on_date)
     on_log("fetching SW industry rotation (sw_daily)…")
@@ -198,25 +197,40 @@ def enrich_market_focus(
     )
 
     # Slot-aware sparkline caption
+    today = dt.datetime.now(BJT).date()
+    is_today = on_date == today
     if slot == "noon":
-        spark_caption = "今日上午分时（5MIN）"
+        spark_caption = "今日上午分时（5MIN）" if is_today else f"{on_date} 上午分时（5MIN）"
     elif slot == "evening":
-        spark_caption = "今日全天分时（5MIN）"
+        spark_caption = "今日全天分时（5MIN）" if is_today else f"{on_date} 全天分时（5MIN）"
     else:
         spark_caption = f"近 {history_days} 日趋势（日 K 收盘）"
 
     def _fetch_intraday_5min(ts_code: str, *, until_hhmm: str | None = None) -> tuple[list[float], list[str]]:
-        """Use `pro.rt_min_daily` for today's 5-min bars from open. until_hhmm e.g. '11:30'."""
+        """Fetch intraday 5min bars.
+
+        is_today=True  → pro.rt_min_daily (today's bars from open, realtime)
+        is_today=False → pro.stk_mins (historical minute bars, range query)
+        """
         try:
-            df = tushare.call("rt_min_daily", ts_code=ts_code, freq="5MIN")
+            if is_today:
+                df = tushare.call("rt_min_daily", ts_code=ts_code, freq="5MIN")
+            else:
+                start_dt = f"{on_date.strftime('%Y-%m-%d')} 09:30:00"
+                end_dt = f"{on_date.strftime('%Y-%m-%d')} 15:00:00"
+                df = tushare.call("stk_mins", ts_code=ts_code, freq="5min",
+                                   start_date=start_dt, end_date=end_dt)
             if df is None or df.empty:
                 return [], []
-            df = df.sort_values("time").reset_index(drop=True)
+            time_col = "time" if "time" in df.columns else ("trade_time" if "trade_time" in df.columns else None)
+            if time_col is None:
+                return [], []
+            df = df.sort_values(time_col).reset_index(drop=True)
             if until_hhmm:
                 cutoff = f"{on_date.strftime('%Y-%m-%d')} {until_hhmm}:00"
-                df = df[df["time"] <= cutoff]
+                df = df[df[time_col] <= cutoff]
             closes = [float(v) if pd.notna(v) else None for v in df["close"]]
-            times = df["time"].astype(str).tolist()
+            times = df[time_col].astype(str).tolist()
             return closes, times
         except Exception:
             return [], []
