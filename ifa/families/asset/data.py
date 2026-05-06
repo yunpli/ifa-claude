@@ -315,10 +315,36 @@ class SectorBar:
 
 
 def fetch_a_share_sectors(client: TuShareClient, *, on_date: dt.date,
-                           sleep_between: float = 0.0) -> list[SectorBar]:
-    """SW industry indexes use the dedicated `sw_daily` endpoint on this account
-    (`index_daily` returns 0 rows for SW codes). `sw_daily` returns the column
-    as `pct_change` (with underscore)."""
+                           sleep_between: float = 0.0,
+                           slot: str = "morning",
+                           engine=None) -> list[SectorBar]:
+    """SW industry indexes.
+
+    Slot routing:
+      today + (noon|evening) → MV-weighted realtime aggregation from member
+                                 rt_k snapshots (via market._sw_realtime).
+      morning / historical replay → sw_daily EOD with staleness gate.
+
+    Note: SW codes (`801xxx.SI`) are not supported by rt_min_daily / stk_mins,
+    so intraday sector value must be synthesized from constituents.
+    """
+    from ifa.core.report.timezones import BJT
+    is_today = on_date == dt.datetime.now(BJT).date()
+    if is_today and slot in ("noon", "evening") and engine is not None:
+        from ifa.families.market._sw_realtime import compute_sw_realtime_snapshot
+        codes = list(SW_SECTOR_INDEXES.keys())
+        agg = compute_sw_realtime_snapshot(client, engine, on_date=on_date, sw_codes=codes, level="l1")
+        out: list[SectorBar] = []
+        for code, name in SW_SECTOR_INDEXES.items():
+            v = agg.get(code, {})
+            out.append(SectorBar(
+                code=code, name=name,
+                close=v.get("close"),
+                pct_change=v.get("pct_change"),
+                trade_date=v.get("trade_date"),
+            ))
+        return out
+
     end = on_date.strftime("%Y%m%d")
     start = (on_date - dt.timedelta(days=10)).strftime("%Y%m%d")
     out: list[SectorBar] = []

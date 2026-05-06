@@ -781,7 +781,7 @@ def run_tech_morning(
     try:
         prev_day = report_date - dt.timedelta(days=1)
         on_log("fetching SW L2 sector performance for tech 5 layers…")
-        boards_by_layer = data.fetch_board_performance(tushare, on_date=prev_day, history_days=10)
+        boards_by_layer = data.fetch_board_performance(tushare, on_date=prev_day, history_days=10, slot="morning")
         on_log("resolving tech sector members (SW PIT)…")
         tech_members = data.resolve_tech_members(tushare, engine, trade_date=prev_day)
         on_log(f"  {sum(len(v) for v in tech_members.values())} member rows across {len(tech_members)} boards")
@@ -800,7 +800,7 @@ def run_tech_morning(
         news_df = data.fetch_tech_news(tushare, end_bjt=to_bjt(data_cutoff_at), lookback_hours=24)
         on_log(f"  {len(news_df)} news after filter")
         on_log("fetching SW tech sector indexes…")
-        sw_sectors = data.fetch_tech_sw_sectors(tushare, on_date=prev_day)
+        sw_sectors = data.fetch_tech_sw_sectors(tushare, on_date=prev_day, slot="morning")
         on_log(f"loading user '{user}' focus list and enriching…")
         important_focus_specs, regular_focus_specs = get_focus_for(user)
         important_focus, regular_focus = data.enrich_focus(

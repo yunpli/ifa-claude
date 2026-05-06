@@ -566,7 +566,7 @@ def run_asset_evening(
         bjt_cutoff = to_bjt(data_cutoff_at)
         news_df = data.fetch_commodity_news(tushare, end_bjt=bjt_cutoff, lookback_hours=24, max_keep=30)
         on_log("fetching SW industry index closes…")
-        sector_bars = data.fetch_a_share_sectors(tushare, on_date=report_date)
+        sector_bars = data.fetch_a_share_sectors(tushare, on_date=report_date, slot="evening", engine=engine)
         on_log("loading this morning's Asset hypotheses…")
         morning_hypotheses = _load_morning_hypotheses(engine, report_date=report_date)
 

@@ -403,7 +403,22 @@ class MarketDay:
     flat_count: int | None
 
 
-def fetch_market_day(client: TuShareClient, *, on_date: dt.date) -> MarketDay:
+def fetch_market_day(client: TuShareClient, *, on_date: dt.date,
+                      slot: str = "morning") -> MarketDay:
+    """Whole-A snapshot for macro morning/noon/evening.
+
+    Slot routing mirrors market.fetch_index_family:
+      today + (noon|evening) → rt_min_daily 5MIN bars cut at 11:30 / 15:00,
+                                 paired with prior-day index_daily for pre_close
+                                 to compute pct_change.
+      historical noon         → stk_mins 09:30→11:30 last bar, prior-day pre_close.
+      morning / historical evening → index_daily EOD on or before on_date.
+
+    Whole-A breadth (up/down/flat + total_amount): today/noon|evening uses
+    rt_k aggregation (delegated to market._fetch_realtime_breadth_snapshot);
+    morning + historical use EOD `daily`.
+    """
+    from ifa.families.market.data import _fetch_realtime_breadth_snapshot
     md = MarketDay(trade_date=on_date,
                    sh_close=None, sh_pct=None,
                    sz_close=None, sz_pct=None,
@@ -413,49 +428,148 @@ def fetch_market_day(client: TuShareClient, *, on_date: dt.date) -> MarketDay:
                    up_count=None, down_count=None, flat_count=None)
     end = on_date.strftime("%Y%m%d")
     start = (on_date - dt.timedelta(days=8)).strftime("%Y%m%d")
-
-    # Staleness defense: only fill fields when returned trade_date matches on_date.
-    # Mismatched (T-1 returned for "today") leaves md.* as None so renderer can
-    # surface "数据未更新" rather than fabricating today's print.
     is_today = on_date == dt.datetime.now(BJT).date()
-    last_actual_td: dt.date | None = None
-    for code, attr_close, attr_pct in [
+    use_realtime = is_today and slot in ("noon", "evening")
+
+    indices = [
         ("000001.SH", "sh_close", "sh_pct"),
         ("399001.SZ", "sz_close", "sz_pct"),
         ("399006.SZ", "cyb_close", "cyb_pct"),
         ("000300.SH", "hs300_close", "hs300_pct"),
-    ]:
-        try:
-            df = client.call("index_daily", ts_code=code, start_date=start, end_date=end)
-            if df is None or df.empty:
-                continue
-            df = df.sort_values("trade_date")
-            row = df.iloc[-1]
-            row_td = dt.datetime.strptime(str(row["trade_date"]), "%Y%m%d").date()
-            if row_td != on_date:
-                # Stale relative to on_date; record actual date but skip price
-                last_actual_td = row_td
-                continue
-            setattr(md, attr_close, float(row["close"]) if pd.notna(row.get("close")) else None)
-            setattr(md, attr_pct, float(row.get("pct_chg")) if pd.notna(row.get("pct_chg")) else None)
-            md.trade_date = row_td
-            last_actual_td = row_td
-        except Exception:
-            continue
-    if md.trade_date == on_date and last_actual_td and last_actual_td != on_date:
-        # Defensive: keep md.trade_date as the actual data date when no fields were filled
-        md.trade_date = last_actual_td
+    ]
 
-    # All-A turnover (sum daily.amount)
-    try:
-        df = client.call("daily", trade_date=end)
-        if df is not None and not df.empty:
-            md.total_amount = float(df["amount"].sum()) / 1e5 / 1e4  # 千元→亿→万亿 (1万亿=1e9千元)
-            md.up_count = int((df["pct_chg"] > 0).sum())
-            md.down_count = int((df["pct_chg"] < 0).sum())
-            md.flat_count = int((df["pct_chg"] == 0).sum())
-    except Exception:
-        pass
+    if use_realtime:
+        import tushare as ts_lib
+        cutoff_hhmm = "11:30" if slot == "noon" else "15:00"
+        cutoff_str = f"{on_date.strftime('%Y-%m-%d')} {cutoff_hhmm}:00"
+        for code, attr_close, attr_pct in indices:
+            picked_close = None
+            # Path 1: rt_min_daily 5MIN bars (works for stocks; some indices return 0 rows)
+            try:
+                df_min = client.call("rt_min_daily", ts_code=code, freq="5MIN")
+                if df_min is not None and not df_min.empty:
+                    time_col = "time" if "time" in df_min.columns else ("trade_time" if "trade_time" in df_min.columns else None)
+                    if time_col is not None:
+                        df_min = df_min.sort_values(time_col).reset_index(drop=True)
+                        df_min = df_min[df_min[time_col] <= cutoff_str]
+                        if not df_min.empty:
+                            picked_close = float(df_min.iloc[-1]["close"]) if pd.notna(df_min.iloc[-1].get("close")) else None
+            except Exception:
+                pass
+            pre_close = None
+            try:
+                prev_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d")
+                prev_start = (on_date - dt.timedelta(days=10)).strftime("%Y%m%d")
+                df_pre = client.call("index_daily", ts_code=code, start_date=prev_start, end_date=prev_end)
+                if df_pre is not None and not df_pre.empty:
+                    pre_close = float(df_pre.sort_values("trade_date").iloc[-1]["close"])
+            except Exception:
+                pass
+            if picked_close is not None and pre_close:
+                setattr(md, attr_close, picked_close)
+                setattr(md, attr_pct, (picked_close - pre_close) / pre_close * 100)
+                md.trade_date = on_date
+                continue
+            # Path 2: realtime_quote fallback (sina backend; index PRICE supported)
+            # Note: PRICE keeps ticking through afternoon — at noon slot this is
+            # only acceptable if the report runs ≤11:30; the cutoff cannot be
+            # enforced on this snapshot. Caller should prefer slot-correct timing.
+            try:
+                rt = ts_lib.realtime_quote(ts_code=code, src="sina")
+                if rt is not None and not rt.empty:
+                    row = rt.iloc[0]
+                    rt_date = str(row.get("DATE") or "")
+                    rt_price = float(row.get("PRICE")) if row.get("PRICE") is not None else None
+                    rt_pre = float(row.get("PRE_CLOSE")) if row.get("PRE_CLOSE") is not None else None
+                    expected_date = on_date.strftime("%Y%m%d")
+                    if rt_date == expected_date and rt_price and rt_pre:
+                        setattr(md, attr_close, rt_price)
+                        setattr(md, attr_pct, (rt_price - rt_pre) / rt_pre * 100)
+                        md.trade_date = on_date
+            except Exception:
+                pass
+        # Evening fallback to EOD index_daily if minute path failed
+        if slot == "evening" and md.sh_close is None:
+            try:
+                df_eod = client.call("index_daily", ts_code="000001.SH", start_date=end, end_date=end)
+                if df_eod is not None and not df_eod.empty:
+                    last = df_eod.iloc[-1]
+                    if dt.datetime.strptime(str(last["trade_date"]), "%Y%m%d").date() == on_date:
+                        md.sh_close = float(last["close"])
+                        md.sh_pct = float(last.get("pct_chg")) if pd.notna(last.get("pct_chg")) else None
+                        md.trade_date = on_date
+            except Exception:
+                pass
+    else:
+        # EOD / historical replay path
+        if not is_today and slot == "noon":
+            # Historical noon — pull stk_mins 11:30 bar per index for cutoff parity
+            for code, attr_close, attr_pct in indices:
+                try:
+                    df_min = client.call("stk_mins", ts_code=code, freq="5min",
+                                          start_date=f"{on_date.strftime('%Y-%m-%d')} 09:30:00",
+                                          end_date=f"{on_date.strftime('%Y-%m-%d')} 11:30:00")
+                    if df_min is None or df_min.empty:
+                        continue
+                    time_col = "time" if "time" in df_min.columns else ("trade_time" if "trade_time" in df_min.columns else None)
+                    if time_col is None:
+                        continue
+                    last_bar = df_min.sort_values(time_col).iloc[-1]
+                    picked_close = float(last_bar["close"]) if pd.notna(last_bar.get("close")) else None
+                    prev_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d")
+                    prev_start = (on_date - dt.timedelta(days=10)).strftime("%Y%m%d")
+                    df_pre = client.call("index_daily", ts_code=code, start_date=prev_start, end_date=prev_end)
+                    pre_close = None
+                    if df_pre is not None and not df_pre.empty:
+                        pre_close = float(df_pre.sort_values("trade_date").iloc[-1]["close"])
+                    if picked_close and pre_close:
+                        setattr(md, attr_close, picked_close)
+                        setattr(md, attr_pct, (picked_close - pre_close) / pre_close * 100)
+                        md.trade_date = on_date
+                except Exception:
+                    continue
+        else:
+            # Morning, or historical evening — index_daily EOD with strict staleness gate
+            last_actual_td: dt.date | None = None
+            for code, attr_close, attr_pct in indices:
+                try:
+                    df = client.call("index_daily", ts_code=code, start_date=start, end_date=end)
+                    if df is None or df.empty:
+                        continue
+                    df = df.sort_values("trade_date")
+                    row = df.iloc[-1]
+                    row_td = dt.datetime.strptime(str(row["trade_date"]), "%Y%m%d").date()
+                    if row_td != on_date:
+                        last_actual_td = row_td
+                        continue
+                    setattr(md, attr_close, float(row["close"]) if pd.notna(row.get("close")) else None)
+                    setattr(md, attr_pct, float(row.get("pct_chg")) if pd.notna(row.get("pct_chg")) else None)
+                    md.trade_date = row_td
+                    last_actual_td = row_td
+                except Exception:
+                    continue
+            if md.sh_close is None and md.sz_close is None and last_actual_td and last_actual_td != on_date:
+                md.trade_date = last_actual_td
+
+    # Whole-A breadth — slot-aware (rt_k for today/noon|evening, EOD daily otherwise)
+    if use_realtime:
+        agg = _fetch_realtime_breadth_snapshot(client, on_date=on_date)
+        if agg is not None:
+            md.total_amount = agg["total_amount"]
+            md.up_count = agg["up_count"]
+            md.down_count = agg["down_count"]
+            md.flat_count = agg["flat_count"]
+    else:
+        try:
+            df = client.call("daily", trade_date=end)
+            if df is not None and not df.empty:
+                md.total_amount = float(df["amount"].sum()) / 1e5 / 1e4
+                md.up_count = int((df["pct_chg"] > 0).sum())
+                md.down_count = int((df["pct_chg"] < 0).sum())
+                md.flat_count = int((df["pct_chg"] == 0).sum())
+        except Exception:
+            pass
+    # Previous-day amount — always EOD (well-defined)
     try:
         prev_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d")
         df_prev = client.call("daily", trade_date=prev_end)

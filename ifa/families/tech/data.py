@@ -46,15 +46,36 @@ class BoardSnapshot:
 
 
 def fetch_board_performance(
-    client: TuShareClient, *, on_date: dt.date, history_days: int = 10
+    client: TuShareClient, *, on_date: dt.date, history_days: int = 10,
+    slot: str = "morning", engine=None,
 ) -> dict[str, list[BoardSnapshot]]:
-    """For each AI layer, pull the SW L2 indices' daily bars over ~10 days,
-    keyed by layer_id. Uses `sw_daily` (note: returns `pct_change` not
-    `pct_chg`)."""
+    """SW L2 layer boards over ~10 days, keyed by layer_id.
+
+    Slot routing:
+      today + (noon|evening) → realtime close/pct from member rt_k aggregation
+        (history sparkline still uses sw_daily T-1 EOD series, with realtime
+        bar appended to tail).
+      morning / historical → sw_daily EOD with staleness gate.
+
+    SW codes don't support rt_min_daily / stk_mins — synthesis from
+    constituents (MV-weighted) is the only realtime path.
+    """
+    from ifa.core.report.timezones import BJT
+    is_today = on_date == dt.datetime.now(BJT).date()
+    use_realtime = is_today and slot in ("noon", "evening") and engine is not None
+
     out: dict[str, list[BoardSnapshot]] = {l.layer_id: [] for l in AI_LAYERS}
     layer_lookup = sector_to_layer()
     end = on_date.strftime("%Y%m%d")
     start = (on_date - dt.timedelta(days=history_days * 2 + 5)).strftime("%Y%m%d")
+
+    realtime_agg: dict[str, dict] = {}
+    if use_realtime:
+        from ifa.families.market._sw_realtime import compute_sw_realtime_snapshot
+        codes = [c for c in all_tech_sector_codes() if layer_lookup.get(c)]
+        # SW L2 codes — pass level="l2" so member lookup uses l2_code
+        realtime_agg = compute_sw_realtime_snapshot(client, engine, on_date=on_date,
+                                                      sw_codes=codes, level="l2")
 
     for code in all_tech_sector_codes():
         layer_id = layer_lookup.get(code)
@@ -75,20 +96,41 @@ def fetch_board_performance(
         df = df.sort_values("trade_date").tail(history_days)
         latest = df.iloc[-1]
         latest_td = _d(str(latest.get("trade_date")))
-        # Staleness defense: only fill close/pct when latest matches on_date
-        is_current = latest_td == on_date
-        snap = BoardSnapshot(
-            ts_code=code,
-            name=name,
-            layer_id=layer_id,
-            close=_f(latest.get("close")) if is_current else None,
-            pct_change=_f(latest.get("pct_change")) if is_current else None,
-            volume=_f(latest.get("vol")) if is_current else None,
-            turnover_rate=_f(latest.get("turnover_rate")) if is_current else None,
-            trade_date=latest_td,
-            history_close=[_f(v) for v in df["close"]],
-            history_dates=df["trade_date"].astype(str).tolist(),
-        )
+        history_close = [_f(v) for v in df["close"]]
+        history_dates = df["trade_date"].astype(str).tolist()
+
+        if use_realtime:
+            v = realtime_agg.get(code, {})
+            rt_close = v.get("close")
+            rt_pct = v.get("pct_change")
+            if rt_close is not None and rt_pct is not None:
+                history_close.append(rt_close)
+                history_dates.append(on_date.strftime("%Y%m%d"))
+                snap = BoardSnapshot(
+                    ts_code=code, name=name, layer_id=layer_id,
+                    close=rt_close, pct_change=rt_pct,
+                    volume=None, turnover_rate=None,
+                    trade_date=on_date,
+                    history_close=history_close, history_dates=history_dates,
+                )
+            else:
+                snap = BoardSnapshot(
+                    ts_code=code, name=name, layer_id=layer_id,
+                    close=None, pct_change=None, volume=None, turnover_rate=None,
+                    trade_date=latest_td,
+                    history_close=history_close, history_dates=history_dates,
+                )
+        else:
+            is_current = latest_td == on_date
+            snap = BoardSnapshot(
+                ts_code=code, name=name, layer_id=layer_id,
+                close=_f(latest.get("close")) if is_current else None,
+                pct_change=_f(latest.get("pct_change")) if is_current else None,
+                volume=_f(latest.get("vol")) if is_current else None,
+                turnover_rate=_f(latest.get("turnover_rate")) if is_current else None,
+                trade_date=latest_td,
+                history_close=history_close, history_dates=history_dates,
+            )
         out[layer_id].append(snap)
     return out
 
@@ -491,10 +533,32 @@ class SectorBar:
     trade_date: dt.date | None
 
 
-def fetch_tech_sw_sectors(client: TuShareClient, *, on_date: dt.date) -> list[SectorBar]:
-    """SW industry indices use the dedicated `sw_daily` endpoint on this account
-    (`index_daily` returns 0 rows for SW codes). Note: `sw_daily` returns
-    `pct_change` (with underscore) instead of `pct_chg`."""
+def fetch_tech_sw_sectors(client: TuShareClient, *, on_date: dt.date,
+                            slot: str = "morning", engine=None) -> list[SectorBar]:
+    """SW L1 broad TMT reference indices.
+
+    Slot routing:
+      today + (noon|evening) → MV-weighted realtime via member rt_k
+                                 (market._sw_realtime).
+      morning / historical → sw_daily EOD with staleness gate.
+    """
+    from ifa.core.report.timezones import BJT
+    is_today = on_date == dt.datetime.now(BJT).date()
+    if is_today and slot in ("noon", "evening") and engine is not None:
+        from ifa.families.market._sw_realtime import compute_sw_realtime_snapshot
+        codes = list(SW_TECH_INDEXES.keys())
+        agg = compute_sw_realtime_snapshot(client, engine, on_date=on_date, sw_codes=codes, level="l1")
+        out: list[SectorBar] = []
+        for code, name in SW_TECH_INDEXES.items():
+            v = agg.get(code, {})
+            out.append(SectorBar(
+                code=code, name=name,
+                close=v.get("close"),
+                pct_change=v.get("pct_change"),
+                trade_date=v.get("trade_date"),
+            ))
+        return out
+
     end = on_date.strftime("%Y%m%d")
     start = (on_date - dt.timedelta(days=10)).strftime("%Y%m%d")
     out: list[SectorBar] = []

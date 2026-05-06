@@ -424,7 +424,7 @@ def run_tech_evening(
 
     try:
         on_log("fetching SW L2 sector performance for tech 5 layers (today)…")
-        boards_by_layer = data.fetch_board_performance(tushare, on_date=report_date, history_days=10)
+        boards_by_layer = data.fetch_board_performance(tushare, on_date=report_date, history_days=10, slot="evening", engine=engine)
         on_log("resolving tech sector members (SW PIT)…")
         tech_members = data.resolve_tech_members(tushare, engine, trade_date=report_date)
         on_log("fetching limit-up tech stocks (today)…")
@@ -441,7 +441,7 @@ def run_tech_evening(
         on_log("fetching tech news (last 24h)…")
         news_df = data.fetch_tech_news(tushare, end_bjt=to_bjt(data_cutoff_at), lookback_hours=24)
         on_log("fetching SW TMT sectors…")
-        sw_sectors = data.fetch_tech_sw_sectors(tushare, on_date=report_date)
+        sw_sectors = data.fetch_tech_sw_sectors(tushare, on_date=report_date, slot="evening", engine=engine)
         on_log(f"loading user '{user}' focus list and enriching…")
         important_focus_specs, regular_focus_specs = get_focus_for(user)
         important_focus, regular_focus = data.enrich_focus(
