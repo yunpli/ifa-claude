@@ -173,7 +173,7 @@ scripts/
 
 docs/
   stock_edge_tuning_work_list.md       # 本文档（living plan）
-  stock_edge_v2_2_tuning_governance_handover_2026_05_05.md  # 上轮 handover（已 superseded）
+  archive/v2.2-implementation/stock_edge_v2_2_tuning_governance_handover_2026_05_05.md  # 上轮 handover（superseded，归档）
 ```
 
 ---

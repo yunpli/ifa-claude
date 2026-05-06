@@ -1,7 +1,8 @@
 # TA Strategy Deep Dive — 技术策略晚盘报告家族
 
-> **状态**：V2.2.1 (M10 P0+P1+P2) 已落地 + 经 180d walk-forward 验证
-> **接手必读**: 📌 [`ta-handover-2026-05-04.md`](ta-handover-2026-05-04.md)
+> **状态**：V2.2 GA (M10 P0+P1+P2) 已落地 + 经 180d walk-forward 验证
+> **V2.2 接手参考**: 📌 [`v2.2-release-notes.md`](v2.2-release-notes.md) + [`v2.2-operations-cookbook.md`](v2.2-operations-cookbook.md) §2.8 TA family
+> **历史 handover**: [`archive/v2.2-implementation/ta-handover-2026-05-04.md`](archive/v2.2-implementation/ta-handover-2026-05-04.md)（已归档）
 > **定位**：iFA 第一个**自上而下、跨家族汇聚**型策略产品 — 不是新策略，而是**策略元层**
 > **关键差异**：不替代 Smart Money、不放大 Ningbo、不黑盒 AI 选股，是**纪律化的次日交易准备文档**
 >
