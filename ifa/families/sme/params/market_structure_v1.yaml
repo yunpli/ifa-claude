@@ -1,0 +1,127 @@
+version: market_structure_params_v1
+active_profile: baseline
+
+# Tuning philosophy:
+# - Continuous thresholds/weights are preferred because flow intensity, breadth,
+#   concentration, and returns are continuous market variables.
+# - Discrete values are reserved for structural choices that are not naturally
+#   ordered, such as bucket construction mode or whether a bucket is long/avoid.
+search_space:
+  continuous:
+    outflow.panic_main_net_ratio_max: [-0.035, -0.005]
+    outflow.panic_return_max: [-3.0, -0.3]
+    outflow.high_low_recent_return_min: [1.0, 8.0]
+    inflow.chase_return_min: [0.8, 5.0]
+    inflow.chase_main_net_ratio_min: [0.003, 0.035]
+    inflow.chase_top5_share_min: [0.35, 0.90]
+    inflow.long_config_flow_breadth_5d_min: [0.35, 0.75]
+    strong_return_weak_flow.return_min: [0.8, 5.0]
+    strong_return_weak_flow.main_net_ratio_max: [-0.010, 0.012]
+    strong_return_weak_flow.main_positive_breadth_max: [0.30, 0.65]
+    repair.weak_return_max: [-4.0, -0.3]
+    repair.compressed_return_10d_max: [-10.0, -1.0]
+    market_overview.risk_up_breadth_min: [0.52, 0.70]
+    market_overview.risk_down_breadth_max: [0.30, 0.48]
+    market_overview.volume_confirm_min: [0.00, 0.25]
+    market_overview.structure_repair_breadth_min: [0.50, 0.65]
+    capital_state.risk_up_breadth_min: [0.52, 0.70]
+    capital_state.risk_down_breadth_max: [0.30, 0.48]
+    capital_state.inflow_outflow_count_ratio_min: [0.50, 1.30]
+    capital_state.defensive_share_min: [0.15, 0.50]
+    capital_state.mainline_inflow_count_min: [1.0, 6.0]
+    primary.min_flow_breadth_5d: [0.20, 0.70]
+    primary.min_main_net_ratio: [-0.002, 0.025]
+    ranking.main_net_bn_weight: [0.50, 2.00]
+    ranking.flow_breadth_5d_weight: [-0.25, 0.75]
+    ranking.return_1d_weight: [-0.10, 0.12]
+    ranking.top5_share_penalty: [0.00, 0.45]
+  discrete:
+    primary.mode: [strict_state_diffusion, broad_positive_flow]
+    primary.allowed_states:
+      - [ignition, diffusion, acceleration]
+      - []
+
+profiles:
+  baseline:
+    description: Current conservative MVP1 production baseline.
+    outflow:
+      panic_main_net_ratio_max: -0.015
+      panic_return_max: -1.0
+      high_low_recent_return_min: 3.0
+    inflow:
+      chase_return_min: 2.0
+      chase_main_net_ratio_min: 0.01
+      chase_top5_share_min: 0.60
+      long_config_flow_breadth_5d_min: 0.55
+    strong_return_weak_flow:
+      return_min: 2.0
+      main_net_ratio_max: 0.003
+      main_positive_breadth_max: 0.48
+    repair:
+      weak_return_max: -1.0
+      compressed_return_10d_max: -3.0
+    market_overview:
+      risk_up_breadth_min: 0.60
+      risk_down_breadth_max: 0.40
+      volume_confirm_min: 0.05
+      structure_repair_breadth_min: 0.55
+    capital_state:
+      risk_up_breadth_min: 0.58
+      risk_down_breadth_max: 0.42
+      inflow_outflow_count_ratio_min: 0.80
+      defensive_share_min: 0.33
+      mainline_inflow_count_min: 3
+    primary:
+      mode: strict_state_diffusion
+      allowed_states: [ignition, diffusion, acceleration]
+      min_flow_breadth_5d: 0.45
+      min_main_net_ratio: 0.0
+    ranking:
+      main_net_bn_weight: 1.0
+      flow_breadth_5d_weight: 0.0
+      return_1d_weight: 0.0
+      top5_share_penalty: 0.0
+
+  mvp1_ytd_candidate:
+    description: >
+      Candidate from 2026 YTD eval: secondary/crowding/avoid were more useful
+      than strict primary, so broaden primary admission and penalize extreme
+      concentration before OOS validation.
+    outflow:
+      panic_main_net_ratio_max: -0.015
+      panic_return_max: -1.0
+      high_low_recent_return_min: 3.0
+    inflow:
+      chase_return_min: 2.0
+      chase_main_net_ratio_min: 0.01
+      chase_top5_share_min: 0.60
+      long_config_flow_breadth_5d_min: 0.50
+    strong_return_weak_flow:
+      return_min: 2.0
+      main_net_ratio_max: 0.003
+      main_positive_breadth_max: 0.48
+    repair:
+      weak_return_max: -1.0
+      compressed_return_10d_max: -3.0
+    market_overview:
+      risk_up_breadth_min: 0.60
+      risk_down_breadth_max: 0.40
+      volume_confirm_min: 0.05
+      structure_repair_breadth_min: 0.55
+    capital_state:
+      risk_up_breadth_min: 0.58
+      risk_down_breadth_max: 0.42
+      inflow_outflow_count_ratio_min: 0.80
+      defensive_share_min: 0.33
+      mainline_inflow_count_min: 3
+    primary:
+      mode: broad_positive_flow
+      allowed_states: []
+      allowed_inflow_types: [event_trade, chase_high, long_config, institutional_absorption, tactical_inflow]
+      min_flow_breadth_5d: 0.25
+      min_main_net_ratio: 0.005
+    ranking:
+      main_net_bn_weight: 1.0
+      flow_breadth_5d_weight: 0.25
+      return_1d_weight: 0.03
+      top5_share_penalty: 0.12

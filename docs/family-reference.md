@@ -209,6 +209,66 @@ ifa smartmoney
 
 ---
 
+## SME — Smart Money Enhanced (separate)
+
+**Purpose.** Production-grade SW L2资金结构 family. SME measures 主力/散户代理资金流, sector diffusion, flow state, forward-label outcomes, and market-structure buckets, then renders a conclusion-first customer brief. It has zero Python-code dependency on old SmartMoney and writes all new outputs to `sme.*`.
+
+**Slots.** Daily production schedule is 22:40 BJT incremental ETL and 23:10 BJT same-trading-day brief. Legacy 04:00 previous-trading-day mode exists but is not the recommended schedule.
+
+**Customer brief sections.**
+
+| # | Name | Notes |
+|---|---|---|
+| B1 | key_directions | 最重要方向：一级受益 / 二级受益 / 脱敏资产 / 修复弹性 |
+| B2 | market_temperature | 指数、成交量、涨跌家数、市场水位 |
+| B3 | inflow_table | 主要流入，含主力/超大单/大单/小中单/机构席位代理数据 |
+| B4 | outflow_table | 主要流出，区分恐慌、降仓、高低切换 |
+| B5 | crowding_risk | 涨幅强但资金流入不足的尾端/拥挤风险 |
+| B6 | repair_candidates | 跌幅大但流出收敛或被压制较久的修复弹性 |
+| B7 | risk_mode | 风险偏好、防御切换、事件博弈、高低切换、主线重估判断 |
+| B8 | scenarios | 未来 1-3 个交易日情景推演 |
+| B9 | disclaimer | Lindenwood Management LLC + bilingual disclaimer |
+
+**Data layer.**
+
+```
+smartmoney.raw_* / sw_member_monthly  (read-only)
+        │
+        ▼
+sme.sme_sw_member_daily
+sme.sme_stock_orderflow_daily
+sme.sme_sector_orderflow_daily
+sme.sme_sector_diffusion_daily
+sme.sme_sector_state_daily
+sme.sme_labels_daily
+sme.sme_market_structure_daily
+sme.sme_strategy_eval_daily
+```
+
+**CLI tree.**
+
+```bash
+uv run python -m ifa.cli sme doctor --json
+uv run python -m ifa.cli sme status --json
+uv run python -m ifa.cli sme etl incremental --as-of auto --run-mode production --source-mode prefer_smartmoney --labels --json
+uv run python -m ifa.cli sme compute market-structure --start 2026-01-01 --end 2026-04-30 --json
+uv run python -m ifa.cli sme compute strategy-eval --start 2026-01-01 --end 2026-04-30 --json
+uv run python -m ifa.cli sme tuning-ready --start 2026-01-01 --end 2026-04-30 --json
+uv run python -m ifa.cli sme brief --date auto --run-mode production --format html
+```
+
+**Production scripts.**
+
+```bash
+scripts/sme_incremental_2240.sh
+scripts/sme_briefing_2310.sh
+scripts/sme_nightly_tune_2300.sh
+```
+
+Scripts gate on `smartmoney.trade_cal`; non-trading days return structured JSON skip with exit 0.
+
+---
+
 ## Ningbo — 宁波派短线策略 (separate)
 
 **Purpose.** A 股短线流派（神枪手/聚宝盆/半年翻倍）的算法化实现 + ML 增强。每天从 ~310 候选股中选 top-5 推荐，目标 +20% 累计止盈 / 跌破 24 日均线止损 / 满 15 日到期。

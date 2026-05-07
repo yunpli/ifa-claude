@@ -107,7 +107,7 @@ Stock Intel  ←──消费──┐
 ### 2.5 后续档位（路线图）
 
 - **Morning Refresh** — V2.2.1（隔夜外盘 + 早间新闻刷新近 7 天活跃报告）
-- **Intraday Quick Check** — V2.2.2（接 5min 数据做日内验证）
+- **Intraday Quick Check** — V2.2.3（接 5min 数据做日内验证）
 - **Personalized Overlay** — V2.2.3（用户成本 / 持仓 / 风险偏好覆盖层）
 
 ---
@@ -1114,8 +1114,8 @@ ifa/families/stock/
 |-----|------|
 | **V2.2.0** | Fast / Deep / Update 三档（含价格分布预测） |
 | **V2.2.1** | Morning Refresh + 用户观察清单批量分析 |
-| **V2.2.2** | Intraday Quick Check（接 5min 数据做日内验证） |
-| **V2.2.3** | Personalized Overlay（个性化层） |
+| **V2.2.2** | SME MVP1 资金结构 family release |
+| **V2.2.3** | Intraday Quick Check（接 5min 数据做日内验证）+ Personalized Overlay（个性化层） |
 | **V2.3** | DL 接口替换为更强模型（部署到服务器后）+ 异常波动检测启用 |
 | **V2.4** | 跨股关联（同板块联动 / 供应链 / 概念聚类） |
 

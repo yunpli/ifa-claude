@@ -105,7 +105,7 @@ TA Family 填补这个空白。
 - **逻辑**：不重做选股，只对昨日 Top 10 做 4 类标签更新：`confirmed` / `weakened` / `invalidated` / `unchanged`
 - **输出**：刷新后的次日观察清单 + 早盘开盘节奏建议
 
-### 2.3 盘中简报（Intraday · 11:00 / 14:00 BJT） — V2.2.2
+### 2.3 盘中简报（Intraday · 11:00 / 14:00 BJT） — V2.2.3
 
 - **目标延迟**：≤ 30 秒
 - **输出**：每只观察候选的"已验证 / 在路上 / 失效"标签 + 板块异动告警
@@ -782,7 +782,7 @@ ifa ta evening --report-date 2026-04-30 --user default --generate-pdf
 # 早盘刷新（V2.2.1）
 ifa ta morning --report-date 2026-05-01
 
-# 盘中（V2.2.2）
+# 盘中（V2.2.3）
 ifa ta intraday --slot 11am --report-date 2026-05-01
 
 # 自选股 TA 卡（V2.2.3）
@@ -835,8 +835,8 @@ ifa ta backtest --setup T1 --start 2024-01-01 --end 2026-04-30
 |-----|------|
 | **V2.2.0** | 晚盘主报告（16 节 + 18 setup + 9 regime） |
 | **V2.2.1** | 早盘刷新报告 + 自选股 TA 卡 |
-| **V2.2.2** | 盘中简报 + 板块异动告警推送 |
-| **V2.2.3** | 个性化推荐（基于用户历史交互调权） |
+| **V2.2.2** | SME MVP1 资金结构 family release |
+| **V2.2.3** | 盘中简报 + 板块异动告警推送 + 个性化推荐（基于用户历史交互调权） |
 | **V2.3** | ML 排名层（在规则 setup 之上加学习层） |
 | **V2.4** | 跨日策略（多日 swing trading 框架） |
 

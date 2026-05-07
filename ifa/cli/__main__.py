@@ -39,6 +39,10 @@ app.add_typer(ta_app, name="ta")
 from ifa.cli.stock import app as stock_app  # noqa: E402
 app.add_typer(stock_app, name="stock")
 
+# Smart Money Enhanced — standalone orderflow research family
+from ifa.cli.sme import app as sme_app  # noqa: E402
+app.add_typer(sme_app, name="sme")
+
 
 if __name__ == "__main__":
     app()

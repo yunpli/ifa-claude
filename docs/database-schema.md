@@ -7,6 +7,7 @@ Multiple logical schemas live in the same PostgreSQL 16 cluster (port 55432):
 | `public` | `ifavr` / `ifavr_test` | Core reporting tables — shared across all report families |
 | `smartmoney` | `ifavr` / `ifavr_test` | SmartMoney-specific ETL, factor, ML, and backtest tables |
 | `research` | `ifavr` / `ifavr_test` | Research family company identity, cache, report assets, factor memory, and PDF extract memory |
+| `sme` | `ifavr` / `ifavr_test` | Smart Money Enhanced PIT SW L2 orderflow, diffusion/state, forward labels, market-structure snapshots, and tuning artifacts |
 
 All migrations are managed by Alembic (`alembic upgrade head`).
 All timestamps are `TIMESTAMPTZ` stored in UTC; rendering converts to `Asia/Shanghai`.
@@ -309,7 +310,42 @@ All raw tables follow TuShare column shapes exactly. PK is typically
 | `label_scheme` | TEXT | `binary_up`, `binary_up5d` |
 | `predicted_at` | TIMESTAMPTZ | |
 
-## Part 3 — Research schema (`research.*`)
+## Part 3 — SME schema (`sme.*`)
+
+SME is an independent family introduced in V2.2.2. It reads local `smartmoney.*` tables only in read-only mode and writes all new derived data to `sme.*`.
+
+### Core derived tables
+
+| Table | Purpose | Key |
+|---|---|---|
+| `sme_sw_member_daily` | PIT SW L2 daily membership materialized from SW history/monthly membership | `(trade_date, l2_code, ts_code)` |
+| `sme_stock_orderflow_daily` | Per-stock official moneyflow plus bucket-level buy/sell audit, normalized to yuan | `(trade_date, ts_code)` |
+| `sme_sector_orderflow_daily` | SW L2 aggregate 主力/超大单/大单/中小单 flow, concentration, member returns | `(trade_date, l2_code)` |
+| `sme_sector_diffusion_daily` | 1/3/5/10 trading-day flow diffusion and return diffusion by PIT member universe | `(trade_date, l2_code)` |
+| `sme_sector_state_daily` | Sector state machine: accumulation, distribution, crowded, rebound, retail chase, etc. | `(trade_date, l2_code)` |
+| `sme_labels_daily` | 1/3/5/10/20 trading-day forward labels for tuning/backtest | `(trade_date, l2_code, horizon_days)` |
+| `sme_market_structure_daily` | Persistent daily market-structure strategy snapshot used by reports and tuning | `(trade_date, profile_name)` |
+| `sme_strategy_eval_daily` | Join of market-structure buckets to forward labels, used for OOS/OOC review | `(trade_date, profile_name, bucket, l2_code, horizon_days)` |
+
+### Governance / audit tables
+
+| Table | Purpose |
+|---|---|
+| `sme_unit_registry` | Authoritative unit conversion registry; `_yuan` columns are stored in yuan |
+| `sme_data_contracts` | Table-level data contracts, source expectations, and quality rules |
+| `sme_source_audit_daily` | Per-date source coverage and quality audit |
+| `sme_etl_runs` | Incremental/backfill run audit with status, row counts, storage deltas, and errors |
+| `sme_storage_audit` | Schema/table/index storage monitoring against the 10GB MVP1 budget |
+| `sme_param_runs` | Parameter search / promotion artifacts and gating state |
+| `sme_report_runs` | SME report output registry for production/manual runs |
+
+### Temporal contract
+
+All SME "previous", "next", "recent N", and forward-label horizons are trading-day based. Use `smartmoney.trade_cal` / canonical trading-date row numbers, not calendar-day arithmetic.
+
+---
+
+## Part 4 — Research schema (`research.*`)
 
 Research owns its own product memory because single-stock financial statements are sparse and reusable. A report generated in manual mode can satisfy a later production request when the stock / statement lens / tier / latest filing period match.
 

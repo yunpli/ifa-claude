@@ -6,6 +6,59 @@ All notable changes to iFA China Market Report System.
 
 ---
 
+## [2.2.2] — 2026-05-07 — SME MVP1 production release
+
+### Added — Smart Money Enhanced (SME)
+
+- New independent `sme` family with no Python-code dependency on old SmartMoney.
+- Read-only dependency on local `smartmoney.*` source tables; all new derived data writes to `sme.*`.
+- Alembic migrations for SME MVP1 core schema, market-structure snapshots, and strategy-evaluation tables.
+- New CLI surface under `ifa sme` for `doctor`, `status`, `etl backfill`, `etl incremental`, compute steps, labels, market-structure snapshots, tuning readiness, bucket review, profile promotion, and briefing.
+- PIT-correct SW L2 daily membership materialization, stock orderflow, sector orderflow, diffusion, state, and 1/3/5/10/20 trading-day forward labels.
+- Market-structure snapshots connected to forward labels through `sme_strategy_eval_daily`, making SME ready for parameter search, backtest, OOS, and OOC workflows.
+- YAML parameterization for market-structure profiles with continuous tuning surfaces and gated promotion into `active_profile`.
+- Conclusion-first SME production brief with explicit observation date, BJT generation time, data-supported inflow/outflow tables, A-share red/green convention, Lindenwood Management LLC header, and bilingual disclaimer.
+
+### Added — Operations
+
+- Production schedule scripts:
+  - `scripts/sme_incremental_2240.sh` — Beijing 22:40 same-trading-day incremental ETL.
+  - `scripts/sme_briefing_2310.sh` — Beijing 23:10 same-trading-day briefing after ETL.
+  - `scripts/sme_nightly_tune_2300.sh` — weekend/nightly tuning artifact generation.
+  - `scripts/sme_daily_gate.py` — trading-calendar gate returning structured JSON and exit 0 on non-trading-day skips.
+- Year-by-year backfill scripts for 2021-2025 plus generic `scripts/sme_backfill_year.sh`; each records elapsed time and SME storage deltas.
+- Standard output path for SME reports: `/Users/neoclaw/claude/ifaenv/out/<run_mode>/<YYYYMMDD>/sme/`.
+
+### Added — Documentation
+
+- `docs/v2.2.2-release-notes.md`.
+- `docs/sme-product-design.md`.
+- `docs/sme-mvp1-work-list.md`.
+- `docs/sme-data-logic-contracts.md`.
+- Updated README, operations, database schema, family reference, tuning playbook, and agent memory for SME.
+
+### Validation
+
+- `uv run pytest tests/sme -q` passes 28 tests.
+- SME shell scripts pass `bash -n`.
+- SME CLI / analysis modules pass `py_compile`.
+- Local SME status after 2021-now backfill: ~8.486GB, latest core tables at 2026-05-06, strategy eval through the latest mature label date.
+
+### Deferred to V2.2.3
+
+- Stock Edge final decision-layer tuning / auto-promotion release.
+- Research peer comparison.
+- TA intraday briefing / sector alert push.
+- Stock Edge intraday quick check and personalization.
+
+---
+
+## [2.2.1] — 2026-05-06 — hotfix
+
+See [`docs/v2.2.1-release-notes.md`](docs/v2.2.1-release-notes.md).
+
+---
+
 ## [2.2.0] — 2026-05-06 — UI overhaul + production-grade data correctness
 
 ### Added — Reports UI v2.2 (4 family × 9 slots — premium card system)

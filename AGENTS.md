@@ -1,10 +1,12 @@
 # IFA SmartMoney — Codex/Agents 上下文
 
-> **更新**: 2026-05-05 (Claude session 收口,等 Codex 接手 360d 验证)
+> **更新**: 2026-05-07 (Codex 完成 V2.2.2 SME MVP1 release)
 > **接手必读**: 📌 [`docs/ta-handover-2026-05-04.md`](docs/ta-handover-2026-05-04.md) — Claude 写的完整 TA family handover,包括做了什么、回测结果、调参演进、还有什么没做。
 > **🎯 调参经验沉淀**: 📌 [`docs/ta-tuning-playbook.md`](docs/ta-tuning-playbook.md) — 10 条启发式规则 + iteration log,任何调参前先读。
 > **TA deep-dive**: [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md)
 > **当前状态**:
+> - V2.2.2 已完成 SME MVP1 release：独立 `sme` family、`sme.*` schema、22:40/23:10 BJT production scripts、forward-label/tuning-ready 链路、客户简报与 release 文档。
+> - V2.2.2 原规划但未落地的 Research 横向对比、TA 盘中、Stock Edge intraday/personalized、Stock Edge final tuning 均顺延到 V2.2.3；主动文档以 `docs/v2.2.2-release-notes.md` / `README.md` / `docs/tuning-playbook.md` 为准。
 > - TA M10 P0+P1+P2 (4 次调参 iteration) 已完成 + push,head commit `dc56965`
 > - 30 setups / 11 families / 180d 真实持仓回测,Tier A 跑赢 universe +0.67pp
 > - 用户会 terminal 跑 `scripts/ta_backfill_360d.py` (~55-60 min) 扩到 360d
@@ -25,10 +27,38 @@
 - **协作边界**：默认尊重并保留另一 session 对 `ifa/families/research/**`、`tests/research/**`、`docs/research-deep-dive.md` 的改动；如必须触碰，应先确认上下文、只做最小必要编辑，并在本文件记录原因。
 - **身份标准**：Codex 在本项目中的工程目标按“顶级华尔街量化工程师 + 30 年全栈工程师 + 熟悉 A 股微观结构的基金经理/交易员”执行。所有实现必须面向 production-grade、可审计、可回测、可解释、可运维的 billion-dollar business 标准，不写 toy demo。
 - **代码质量底线**：数据口径优先于页面效果；PIT 正确性、单位一致性、缺失值显式传播、可复现输出、失败降级、测试覆盖、日志与监控优先。LLM 只能增强叙述，不得编造财务数字或替代规则层判断。
+- **数据/逻辑改动留痕规则**：任何涉及数据层口径、单位换算、PIT 规则、特征计算逻辑、状态机/标签定义、训练/回测目标、ETL 增量语义的实现改动，都必须同步留下足够的代码注释或 docs 说明。说明至少覆盖：旧口径/新口径差异、为什么改、会影响哪些表/字段/回测结果、历史数据是否需要重算、后续 dev/ops 应该如何验证或回滚。不要只改代码让未来开发者从 SQL/实现里猜业务含义。
 - **产品判断底线**：任何报告或信号必须服务真实投资流程：能帮助 PM/分析师/交易员更快判断“是否值得继续研究、风险在哪里、下一步验证什么”。不做漂亮但不可交易、不可验证、不可解释的输出。
 - **Research 财报分析形态**：财报分析不是单一 generic report，当前固定为“报表类型 × 深度档位”的 4 类单股报告：`quarterly quick`（只读最新季报）、`annual quick`（只读最新年报）、`quarterly deep`（最多三年/12 个季度，逐季看 YoY + QoQ）、`annual deep`（最多三年/3 份年报，看 YoY + 较上年变化）。不要做 stock comparison。手动验证曾用 `智微智能` / `致尚科技` / `鹏鼎控股`，当前新增验证样本按用户要求改为 `朗科科技` 跑完整 matrix。
 - **Research 持久化原则**：所有从历史季报/年报/研报 PDF 解析或派生出的财报因子，必须落到本地数据库后再组合生成报告。Canonical 长期记忆使用 PostgreSQL `research.period_factor_decomposition`（分期五维拆解）与 `research.pdf_extract_cache`（研报 PDF 摘要缓存）；DuckDB 只用于本地 scratch / ad hoc OLAP，不作为 Research 基本面权威存储。Stock Intel / TA 侧需要基本面 lineup 时调用 `ifa.families.research.memory.load_fundamental_lineup(...)`，不要解析 HTML。
 - **Research 报告资产复用**：同一股票、同一 `analysis_type`、同一 `tier`、同一最新财报期已经有成功生成的报告时，默认从 `research.report_runs` 取 `output_html_path` / `scope_json.md_path` 直接列给用户，不重新生成；manual / production 只是输出目录不同，不作为强制重算边界。需要强制重跑时 CLI 用 `--fresh`。Stock Intel 若需要财报底稿，应先查 `find_reusable_report(...)`；没有则同步触发对应 quick/deep 生成，再通过 `load_fundamental_lineup(...)` 取结构化基本面。
+
+### Smart Money Enhanced / SME 当前实现记录（Codex 2026-05-07）
+
+- **产品与工作清单文档**：新增 `docs/sme-product-design.md` 与 `docs/sme-mvp1-work-list.md`。SME 是新 family，代码上对既有 `SmartMoney` 0 依赖；对 `smartmoney.*` 本地老表只读，所有新增计算与持久化写入独立 `sme.*` 表。
+- **数据/逻辑口径文档**：新增 `docs/sme-data-logic-contracts.md`，以后 SME 任何单位、PIT、特征、状态机、标签、ETL 语义改动必须同步更新该文档或代码注释。
+- **MVP1 schema 已落库**：新增 Alembic `alembic/versions/l0m1n2o3p4q5_sme_mvp1_schema.py` 并已本地 `upgrade head`。核心表包括 `sme_sw_member_daily`、`sme_stock_orderflow_daily`、`sme_sector_orderflow_daily`、`sme_sector_diffusion_daily`、`sme_sector_state_daily`、`sme_labels_daily`、审计/合约/单位注册表。
+- **CLI 入口**：新增统一入口 `uv run python -m ifa.cli sme ...`，覆盖 `doctor`、`status`、`etl audit/backfill/incremental`、`compute membership/stock-flow/sector-flow/diffusion/state`、`labels`。每日增量入口支持 `--source-mode prefer_smartmoney --labels --json` 等生产参数。
+- **MVP1 数据流口径**：当前 source mode 只启用 `prefer_smartmoney`，读取 `smartmoney.raw_moneyflow`、`raw_daily`、`raw_daily_basic`、`raw_sw_member`、`sw_member_monthly`、`raw_sw_daily`；不改写任何 `smartmoney.*` 表。金额统一落为 `_yuan` 列，来源单位由 SME unit registry/contract 做审计。
+- **diffusion/state 优化**：`diffusion` 与 `state` 已从逐日循环改为区间批量 SQL。diffusion 用当前 PIT 成分股 universe 计算 1/3/5/10 日滚动主力净额扩散率，3/5 日收益改为按成分股滚动复利口径；state 修正 `rebound` 不可达问题，并补充 `retail_chase`、`leader_crowded` 等风险标记。
+- **交易日语义硬规则**：SME/SmartMoney/Stock Edge 里“上一日、下一日、最近 N 日、未来 h 日”都必须指交易日，不是日历日。实现必须使用 canonical trading calendar / trading-date row_number / `previous_trade_date` / `next_trade_date`，禁止用 `date +/- N` 表达交易窗口，禁止用单一数据源表日期隐式替代交易日历。2021-05-10 曾因 `raw_daily` 缺失但 `raw_moneyflow` 存在而被漏算，根因就是把 `raw_daily` 当交易日历。
+- **stock orderflow v1.3 修正**：`net_mf_amount_yuan` 是 Tushare 官方净流入额；四类订单 buy/sell 金额是成交 bucket，不再拿 bucket 重算值和官方净流入做 reconciliation。`net_recomputed_yuan`/`reconciliation_error_yuan` 现在表示 bucket balance audit。bucket balance 不再作为 `quality_flag` 阻断条件，因为 BJ/920 系列存在 bucket net 等于官方净流入的源口径差异；真正 degraded 只用于行情/成交额缺失或非法值。历史窗口已按 `stock_orderflow_v1_3` 重跑。
+- **NULL/0 规则**：缺失行情、成交额、收益率必须保留 NULL 并显式 degraded，不能 `COALESCE(..., 0)` 把缺失伪装成真实零。只有业务语义上“缺失即 0”的字段才允许这样处理，并必须写注释。
+- **sector/label v1.1 修正**：本地 `raw_sw_daily` 多数是 SW L1，不是完整 L2；`sector_orderflow_v1_1` 对 L2 return 使用 `COALESCE(raw_sw_daily.pct_change, amount_weight_return, equal_weight_return)` fallback。`labels_forward_v1_1` 使用未来 h 个交易日复利收益，重算前先删除目标窗口/horizon，确保旧 NULL labels 不残留。
+- **全量重算状态**：2021-01-01 → 2026-05-06 已按最终逻辑版本重跑完成；覆盖 1290/1290 个 source trade dates，无缺失 source dates，`null_label_rows=0`，sector/diffusion/state 对齐。最终逻辑版本：`stock_orderflow_v1_3`、`sector_orderflow_v1_1`、`diffusion_v1_2`、`state_machine_v1_1`、`labels_forward_v1_1`。SME schema 约 8.48GB（VACUUM ANALYZE 后统计已更新）。仅剩 3 行 `2022-11-09` stock degraded，原因是三只股票有 moneyflow 但 Tushare daily 仍无行情；保留 degraded 是正确行为。sector degraded 主要是低覆盖板块，属于覆盖质量信号。
+- **年度回填脚本**：新增 `scripts/sme_backfill_year.sh` 及 `scripts/sme_backfill_2021.sh` 到 `scripts/sme_backfill_2025.sh`。脚本会输出并记录实际耗时、SME schema 前后总存储、增量 bytes/GB、各 SME 表前后 rows/table/index bytes；日志写入 `/Users/neoclaw/claude/ifaenv/logs/sme_backfill/`。
+- **每日增量脚本**：新增 `scripts/sme_incremental_0300.sh`，生产默认跑 `sme etl incremental --as-of auto --run-mode production --source-mode prefer_smartmoney --labels --json` 并随后执行 doctor。incremental 默认在目标交易日核心 SME 表已完整时 no-op；需要强制重算用 CLI `--force`。
+- **SME 每日生产 gate 与推荐 schedule**：新增 `scripts/sme_daily_gate.py`，并接入 `scripts/sme_incremental_0300.sh` / `scripts/sme_incremental_2240.sh`、`scripts/sme_briefing_2310.sh`、`scripts/sme_briefing_0400.sh`。推荐生产节奏改为北京时间晚间：22:40 跑 incremental，23:10 左右跑 `sme_briefing_2310.sh`，观察日就是当天交易日，避免凌晨“上一交易日”歧义。脚本第一步查 `smartmoney.trade_cal`：交易日才执行；非交易日输出结构化 JSON（`status=non_trade_day`, `action=skip`）并 exit 0，方便投递 agent 发“今日非交易日，无 SME 简报/ETL”的消息。`sme_briefing_0400.sh` 只保留给 legacy 凌晨 previous-trading-day 模式，不作为推荐调度。
+- **客户报告口径**：用户明确要求最终报告“不求复杂、不要过程、只要通俗易懂的结论”。SME 资金结构报告生产端可用 `uv run python -m ifa.cli sme market-structure --date auto --client` 输出终端结论，或用 `uv run python -m ifa.cli sme brief --date auto --format html --output ...` 生成独立 HTML 简报。完整 JSON 只用于审计/调参/第三方机器集成。不要把公式、过程、阈值表、证据数组直接塞给最终客户。
+- **SME 简报日期与输出目录**：`ifa sme brief` 的标题必须写明观察交易日，例如“2026年5月6日资金结构简报”，页头同时展示观察日期与北京时间报告生成时间。无显式 `--output` 时默认写入 IFA 标准目录：`/Users/neoclaw/claude/ifaenv/out/<run_mode>/<YYYYMMDD>/sme/CN_sme_brief_<YYYYMMDD>_<HHMM>.<ext>`；production schedule 应使用 `--run-mode production`。
+- **SME 简报数据支撑**：客户版不展示公式，但“主要流入/主要流出”必须给出可读数据支撑。当前口径为按主力资金排序，主力=超大单+大单净额；小中单是散户代理；机构席位代理和龙虎榜事件资金是披露样本辅助验证，不代表全市场机构全量仓位。
+- **SME 简报模板隔离**：新增 `ifa/families/sme/templates/brief.html`，信息层级参考老 SmartMoney 晚报，但模板代码 0 依赖老 SmartMoney / core render templates；不得在 SME 简报模板中 `{% include %}` 老模板文件，避免老模板变更影响 SME 生产输出。
+- **效果优先原则**：用户明确不关心内部实现了多少模型/策略/规则，只关心真实预测效果和实际决策能力。SME 内部可以复杂，但所有模型/规则必须服务 walk-forward、OOC/OOS、调参和可验证收益；对客户输出必须简单直观。LLM 可用于 narrative 压缩，但不得改写结构化结论、方向、数值或风险等级。
+- **调参中间结果持久化**：不要僵硬坚持“数据层不变”。只要某个中间判断会进入回测/调参/OOS 验证，就应考虑落入 SME 自己的新表并带 logic_version。`sme_market_structure_daily` 已用于持久化每日资金结构策略快照，避免报告时动态重算导致历史不可复现。
+- **策略评估链路**：新增 `sme_strategy_eval_daily`，用 `ifa sme compute strategy-eval --start ... --end ...` 将 `sme_market_structure_daily` 的 primary/secondary/defensive/repair/avoid/crowding buckets 与 `sme_labels_daily` 的 1/3/5/10/20 交易日 forward labels 连接。新增 `ifa sme tuning-ready --start ... --end ...` 检查样本是否够调参。调参优化目标应看 OOS/OOC 的 `avg_signal_score`、`success_rate`、drawdown/runup，不看内部实现数量。
+- **Nightly 脚本**：新增 `scripts/sme_incremental_2240.sh` 与 `scripts/sme_nightly_tune_2300.sh` 给第三方平台集成。nightly 脚本自动取最新成熟 label date，刷新 market structure、strategy eval、tuning-ready、bucket-review，并输出 artifacts 到 `/Users/neoclaw/claude/ifaenv/out/sme_tuning/nightly/<timestamp>/`。
+- **SME 参数化原则**：市场结构参数已 YAML 化在 `ifa/families/sme/params/market_structure_v1.yaml`。连续参数是主调参面（阈值、权重、惩罚项），离散只用于结构选择（如 `primary.mode`）。`ifa sme tune promote-profile` 会自动检查候选 profile 是否已在窗口内评估、样本是否 ready、是否有正向 bucket，再允许 `--apply` 写回 YAML `active_profile`。nightly 可用 `SME_MARKET_STRUCTURE_PROFILE` 评估 profile，用 `SME_TUNE_PROMOTE_PROFILE` + `SME_TUNE_APPLY_PROMOTION=1` 自动晋升。
+- **当前验证**：`uv run pytest tests/sme -q` 通过 28 条；`py_compile` 通过；`bash -n scripts/sme_incremental_2240.sh scripts/sme_nightly_tune_2300.sh` 通过；`uv run alembic upgrade head` 已 apply `m1n2o3p4q5r6` 与 `n2o3p4q5r6s7`；`uv run python -m ifa.cli sme compute market-structure --start 2026-01-01 --end 2026-04-30 --json` 已回填 77 个交易日；`uv run python -m ifa.cli sme compute strategy-eval --start 2026-01-01 --end 2026-04-30 --json` 生成 2,026 行评估；`uv run python -m ifa.cli sme tuning-ready --start 2026-01-01 --end 2026-04-30 --json` 返回 ready horizons `[1,3,5,10]`；`uv run python -m ifa.cli sme tune bucket-review --start 2026-01-01 --end 2026-04-30 --json` 输出 promote `secondary/crowding_risk/avoid`、rebuild `primary/repair/defensive`。`uv run python -m ifa.cli sme status --json` 显示 `sme_market_structure_daily` 78 行最新 `2026-05-06`、`sme_strategy_eval_daily` 2,026 行最新 `2026-04-30`、总存储约 8.486GB。早期信号：current `secondary` 与 `crowding_risk` 桶显著优于 `primary`，下一轮调参应优先重做 bucket ranking/threshold。`ifa/cli/stock.py`、`scripts/stock_edge_panel_tune.py` 仍是本任务外既有脏改，SME 工作不要覆盖它们。
 
 ### Stock Edge / 个股作战室当前实现记录（Codex 2026-05-05）
 
@@ -507,6 +537,8 @@ uv run alembic current
 5. **TuShare 无历史的表**: `raw_moneyflow_ind_dc`（2023起）、`raw_moneyflow_ind_ths`（2024起）、`raw_kpl_concept`（2024起）等，早年确实无数据，非 bug。B 阶段主路径不依赖这些表。
 
 6. **`raw_moneyflow_hsgt` 缺口**: 北向资金数据略有缺口（每年约 5-10 天），是交易所不开放日（MSCI 审议等），正常现象。
+
+7. **SME MVP1 market-structure 策略快照**: 新增 `ifa sme market-structure --date auto --json`。该解释器不只看指数涨跌，而是读取 SME 本地 SW L2 主力流、扩散、状态、全市场涨跌家数和成交额，输出流入/流出性质、拥挤风险、压制修复、一级/二级/脱敏/修复方向、资金状态和 1-3 个交易日情景推演。真实分时和外部变量暂不作为核心数据层依赖；外部变量用 `--external-summary` 注入，未来若面向客户展示需单独持久化来源、时间、模型和 prompt hash。
 
 ---
 

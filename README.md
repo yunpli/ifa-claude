@@ -1,6 +1,6 @@
 # ifa-claude — iFA China Market Report System
 
-**Version 2.2.0** · AI-native, structured, source-anchored intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
+**Version 2.2.2** · AI-native, structured, source-anchored intelligence reports for China A-share investors. Customer-facing reports are 中文; engineering documentation is bilingual.
 
 ---
 
@@ -11,7 +11,8 @@ V2.2 ships **three new families** plus a **complete report UI overhaul** and **p
 ### Three new families
 - **Research** — single-stock financial-statement reports. 28 factors × 5 dimensions, SW L2 peer percentile, four lenses (quarterly/annual × quick/deep), durable Postgres fundamental memory, analyst-PDF extraction cache. See [`docs/research-deep-dive.md`](docs/research-deep-dive.md).
 - **TA** — 晚盘技术面 evening report. 9-regime classifier, 19 candidate setups across 7 families, T+N outcome tracking, regime gating + decay-based suspension, 11 deterministic + 3 LLM-augmented sections. See [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md).
-- **Stock Edge** — single-stock 5d/10d/20d quantitative trade plan. 85-strategy 决策矩阵 + per-horizon decision layer + auto-promotion gates. Tuning playbook still maturing (current alpha 不稳，see "Roadmap to V2.2.1" below). See [`docs/stock-edge-deep-dive.md`](docs/stock-edge-deep-dive.md).
+- **Stock Edge** — single-stock 5d/10d/20d quantitative trade plan. 85-strategy 决策矩阵 + per-horizon decision layer + auto-promotion gates. Tuning playbook still maturing (current alpha 不稳，see "Roadmap to V2.2.3" below). See [`docs/stock-edge-deep-dive.md`](docs/stock-edge-deep-dive.md).
+- **SME (Smart Money Enhanced)** — independent SW L2资金结构 family. Read-only dependency on local `smartmoney.*` raw tables, own `sme.*` schema, PIT daily membership, stock/sector orderflow, diffusion/state, forward labels, strategy snapshots, YAML tuning surface, and a conclusion-first production brief. See [`docs/sme-product-design.md`](docs/sme-product-design.md).
 
 ### Complete UI overhaul (1 main + 3 aux)
 - **§01 headline cards** standardised across all 9 family×slot combinations: `headline ≤28字 + top3[3] ≤22字 + summary ≤80字`. The "三件事" promise on every card front is now actually three forward-looking actions, not a recap of §02.
@@ -29,8 +30,12 @@ V2.2 ships **three new families** plus a **complete report UI overhaul** and **p
 - **Banner staleness warning** when any `trade_date < report_date` — red-bordered alert tells the reader why "—" appears.
 - See [`docs/v2.2-release-notes.md`](docs/v2.2-release-notes.md) for the bug list (#1—#19, all closed) and migration guide.
 
-### Roadmap to V2.2.1
-- **Stock Edge tuning** — T3.2 ML 跨日期复用 + T3.3 扩 panel 100×24 终验。Currently 5d/10d val rank IC unstable across folds (2/4 positive); 20d at +0.034 K-fold median (target ≥+0.05). Production YAML works but is suboptimal. See [`docs/tuning-playbook.md`](docs/tuning-playbook.md) for the cross-family tuning surface.
+### V2.2.2 Release
+- **SME MVP1** — production-grade资金结构 family. Ships `ifa sme ...`, `sme.*` migrations, 2021-now backfill-ready ETL, 22:40 BJT incremental script, 23:10 BJT same-trading-day brief script, weekend tuning script, market-structure snapshots, forward-label evaluation, and China-market report UI with data-supported flow tables. See [`docs/v2.2.2-release-notes.md`](docs/v2.2.2-release-notes.md).
+
+### Roadmap to V2.2.3
+- **Stock Edge tuning** — final decision-layer tuning / wider panel validation / YAML promotion governance.
+- **Research / TA / Stock Edge deferred scope** — Research peer comparison, TA intraday alerting, Stock Edge intraday quick check and personalization were previously mentioned around V2.2.2 in planning docs; they are now deferred to V2.2.3.
 
 ---
 
@@ -106,7 +111,8 @@ The main `market` family is 总指挥型 — it summarises the day. The three au
 | **Ningbo** (separate) | `ifa ningbo evening` | evening | 5 | Yes (SW L2 member lookup) | 短线策略三轨 — 启发式 / ML 激进 / ML 稳健，★1-★5 共识矩阵，15 日追踪 |
 | **Research** (V2.2, separate) | `ifa research report` | quarterly/annual × quick/standard/deep | 18 | Yes (SW L2 peer rank) | 个股财报分析 — 四类报告 / 5 维度 / 研报 PDF 摘要 / Postgres 基本面记忆 / 报告资产复用 |
 | **TA** (V2.2, separate) | `ifa ta evening` | evening | 11 + 3 LLM | Yes (SW L1/L2 sector) | 晚盘技术面 — 9 体制 + 19 setup + T+N 追踪 + 衰减门控 |
-| **Stock Edge** (V2.2, separate) | `ifa stock edge` | on-demand | – | Yes (SW peer scan) | 个股 5d/10d/20d 量化交易计划 — 85 策略矩阵 + 决策层 + 自动晋升门 (V2.2.1 调参中) |
+| **Stock Edge** (V2.2, separate) | `ifa stock edge` | on-demand | – | Yes (SW peer scan) | 个股 5d/10d/20d 量化交易计划 — 85 策略矩阵 + 决策层 + 自动晋升门 (V2.2.3 调参中) |
+| **SME** (V2.2.2, separate) | `ifa sme brief` / `ifa sme etl incremental` | evening / scheduled | conclusion brief | Yes (SW L2 PIT member) | Smart Money Enhanced — 主力/散户代理资金结构、扩散、状态、forward labels、调参快照、生产简报 |
 
 Most families share the core reporting tables (`report_runs`, `report_sections`, `report_judgments`, `model_outputs`) and the same `ReportRun` lifecycle. Research additionally owns `research.report_runs` / `research.report_sections` as a single-stock report asset registry plus `research.period_factor_decomposition` and `research.pdf_extract_cache` for reusable fundamental memory.
 
@@ -252,14 +258,19 @@ Implementation uses headless Chrome with print-CSS injection that opens all `<de
 
 ### V2.2 release pack
 - [`docs/v2.2-release-notes.md`](docs/v2.2-release-notes.md) — V2.2 deliverables, migration v2.1.3 → v2.2, breaking changes, gap analysis
+- [`docs/v2.2.1-release-notes.md`](docs/v2.2.1-release-notes.md) — V2.2.1 hotfix notes
+- [`docs/v2.2.2-release-notes.md`](docs/v2.2.2-release-notes.md) — SME MVP1 release notes, migration, schedule, validation, deferred V2.2.3 scope
 - [`docs/v2.2-operations-cookbook.md`](docs/v2.2-operations-cookbook.md) — **standalone scripts, BJT schedule, cron/launchd examples, per-family quickstart with examples, troubleshooting cookbook, ledger queries**
 - [`docs/ui-overhaul-v2.2.md`](docs/ui-overhaul-v2.2.md) — premium card design system reference (components, tokens, anti-patterns)
-- [`docs/tuning-playbook.md`](docs/tuning-playbook.md) — cross-family tuning surface (TA / SmartMoney / Stock Edge), how to extend, V2.2.1 plan
+- [`docs/tuning-playbook.md`](docs/tuning-playbook.md) — cross-family tuning surface (TA / SmartMoney / Stock Edge / SME), how to extend, V2.2.3 plan
 
 ### Family deep-dives
 - [`docs/research-deep-dive.md`](docs/research-deep-dive.md) — Research family (V2.2 NEW)
 - [`docs/ta-strategy-deep-dive.md`](docs/ta-strategy-deep-dive.md) — TA family (V2.2 NEW)
 - [`docs/stock-edge-deep-dive.md`](docs/stock-edge-deep-dive.md) — Stock Edge family (V2.2 NEW)
+- [`docs/sme-product-design.md`](docs/sme-product-design.md) — Smart Money Enhanced family (V2.2.2 NEW)
+- [`docs/sme-mvp1-work-list.md`](docs/sme-mvp1-work-list.md) — SME MVP1 production checklist and runbook
+- [`docs/sme-data-logic-contracts.md`](docs/sme-data-logic-contracts.md) — SME data contracts, units, trading-day logic, ETL/report schedules
 - [`docs/ningbo-deep-dive.md`](docs/ningbo-deep-dive.md) — 宁波派完整架构：Phase 1-3.D，三轨，Champion-Challenger
 - [`docs/smartmoney-deep-dive.md`](docs/smartmoney-deep-dive.md) — SmartMoney V2.1.2 修复背景 + 两层 recompute 体系
 - [`docs/main-three-aux-deep-dive.md`](docs/main-three-aux-deep-dive.md) — 一主三辅协作时序与数据流
@@ -291,11 +302,14 @@ The root `CLAUDE.md` is the engineering checklist for the in-progress SmartMoney
 | V2.1.2 patch (SmartMoney L2 pct_change in factors; recompute+retrain required) | Done |
 | V2.1.3 patch (Ningbo Phase 1-3.D 全闭环；Champion-Challenger；★ 共识矩阵；运维文档) | Done |
 | **V2.2 release** — UI overhaul + Research + TA + Stock Edge + production data correctness | **Done** |
-| V2.2.1 (planned) — Stock Edge tuning T3.2 + T3.3 → variant YAML auto-promote | In progress |
+| **V2.2.1 hotfix** — production-blocking V2.2 fixes | **Done** |
+| **V2.2.2 release** — SME MVP1: SW L2资金结构 family + ETL/labels/tuning-ready/brief | **Done** |
+| V2.2.3 (planned) — Stock Edge tuning auto-promote + deferred Research/TA/Stock Edge intraday scope | In progress |
 | V2.3 (planned) — Research HTTP API + Telegram + quota + dashboard | Backlog |
 
 See [`docs/v2.2-release-notes.md`](docs/v2.2-release-notes.md) for the full V2.2 deliverables list and migration guide.
-See [`docs/tuning-playbook.md`](docs/tuning-playbook.md) for the cross-family tuning surface and V2.2.1 plan.
+See [`docs/v2.2.2-release-notes.md`](docs/v2.2.2-release-notes.md) for the SME release pack.
+See [`docs/tuning-playbook.md`](docs/tuning-playbook.md) for the cross-family tuning surface and V2.2.3 plan.
 
 ---
 

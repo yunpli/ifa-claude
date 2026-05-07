@@ -5,6 +5,7 @@
 > - TA — [`docs/ta-tuning-playbook.md`](ta-tuning-playbook.md)
 > - Stock Edge — [`docs/stock_edge_tuning_work_list.md`](stock_edge_tuning_work_list.md), [`docs/stock_edge_weekly_tune_runbook.md`](stock_edge_weekly_tune_runbook.md)
 > - SmartMoney — [`docs/smartmoney-deep-dive.md`](smartmoney-deep-dive.md)
+> - SME — [`docs/sme-data-logic-contracts.md`](sme-data-logic-contracts.md), [`docs/sme-mvp1-work-list.md`](sme-mvp1-work-list.md)
 
 ---
 
@@ -14,10 +15,11 @@
 |---|---|---|---|---|
 | **TA** | 28 setup thresholds, regime gating, decay weights | Iter 19 封版 ✅ | `ifa ta walk-forward` + `ifa ta backtest` | Production |
 | **SmartMoney** | RF + XGB hyperparameters per phase, factor weights | v2026_05 frozen ✅ | `ifa smartmoney backtest` + `params freeze` | Production |
-| **Stock Edge** | 决策层 horizons.weights.* (5d/10d/20d), continuous overlay bounds, cluster/signal shifts | T3.1 + T3.4 done; **T3.2 + T3.3 pending → V2.2.1** | `_search_overlay()` + `auto_promote_if_passing` | **Quality-improving** |
+| **Stock Edge** | 决策层 horizons.weights.* (5d/10d/20d), continuous overlay bounds, cluster/signal shifts | T3.1 + T3.4 done; **T3.2 + T3.3 pending → V2.2.3** | `_search_overlay()` + `auto_promote_if_passing` | **Quality-improving** |
 | **Research** | n/a (deterministic factor calc; LLM only narrates) | – | – | – |
+| **SME** | Market-structure bucket ranking, continuous thresholds/weights/penalties, bucket-specific promotion rules | MVP1 ready ✅; first tuning signal says secondary/crowding_risk/avoid > primary | `ifa sme tuning-ready`, `ifa sme tune bucket-review`, `ifa sme tune promote-profile`, `scripts/sme_nightly_tune_2300.sh` | **Tuning-ready** |
 
-**Bottom line for V2.2**: TA and SmartMoney YAMLs are frozen at production-grade parameters. Stock Edge ships with the current YAML (working but suboptimal); V2.2.1 will land tuning improvements via T3.2 + T3.3.
+**Bottom line for V2.2.2**: TA and SmartMoney YAMLs are frozen at production-grade parameters. SME now has persistent snapshots and forward-label evaluation, so it is tuning-ready. Stock Edge ships with the current YAML (working but suboptimal); V2.2.3 will land tuning improvements via T3.2 + T3.3.
 
 ---
 
@@ -91,6 +93,47 @@
 
 ---
 
+## SME family
+
+### What's tunable
+
+- Market-structure bucket ranking: `primary`, `secondary`, `defensive`, `repair`, `avoid`, `crowding_risk`.
+- Continuous thresholds and weights for flow intensity, breadth, concentration, institutional/event-flow proxy, small/mid-order proxy, and risk penalties.
+- Bucket-specific promotion and demotion rules.
+- Scenario classification language is not a tuning target; it is customer-facing compression of the structured snapshot.
+
+### Current state (V2.2.2 release)
+
+- 2021-now SME derived tables are backfilled locally and under the 10GB storage budget.
+- `sme_market_structure_daily` persists daily strategy snapshots.
+- `sme_strategy_eval_daily` joins buckets to 1/3/5/10/20 trading-day forward labels.
+- YTD readout: `secondary`, `crowding_risk`, and `avoid` currently beat `primary`; first tuning work should rebuild bucket ranking and thresholds rather than add more narrative.
+
+### Tools available
+
+```bash
+uv run python -m ifa.cli sme tuning-ready --start 2026-01-01 --end 2026-04-30 --json
+uv run python -m ifa.cli sme tune bucket-review --start 2026-01-01 --end 2026-04-30 --json
+uv run python -m ifa.cli sme tune promote-profile --profile mvp1_ytd_candidate --start 2026-01-01 --end 2026-04-30 --apply --json
+scripts/sme_nightly_tune_2300.sh
+```
+
+### When to re-tune
+
+- Weekly weekend tuning after enough new mature labels accumulate.
+- Immediately after a logic-version change in market-structure, state, diffusion, or labels.
+- After a visible regime shift where OOS/OOC bucket performance drifts.
+
+### Process
+
+1. Run the 22:40 incremental first so the latest source day is materialized.
+2. Run weekend tuning with a stable long window:
+   `SME_TUNE_START=2021-01-01 SME_TUNE_MIN_SAMPLE_DAYS=120 scripts/sme_nightly_tune_2300.sh`.
+3. Review `bucket_review.json` and `run_summary.json`; promote only if the candidate profile improves OOS/OOC signal quality and has enough mature-label coverage.
+4. Let `ifa sme tune promote-profile --apply` write `active_profile` to YAML; do not hand-edit active profiles after a search.
+
+---
+
 ## Stock Edge family
 
 ### What's tunable
@@ -115,7 +158,7 @@ decision_score per (ts_code, horizon, as_of)
 #### Surface 2 — Continuous overlay (what `_search_overlay` was tuning)
 Path: handcrafted 9-term tanh formula in `optimizer.py:_evaluate_overlay()`.
 
-⚠️ **Known precondition** (memory `project_stock_edge_optimizer_surrogate_bug.md`): historical optimizer was tuning Surface 2 (a proxy formula), NOT Surface 1 (production decision layer). **V2.2.1 T3.2 fixes this** by wiring `compute_strategy_matrix → build_decision_layer` into the evaluation pipeline. Until then, treat optimizer output with skepticism.
+⚠️ **Known precondition** (memory `project_stock_edge_optimizer_surrogate_bug.md`): historical optimizer was tuning Surface 2 (a proxy formula), NOT Surface 1 (production decision layer). **V2.2.3 T3.2 fixes this** by wiring `compute_strategy_matrix → build_decision_layer` into the evaluation pipeline. Until then, treat optimizer output with skepticism.
 
 ### Current state (V2.2 release)
 
@@ -129,11 +172,11 @@ Path: handcrafted 9-term tanh formula in `optimizer.py:_evaluate_overlay()`.
 - T3.1 DB I/O batching (~50% wall-time reduction)
 - T3.4 Decision ledger `stock.tuning_promotion_log` + git tag automation
 
-**Pending** (V2.2.1):
+**Pending** (V2.2.3):
 - **T3.2** ML 跨日期复用 (sklearn fit cache by ts_code × fit_window)
 - **T3.3** 扩 panel 100 stocks × 24 dates final tuning (K=6 folds)
 
-### Acceptance gate (V2.2.1)
+### Acceptance gate (V2.2.3)
 
 | Horizon | Target | Current (4-fold × 50 stocks × 12 dates) |
 |---|---|---|
@@ -168,12 +211,12 @@ ORDER BY timestamp DESC LIMIT 10;
 "
 ```
 
-**Pending V2.2.1**:
+**Pending V2.2.3**:
 - ❌ No standalone `ifa stock tune` CLI yet — must be invoked programmatically
 - ❌ No `auto_promote_if_passing` end-to-end CLI flow
 - ❌ No script for routine T3.2 ML cache warmup
 
-### V2.2.1 deliverables (3-4 days)
+### V2.2.3 deliverables (3-4 days)
 
 1. **T3.2 ML 跨日期复用** (2 days)
    - Add sklearn fit cache to `ifa.families.stock.factor.compute_strategy_matrix`
@@ -209,7 +252,7 @@ ORDER BY timestamp DESC LIMIT 10;
 |---|---|---|
 | Reports look reasonable but signals weak | Factor distribution drift | SmartMoney (rule-based first) |
 | TA setup fires too often / never | Threshold drift | TA (run `coverage` first) |
-| Stock Edge `decision_score` doesn't predict | Decision layer weights stale | Stock Edge (V2.2.1) |
+| Stock Edge `decision_score` doesn't predict | Decision layer weights stale | Stock Edge (V2.2.3) |
 | Regime classifier wrong half the time | Transition matrix or feature drift | SmartMoney + TA (regime is shared) |
 | Research factors look correct but story confusing | Prompt drift, not tuning | LLM prompt (Phase L work) |
 
@@ -235,7 +278,8 @@ ORDER BY timestamp DESC LIMIT 10;
 
 ## Roadmap
 
-- **V2.2.1** (1 week): Stock Edge T3.2 + T3.3 → variant YAML auto-promote
+- **V2.2.2** (shipped): SME MVP1 → persistent snapshots + forward labels + tuning-ready brief
+- **V2.2.3** (1 week): Stock Edge T3.2 + T3.3 → variant YAML auto-promote; deferred Research/TA/Stock Edge intraday scope
 - **V2.3** (4 weeks): Cross-family auto-tuning daemon (rolling weekly tune all 3 families with notifications)
 - **V2.4** (8+ weeks): Online learning prototype for SmartMoney (vs. batch re-train)
 

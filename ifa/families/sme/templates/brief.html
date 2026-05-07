@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{ brief.title or "资金结构简报" }}</title>
+<style>
+:root {
+  --paper: #f6f8f7;
+  --panel: #ffffff;
+  --panel-2: #edf3f1;
+  --panel-3: #f8fbfa;
+  --ink: #171717;
+  --muted: #65706b;
+  --soft: #8b9892;
+  --rule: #d9e2de;
+  --accent: #0f766e;
+  --accent-soft: #d9efea;
+  --accent-line: #54b3a6;
+  --up: #b42318;
+  --down: #146c43;
+  --warn: #9a5b13;
+  --shadow: 0 18px 50px rgba(20, 49, 43, 0.08);
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", sans-serif;
+  line-height: 1.55;
+}
+.page {
+  width: min(1120px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 40px;
+}
+.banner {
+  border: 1px solid var(--rule);
+  border-top: 4px solid var(--accent);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 24px 26px 22px;
+  position: relative;
+  overflow: hidden;
+}
+.banner::after {
+  content: "";
+  position: absolute;
+  right: 24px;
+  top: 22px;
+  width: 180px;
+  height: 2px;
+  background: var(--accent-line);
+}
+.brand {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+h1 {
+  margin: 8px 0 2px;
+  font-family: Georgia, "Noto Serif SC", serif;
+  font-size: clamp(28px, 4vw, 44px);
+  letter-spacing: 0;
+  line-height: 1.1;
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 10px;
+}
+.one-line {
+  margin-top: 18px;
+  padding: 14px 16px;
+  background: var(--accent-soft);
+  border-left: 4px solid var(--accent);
+  font-size: 18px;
+  font-weight: 700;
+}
+.decision-map {
+  border: 1px solid #b8d8d2;
+  border-top: 3px solid var(--accent);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 18px;
+  margin-top: 14px;
+  box-shadow: var(--shadow);
+}
+.decision-map .section__head {
+  border-color: var(--rule);
+}
+.decision-map .tag,
+.decision-map__note {
+  color: var(--muted);
+}
+.decision-map__note {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+.signal-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.signal-tile {
+  border: 1px solid var(--rule);
+  background: var(--panel-3);
+  padding: 10px;
+}
+.signal-tile span {
+  display: block;
+  color: var(--soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.signal-tile strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+.section {
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  padding: 16px;
+}
+.section--wide { grid-column: span 12; }
+.section--half { grid-column: span 6; }
+.section--third { grid-column: span 4; }
+.section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: 12px;
+}
+h2 {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: .02em;
+}
+.tag {
+  color: var(--soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.pulse {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr;
+  gap: 14px;
+}
+.pulse__main {
+  font-size: 18px;
+  font-weight: 700;
+}
+.pulse__sub {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 6px;
+}
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  border: 1px solid var(--rule);
+  background: var(--panel-2);
+  padding: 6px 12px;
+  font-weight: 700;
+}
+ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+li {
+  padding: 9px 0;
+  border-bottom: 1px solid #ebe6dc;
+}
+li:last-child { border-bottom: 0; }
+.empty { color: var(--soft); }
+.scenario li { display: grid; gap: 2px; }
+.table-wrap { overflow-x: auto; }
+.flow-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.flow-table th,
+.flow-table td {
+  border-bottom: 1px solid #ebe6dc;
+  padding: 8px 7px;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.flow-table th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  background: var(--panel-2);
+}
+.flow-table td:first-child {
+  font-weight: 800;
+  color: var(--ink);
+}
+.flow-table td:nth-child(2),
+.flow-table td:last-child {
+  white-space: normal;
+  min-width: 108px;
+}
+.num {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-weight: 750;
+  text-align: right !important;
+}
+.num.pos { color: var(--up); }
+.num.neg { color: var(--down); }
+.num.zero { color: var(--soft); }
+.basis {
+  color: var(--muted);
+  font-size: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--rule);
+  padding: 9px 10px;
+  margin-bottom: 10px;
+}
+.direction-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+.direction {
+  border: 1px solid var(--rule);
+  background: var(--panel-3);
+  padding: 12px;
+  min-height: 116px;
+  position: relative;
+}
+.direction::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent-line);
+}
+.direction__name {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+.decision-map .direction__name { color: var(--muted); }
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 650;
+}
+.decision-map .chip {
+  background: #ffffff;
+  border-color: #cddbd6;
+  color: var(--ink);
+}
+.explain {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.risk { color: var(--warn); }
+.in { color: var(--up); }
+.out { color: var(--down); }
+.decision {
+  background: #171717;
+  color: #fffdfa;
+  border-color: #171717;
+}
+.decision .section__head {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.decision .tag,
+.decision li {
+  color: rgba(255, 253, 250, 0.76);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.decision b { color: #fff; }
+.footnote {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 16px;
+  border-top: 1px solid var(--rule);
+  padding-top: 12px;
+}
+.short-disclaimer {
+  margin-top: 14px;
+  border: 1px solid var(--rule);
+  background: var(--panel-3);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 10px 12px;
+}
+.disclaimer {
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  margin-top: 14px;
+  padding: 18px;
+}
+.disclaimer h2 {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+.disclaimer h3 {
+  margin: 16px 0 8px;
+  font-size: 13px;
+  letter-spacing: .04em;
+}
+.disclaimer h3:first-of-type { margin-top: 0; }
+.disclaimer p {
+  color: var(--muted);
+  font-size: 11.5px;
+  margin: 0 0 8px;
+}
+.footer {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 14px;
+  border-top: 1px solid var(--rule);
+  padding-top: 12px;
+}
+@media (max-width: 860px) {
+  .page { width: min(100% - 20px, 1120px); padding-top: 12px; }
+  .banner { padding: 18px; }
+  .section--half, .section--third { grid-column: span 12; }
+  .pulse { grid-template-columns: 1fr; }
+  .direction-grid { grid-template-columns: 1fr; }
+  .signal-strip { grid-template-columns: repeat(2, 1fr); }
+  .flow-table { font-size: 12px; }
+}
+</style>
+</head>
+<body>
+<article class="page">
+  <header class="banner">
+    <div class="brand">SME · Smart Money Enhanced</div>
+    <h1>{{ brief.title or "资金结构简报" }}</h1>
+    <div class="meta">
+      <span>观察日期：{{ brief.observation_date_zh or brief.date or "—" }}</span>
+      <span>报告日期：北京时间 {{ brief.generated_at_bjt or "—" }}</span>
+      <span>输出口径：结论优先</span>
+      <span>适用周期：未来 1-3 个交易日</span>
+    </div>
+    {% if brief.status == "ok" %}
+    <div class="one-line">{{ brief.one_line }}</div>
+    {% else %}
+    <div class="one-line">{{ brief.summary or "本地数据不足，暂不生成简报。" }}</div>
+    {% endif %}
+    <div class="short-disclaimer">
+      {{ brief.disclaimer.short_header_zh }}<br>
+      {{ brief.disclaimer.short_header_en }}
+    </div>
+  </header>
+
+  {% if brief.status == "ok" %}
+  <section class="decision-map">
+    <div class="section__head">
+      <h2>最重要的方向</h2>
+      <span class="tag">Decision First</span>
+    </div>
+    <p class="decision-map__note">{{ brief.section_definitions["方向划分"] }}</p>
+    <div class="signal-strip">
+      <div class="signal-tile"><span>Capital State</span><strong>{{ brief.capital_state or "结构不清晰" }}</strong></div>
+      <div class="signal-tile"><span>Primary</span><strong>{{ brief.directions["一级受益方向"][:2] | join("、") or "暂无" }}</strong></div>
+      <div class="signal-tile"><span>Watch</span><strong>{{ brief.directions["二级受益方向"][:2] | join("、") or "暂无" }}</strong></div>
+      <div class="signal-tile"><span>Avoid</span><strong>{{ brief.directions["需要回避或减仓的方向"][:2] | join("、") or "暂无" }}</strong></div>
+    </div>
+    <div class="direction-grid">
+      {% for name, items in brief.directions.items() %}
+      <div class="direction">
+        <div class="direction__name">{{ name }}</div>
+        <div class="chips">
+          {% for item in items %}
+          <span class="chip">{{ item }}</span>
+          {% else %}
+          <span class="chip empty">暂无</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <main class="grid">
+    <section class="section section--wide">
+      <div class="section__head">
+        <h2>市场温度</h2>
+        <span class="tag">Market Pulse</span>
+      </div>
+      <div class="pulse">
+        <div>
+          <div class="pulse__main">{{ brief.market_temperature.conclusion or "结构不清晰。" }}</div>
+          <div class="pulse__sub">{{ brief.market_temperature.breadth }}</div>
+        </div>
+        <div>
+          <span class="state-pill">{{ brief.capital_state or "结构不清晰" }}</span>
+          <div class="pulse__sub">{{ brief.market_temperature.intraday_note }}</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section--half">
+      <div class="section__head">
+        <h2>主要流入</h2>
+        <span class="tag in">Inflow</span>
+      </div>
+      <div class="basis">{{ brief.flow_basis }}</div>
+      <div class="table-wrap">
+        <table class="flow-table">
+          <thead>
+            <tr>
+              <th>板块</th>
+              <th>判断</th>
+              <th>主力</th>
+              <th>超大单</th>
+              <th>大单</th>
+              <th>小中单</th>
+              <th>机构席位</th>
+              <th>龙虎榜</th>
+              <th>资金主体</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in brief.main_inflows %}
+            <tr>
+              <td>{{ item.name }}</td>
+              <td>{{ item.conclusion }}</td>
+              <td class="num {{ item.metrics['主力']|flow_class }}">{{ item.metrics['主力']|signed_bn }}</td>
+              <td class="num {{ item.metrics['超大单']|flow_class }}">{{ item.metrics['超大单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['大单']|flow_class }}">{{ item.metrics['大单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['小中单']|flow_class }}">{{ item.metrics['小中单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['机构席位']|flow_class }}">{{ item.metrics['机构席位']|signed_bn }}</td>
+              <td class="num {{ item.metrics['龙虎榜']|flow_class }}">{{ item.metrics['龙虎榜']|signed_bn }}</td>
+              <td>{{ item.actor }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9" class="empty">暂无明确方向</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section section--half">
+      <div class="section__head">
+        <h2>主要流出</h2>
+        <span class="tag out">Outflow</span>
+      </div>
+      <div class="basis">{{ brief.flow_basis }}</div>
+      <div class="table-wrap">
+        <table class="flow-table">
+          <thead>
+            <tr>
+              <th>板块</th>
+              <th>判断</th>
+              <th>主力</th>
+              <th>超大单</th>
+              <th>大单</th>
+              <th>小中单</th>
+              <th>机构席位</th>
+              <th>龙虎榜</th>
+              <th>资金主体</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in brief.main_outflows %}
+            <tr>
+              <td>{{ item.name }}</td>
+              <td>{{ item.conclusion }}</td>
+              <td class="num {{ item.metrics['主力']|flow_class }}">{{ item.metrics['主力']|signed_bn }}</td>
+              <td class="num {{ item.metrics['超大单']|flow_class }}">{{ item.metrics['超大单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['大单']|flow_class }}">{{ item.metrics['大单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['小中单']|flow_class }}">{{ item.metrics['小中单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['机构席位']|flow_class }}">{{ item.metrics['机构席位']|signed_bn }}</td>
+              <td class="num {{ item.metrics['龙虎榜']|flow_class }}">{{ item.metrics['龙虎榜']|signed_bn }}</td>
+              <td>{{ item.actor }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9" class="empty">暂无明确方向</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section section--half">
+      <div class="section__head">
+        <h2>拥挤或尾端风险</h2>
+        <span class="tag risk">Risk</span>
+      </div>
+      <p class="explain">{{ brief.section_definitions["拥挤或尾端风险"] }}</p>
+      <div class="table-wrap">
+        <table class="flow-table">
+          <thead>
+            <tr>
+              <th>板块</th>
+              <th>判断</th>
+              <th>主力</th>
+              <th>超大单</th>
+              <th>大单</th>
+              <th>小中单</th>
+              <th>机构席位</th>
+              <th>龙虎榜</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in brief.crowding_or_tail_risk %}
+            <tr>
+              <td>{{ item.name }}</td>
+              <td>{{ item.conclusion }}</td>
+              <td class="num {{ item.metrics['主力']|flow_class }}">{{ item.metrics['主力']|signed_bn }}</td>
+              <td class="num {{ item.metrics['超大单']|flow_class }}">{{ item.metrics['超大单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['大单']|flow_class }}">{{ item.metrics['大单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['小中单']|flow_class }}">{{ item.metrics['小中单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['机构席位']|flow_class }}">{{ item.metrics['机构席位']|signed_bn }}</td>
+              <td class="num {{ item.metrics['龙虎榜']|flow_class }}">{{ item.metrics['龙虎榜']|signed_bn }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="empty">暂无明确方向</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section section--half">
+      <div class="section__head">
+        <h2>修复弹性</h2>
+        <span class="tag">Repair</span>
+      </div>
+      <p class="explain">{{ brief.section_definitions["修复弹性"] }}</p>
+      <div class="table-wrap">
+        <table class="flow-table">
+          <thead>
+            <tr>
+              <th>板块</th>
+              <th>判断</th>
+              <th>主力</th>
+              <th>超大单</th>
+              <th>大单</th>
+              <th>小中单</th>
+              <th>机构席位</th>
+              <th>龙虎榜</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in brief.repair_elasticity %}
+            <tr>
+              <td>{{ item.name }}</td>
+              <td>{{ item.conclusion }}</td>
+              <td class="num {{ item.metrics['主力']|flow_class }}">{{ item.metrics['主力']|signed_bn }}</td>
+              <td class="num {{ item.metrics['超大单']|flow_class }}">{{ item.metrics['超大单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['大单']|flow_class }}">{{ item.metrics['大单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['小中单']|flow_class }}">{{ item.metrics['小中单']|signed_bn }}</td>
+              <td class="num {{ item.metrics['机构席位']|flow_class }}">{{ item.metrics['机构席位']|signed_bn }}</td>
+              <td class="num {{ item.metrics['龙虎榜']|flow_class }}">{{ item.metrics['龙虎榜']|signed_bn }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="empty">暂无明确方向</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section section--half">
+      <div class="section__head">
+        <h2>外部变量</h2>
+        <span class="tag">Macro</span>
+      </div>
+      <p>{{ brief.external_variable }}</p>
+    </section>
+
+    <section class="section section--half">
+      <div class="section__head">
+        <h2>未来 1-3 个交易日</h2>
+        <span class="tag">Scenario</span>
+      </div>
+      <ul class="scenario">
+        <li><b>风险继续升级</b><span>{{ brief.scenario_1_3_days.get("风险继续升级", "暂无") }}</span></li>
+        <li><b>风险缓和</b><span>{{ brief.scenario_1_3_days.get("风险缓和", "暂无") }}</span></li>
+        <li><b>事件拖延</b><span>{{ brief.scenario_1_3_days.get("事件拖延", "暂无") }}</span></li>
+      </ul>
+    </section>
+
+    <section class="section section--wide decision">
+      <div class="section__head">
+        <h2>简单决策</h2>
+        <span class="tag">Action</span>
+      </div>
+      <ul>
+        {% for item in brief.what_to_do %}
+        <li><b>{{ loop.index }}.</b> {{ item }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </main>
+  {% endif %}
+
+  <section class="disclaimer">
+    <h2>完整免责声明 / Full Disclaimer</h2>
+    <h3>Disclaimer</h3>
+    {% for p in brief.disclaimer.paragraphs_en %}
+    <p>{{ p }}</p>
+    {% endfor %}
+    <h3>免责声明</h3>
+    {% for p in brief.disclaimer.paragraphs_zh %}
+    <p>{{ p }}</p>
+    {% endfor %}
+  </section>
+
+  <footer class="footer">
+    <strong>Lindenwood Management LLC</strong> ｜ {{ brief.disclaimer.footer_short_en }}<br>
+    {{ brief.disclaimer.footer_short_zh }}<br>
+    Generated {{ brief.generated_at_bjt }} 北京时间 · SME standalone template
+  </footer>
+</article>
+</body>
+</html>
