@@ -62,6 +62,9 @@
 
 ### Stock Edge / 个股作战室当前实现记录（Codex 2026-05-05）
 
+- **Yunpeng-approved Stock Edge tuning operating settings（2026-05-08）**：用户云鹏已明确授权覆盖之前“默认不 commit / 不 push / 不改 YAML”的保守约束。好工程改动、诊断工具、数据扩展、算法改进在测试/验证通过后可以 commit；明确可用阶段成果 commit 后可以 push；新参数/新算法只有通过严格 gate 后才能固化到 YAML，固化后必须跑最小回归 + smoke 再 commit。坏实验不得硬调参数或固化，应改数据集、连续参数空间、算法或验证设计。Stock Edge 调参按连续参数/连续优化问题处理，必须以 PIT、OOS/OOC、purged/walk-forward、anti-leakage、anti-bias、泛化 edge 为准。
+- **Stock Edge YAML 固化 gate（2026-05-08）**：固化 baseline/production YAML 前必须证明 PIT-local 与 latest 方向不矛盾且优先 PIT-local；OOS/K-fold/purged/walk-forward 口径可解释；目标 horizon 稳定正 lift，positive folds ≥ 2/3（大样本更严）；不能只靠 current-liquidity cohort bias；baseline/YAML 修改必须附验证命令和 before/after metrics。不得用 `--auto-promote` / `--apply-to-baseline` 绕过 gate。
+- **Stock Edge tuning v2.3 工程方向（Codex 2026-05-08）**：panel tuner 新增 `--universe-mode stratified-pit`，按每个 PIT 日期只用当时可见数据做分层抽样，MVP 维度为流动性 bucket、市值 bucket、SW L1 行业，波动率 bucket 先作为诊断维度写 manifest；新增 `--two-stage`，用 cheap proxy 子样本预筛，再在真实 replay panel 上精评；panel build 后默认写 diagnosis artifact 到 `/Users/neoclaw/claude/ifaenv/manifests/stock_edge_panel_diagnostics/`，包含 coverage/regime/label-noise/baseline rank-IC/signal coverage flags。当前这些是工程与验证框架改进，不代表参数已过 gate，不应自动改 YAML。
 - **最新 handover（调参治理重点）**：`docs/stock_edge_v2_2_tuning_governance_handover_2026_05_05.md` 是当前最新接手入口；旧 `docs/stock_edge_v2_2_tuning_handover_2026_05_05.md` 已标记 superseded，只能作历史背景。
 - **提交状态**：Stock Edge v2.2 三周期主实现已 commit/push 到 `origin/main`，commit `5a578a6`；调参治理修正已 commit/push，commit `9b4b4a0` (`Refactor Stock Edge tuning governance`)。
 - **调参机制口径**：YAML 是 baseline 和搜索边界；global preset 实验阶段仍写 JSON artifact，但经过验证后必须通过 `scripts/stock_edge_promote_global_preset.py` 生成可审计 YAML patch / baseline variant 并人工晋升。single-stock overlay 只作为 runtime JSON 局部适配，永远不写回 YAML。

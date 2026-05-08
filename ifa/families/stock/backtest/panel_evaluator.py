@@ -388,10 +388,17 @@ def compute_signal_ic_priors(panel: PanelMatrix, *, min_samples: int = 30) -> di
         if f_var <= 0:
             continue
         # For each signal column j: corr_j = sum((r_j - mean(r_j)) * f) / sqrt(var(r_j) * var(f))
-        # using only rows where active[j] is True
-        # Vectorized: replace NaN with column mean (centering then yields 0 contribution)
-        with np.errstate(invalid="ignore"):
-            col_means = np.nanmean(ranks_masked, axis=0)
+        # using only rows where active[j] is True. Some signals can be inactive for
+        # every row in a sparse panel; handle those columns explicitly instead of
+        # letting np.nanmean emit "Mean of empty slice".
+        active_counts = active.sum(axis=0)
+        col_sums = np.where(active, ranks_masked, 0.0).sum(axis=0)
+        col_means = np.divide(
+            col_sums,
+            active_counts,
+            out=np.zeros(scores_masked.shape[1], dtype=np.float64),
+            where=active_counts > 0,
+        )
         ranks_centered = np.where(active, ranks_masked - col_means, 0.0)  # NaN → 0 contribution
         cov = ranks_centered.T @ f                                          # [K]
         col_var = (ranks_centered ** 2).sum(axis=0)                          # [K]
@@ -399,7 +406,6 @@ def compute_signal_ic_priors(panel: PanelMatrix, *, min_samples: int = 30) -> di
         ic_vec = np.where(denom > 0, cov / np.where(denom > 0, denom, 1.0), 0.0)
 
         # Also enforce min_samples per signal (active count threshold)
-        active_counts = active.sum(axis=0)
         for j, key in enumerate(ALL_SIGNAL_KEYS):
             if active_counts[j] >= min_samples and not math.isnan(ic_vec[j]):
                 out[f"{h}d"][key] = float(ic_vec[j])

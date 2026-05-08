@@ -22,7 +22,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
@@ -83,12 +83,22 @@ class PanelManifest:
     built_at: dt.datetime
     panel_path: str
     manifest_path: str
+    universe_mode: str = "latest"
+    universe_selection: dict[str, Any] = field(default_factory=dict)
+    total_pairs: int = 0
+    failed_rows: int = 0
+    failure_details: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
+        total_pairs = self.total_pairs or (self.universe_size * len(self.as_of_dates))
         return {
             **asdict(self),
             "as_of_dates": [d.isoformat() for d in self.as_of_dates],
             "built_at": self.built_at.isoformat(),
+            "total_pairs": total_pairs,
+            "failed_rows": self.failed_rows,
+            "failure_rate": round(self.failed_rows / total_pairs, 6) if total_pairs else 0.0,
+            "failure_details": self.failure_details,
         }
 
 
@@ -102,8 +112,11 @@ def build_replay_panel(
     *,
     ts_codes: Sequence[str],
     as_of_dates: Sequence[dt.date],
+    ts_codes_by_date: Mapping[dt.date, Sequence[str]] | None = None,
     base_params: dict[str, Any] | None = None,
     universe_id: str = "ad_hoc",
+    universe_mode: str = "latest",
+    universe_selection: dict[str, Any] | None = None,
     skip_llm: bool = True,
     n_workers: int | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
@@ -117,8 +130,16 @@ def build_replay_panel(
     base_params = base_params or load_params()
     targets = target_return_pct_by_horizon or {5: 5.0, 10: 8.0, 20: 20.0}
     base_hash = params_hash(_strip_unstable_params(base_params))
+    chunks = _panel_chunks(ts_codes=ts_codes, as_of_dates=as_of_dates, ts_codes_by_date=ts_codes_by_date)
+    universe_mode = universe_mode.strip().lower()
+    if universe_mode not in {"latest", "pit-local", "stratified-pit"}:
+        raise ValueError(f"unsupported universe_mode={universe_mode!r}")
+    universe_selection = dict(universe_selection or {})
+    if universe_mode in {"pit-local", "stratified-pit"}:
+        universe_selection.setdefault("membership_hash", _membership_hash(chunks))
 
-    cache_path = _panel_cache_path(universe_id, as_of_dates, base_hash, skip_llm)
+    cache_extra = None if universe_mode == "latest" else universe_selection.get("membership_hash")
+    cache_path = _panel_cache_path(universe_id, as_of_dates, base_hash, skip_llm, cache_key_extra=cache_extra)
     manifest_path = cache_path.with_suffix(".manifest.json")
     if cache_path.exists() and manifest_path.exists():
         rows = _load_panel_parquet(cache_path)
@@ -127,23 +148,23 @@ def build_replay_panel(
             on_progress({"event": "cache_hit", "rows": len(rows), "path": str(cache_path)})
         return rows, manifest
 
-    # Dispatch by (as_of_date, [ts_codes]) chunks so gateway sector cache hits within a chunk
-    chunks: list[tuple[dt.date, list[str]]] = [(date, list(ts_codes)) for date in as_of_dates]
     total_pairs = sum(len(stocks) for _, stocks in chunks)
+    if on_progress:
+        on_progress({"event": "cache_miss", "path": str(cache_path), "total_pairs": total_pairs})
     started = time.monotonic()
     n_workers = n_workers or max(1, (os.cpu_count() or 4) - 1)
 
     rows: list[PanelRow] = []
-    failed = 0
+    failure_details: list[dict[str, Any]] = []
     completed = 0
     if n_workers <= 1:
         for as_of, codes in chunks:
-            chunk_rows, chunk_fail = _build_chunk_for_date(engine_url, as_of, codes, base_params, skip_llm, targets)
+            chunk_rows, chunk_failures = _build_chunk_for_date(engine_url, as_of, codes, base_params, skip_llm, targets)
             rows.extend(chunk_rows)
-            failed += chunk_fail
+            failure_details.extend(chunk_failures)
             completed += len(codes)
             if on_progress:
-                _emit_progress(on_progress, completed, total_pairs, len(rows), failed, started)
+                _emit_progress(on_progress, completed, total_pairs, len(rows), len(failure_details), started)
     else:
         with ProcessPoolExecutor(max_workers=n_workers) as ex:
             futures = {
@@ -153,16 +174,25 @@ def build_replay_panel(
             for fut in as_completed(futures):
                 as_of, codes = futures[fut]
                 try:
-                    chunk_rows, chunk_fail = fut.result()
+                    chunk_rows, chunk_failures = fut.result()
                 except Exception as exc:
-                    chunk_rows, chunk_fail = [], len(codes)
+                    chunk_rows = []
+                    chunk_failures = [
+                        _failure_detail(ts_code=code, as_of_date=as_of, reason="chunk_exception", error=repr(exc))
+                        for code in codes
+                    ]
                     if on_progress:
-                        on_progress({"event": "row_error", "error": repr(exc)})
+                        on_progress({
+                            "event": "row_error",
+                            "as_of_date": as_of.isoformat(),
+                            "failed": len(chunk_failures),
+                            "error": repr(exc),
+                        })
                 rows.extend(chunk_rows)
-                failed += chunk_fail
+                failure_details.extend(chunk_failures)
                 completed += len(codes)
                 if on_progress:
-                    _emit_progress(on_progress, completed, total_pairs, len(rows), failed, started)
+                    _emit_progress(on_progress, completed, total_pairs, len(rows), len(failure_details), started)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     _save_panel_parquet(rows, cache_path)
@@ -176,6 +206,11 @@ def build_replay_panel(
         built_at=dt.datetime.now(dt.timezone.utc),
         panel_path=str(cache_path),
         manifest_path=str(manifest_path),
+        universe_mode=universe_mode,
+        universe_selection=universe_selection,
+        total_pairs=total_pairs,
+        failed_rows=len(failure_details),
+        failure_details=failure_details[:200],
     )
     manifest_path.write_text(json.dumps(manifest.to_dict(), ensure_ascii=False, default=str, indent=2), encoding="utf-8")
     return rows, manifest
@@ -197,7 +232,7 @@ def _build_chunk_for_date(
     base_params: dict[str, Any],
     skip_llm: bool,
     target_pct_by_horizon: dict[int, float],
-) -> tuple[list[PanelRow], int]:
+) -> tuple[list[PanelRow], list[dict[str, Any]]]:
     """Worker entry: build all rows for one (as_of_date, [ts_codes]) chunk.
 
     The shared `_PanelGateway` caches sector queries by l2_code so stocks in the
@@ -227,16 +262,16 @@ def _build_chunk_for_date(
             # If preload fails, fall back to per-stock queries (no perf gain but correct)
             pass
         rows: list[PanelRow] = []
-        failed = 0
+        failures: list[dict[str, Any]] = []
         for ts_code in ts_codes:
-            row = _build_one_row_with_gateway(
+            row, failure = _build_one_row_with_gateway_detailed(
                 engine, gateway, ts_code, as_of_date, base_params, skip_llm, target_pct_by_horizon
             )
             if row is None:
-                failed += 1
+                failures.append(failure or _failure_detail(ts_code=ts_code, as_of_date=as_of_date, reason="unknown"))
             else:
                 rows.append(row)
-        return rows, failed
+        return rows, failures
     finally:
         engine.dispose()
 
@@ -256,9 +291,10 @@ def _build_one_row(
     engine = create_engine(engine_url, poolclass=QueuePool, pool_size=2, max_overflow=2, pool_recycle=3600)
     try:
         gateway = _PanelGateway(engine)
-        return _build_one_row_with_gateway(
+        row, _failure = _build_one_row_with_gateway_detailed(
             engine, gateway, ts_code, as_of_date, base_params, skip_llm, target_pct_by_horizon
         )
+        return row
     finally:
         engine.dispose()
 
@@ -273,6 +309,22 @@ def _build_one_row_with_gateway(
     target_pct_by_horizon: dict[int, float],
 ) -> PanelRow | None:
     """Inner builder that reuses a passed-in cached gateway across multiple stocks."""
+    row, _failure = _build_one_row_with_gateway_detailed(
+        engine, gateway, ts_code, as_of_date, base_params, skip_llm, target_pct_by_horizon
+    )
+    return row
+
+
+def _build_one_row_with_gateway_detailed(
+    engine: Engine,
+    gateway: "_PanelGateway",
+    ts_code: str,
+    as_of_date: dt.date,
+    base_params: dict[str, Any],
+    skip_llm: bool,
+    target_pct_by_horizon: dict[int, float],
+) -> tuple[PanelRow | None, dict[str, Any] | None]:
+    """Build one row and return a structured failure reason when it cannot be built."""
     try:
         params = _params_for_panel(base_params, skip_llm=skip_llm)
         request = StockEdgeRequest(
@@ -283,19 +335,24 @@ def _build_one_row_with_gateway(
         )
         try:
             ctx = build_context(request, engine=engine, params=params)
-        except Exception:
-            return None
+        except Exception as exc:
+            return None, _failure_detail(ts_code=ts_code, as_of_date=as_of_date, reason="build_context_exception", error=repr(exc))
         # Force as_of to the requested date if calendar resolution drifted
         if ctx.as_of.as_of_trade_date != as_of_date:
-            return None
+            return None, _failure_detail(
+                ts_code=ts_code,
+                as_of_date=as_of_date,
+                reason="as_of_calendar_drift",
+                resolved_as_of=str(ctx.as_of.as_of_trade_date),
+            )
         try:
             snapshot = build_local_snapshot(ctx, gateway=gateway, allow_backfill=False)
-        except Exception:
-            return None
+        except Exception as exc:
+            return None, _failure_detail(ts_code=ts_code, as_of_date=as_of_date, reason="snapshot_exception", error=repr(exc))
         try:
             matrix = compute_strategy_matrix(snapshot)
-        except Exception:
-            return None
+        except Exception as exc:
+            return None, _failure_detail(ts_code=ts_code, as_of_date=as_of_date, reason="strategy_matrix_exception", error=repr(exc))
         signals = {}
         for sig in matrix.get("signals") or []:
             key = sig.get("key")
@@ -319,7 +376,12 @@ def _build_one_row_with_gateway(
         # Forward labels — read PIT from DB without going through gateway
         forward = _forward_labels_from_db(engine, ts_code, as_of_date, target_pct_by_horizon)
         if forward is None:
-            return None
+            return None, _failure_detail(
+                ts_code=ts_code,
+                as_of_date=as_of_date,
+                reason="missing_pit_forward_label_anchor",
+                detail="raw_daily has no positive close exactly on the PIT as_of_date or lacks enough anchor data",
+            )
         regime = _regime_for_date(engine, as_of_date)
         return PanelRow(
             ts_code=ts_code,
@@ -346,9 +408,9 @@ def _build_one_row_with_gateway(
             decision_5d_score_baseline=baseline_5d,
             decision_10d_score_baseline=baseline_10d,
             decision_20d_score_baseline=baseline_20d,
-        )
-    except Exception:
-        return None
+        ), None
+    except Exception as exc:
+        return None, _failure_detail(ts_code=ts_code, as_of_date=as_of_date, reason="unexpected_exception", error=repr(exc))
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -670,26 +732,65 @@ def _strip_unstable_params(base_params: dict[str, Any]) -> dict[str, Any]:
     return params
 
 
-def _panel_cache_path(universe_id: str, as_of_dates: Sequence[dt.date], base_hash: str, skip_llm: bool) -> Path:
+def _panel_chunks(
+    *,
+    ts_codes: Sequence[str],
+    as_of_dates: Sequence[dt.date],
+    ts_codes_by_date: Mapping[dt.date, Sequence[str]] | None,
+) -> list[tuple[dt.date, list[str]]]:
+    if ts_codes_by_date is None:
+        return [(date, list(ts_codes)) for date in as_of_dates]
+    chunks: list[tuple[dt.date, list[str]]] = []
+    for as_of_date in as_of_dates:
+        codes = list(ts_codes_by_date.get(as_of_date) or [])
+        chunks.append((as_of_date, codes))
+    return chunks
+
+
+def _membership_hash(chunks: Sequence[tuple[dt.date, Sequence[str]]]) -> str:
+    payload = [
+        {"as_of_date": as_of.isoformat(), "ts_codes": list(codes)}
+        for as_of, codes in sorted(chunks, key=lambda item: item[0])
+    ]
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _panel_cache_path(
+    universe_id: str,
+    as_of_dates: Sequence[dt.date],
+    base_hash: str,
+    skip_llm: bool,
+    *,
+    cache_key_extra: str | None = None,
+) -> Path:
     sorted_dates = sorted(as_of_dates)
     date_sig = f"{sorted_dates[0].isoformat()}_{sorted_dates[-1].isoformat()}_{len(sorted_dates)}"
-    suffix = hashlib.sha256(f"{universe_id}|{date_sig}|{base_hash}|llm={skip_llm}".encode()).hexdigest()[:12]
+    extra = f"|extra={cache_key_extra}" if cache_key_extra else ""
+    suffix = hashlib.sha256(f"{universe_id}|{date_sig}|{base_hash}|llm={skip_llm}{extra}".encode()).hexdigest()[:12]
     fname = f"{universe_id}__{sorted_dates[0]:%Y%m%d}_{sorted_dates[-1]:%Y%m%d}__{suffix}.parquet"
     return PANEL_CACHE_ROOT / fname
 
 
 def _load_manifest(path: Path) -> PanelManifest:
     raw = json.loads(path.read_text(encoding="utf-8"))
+    as_of_dates = [dt.date.fromisoformat(d) for d in raw["as_of_dates"]]
+    universe_size = int(raw["universe_size"])
+    total_pairs = int(raw.get("total_pairs") or (universe_size * len(as_of_dates)))
     return PanelManifest(
         universe_id=raw["universe_id"],
-        universe_size=int(raw["universe_size"]),
-        as_of_dates=[dt.date.fromisoformat(d) for d in raw["as_of_dates"]],
+        universe_size=universe_size,
+        as_of_dates=as_of_dates,
         base_param_hash=raw["base_param_hash"],
         skip_llm=bool(raw["skip_llm"]),
         n_rows=int(raw["n_rows"]),
         built_at=dt.datetime.fromisoformat(raw["built_at"]),
         panel_path=raw["panel_path"],
         manifest_path=raw["manifest_path"],
+        universe_mode=str(raw.get("universe_mode") or "latest"),
+        universe_selection=dict(raw.get("universe_selection") or {}),
+        total_pairs=total_pairs,
+        failed_rows=int(raw.get("failed_rows") or max(0, total_pairs - int(raw["n_rows"]))),
+        failure_details=list(raw.get("failure_details") or []),
     )
 
 
@@ -706,6 +807,22 @@ def _emit_progress(cb: Callable, idx: int, total: int, ok: int, failed: int, sta
         "eta_sec": round(eta, 1),
         "rate_per_min": round(idx * 60.0 / max(elapsed, 0.01), 1),
     })
+
+
+def _failure_detail(
+    *,
+    ts_code: str,
+    as_of_date: dt.date,
+    reason: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    detail = {
+        "ts_code": ts_code,
+        "as_of_date": as_of_date.isoformat(),
+        "reason": reason,
+    }
+    detail.update({k: v for k, v in extra.items() if v is not None})
+    return detail
 
 
 def _forward_labels_from_db(

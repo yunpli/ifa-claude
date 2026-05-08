@@ -312,6 +312,7 @@ def fit_global_preset_successive_halving(
     use_ic_warmstart: bool = True,
     allow_negative_weights: bool = True,
     search_algo: str = "tpe",
+    initial_overlay: Mapping[str, float] | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
     stage_budgets: tuple[int, int, int] = (4, 2, 1),
     stage_widths: tuple[float, float, float] = (1.0, 0.25, 0.10),
@@ -361,10 +362,20 @@ def fit_global_preset_successive_halving(
     best_artifact = None
 
     for stage_idx, (n_trials, width_factor) in enumerate(zip(stage_n, stage_widths)):
+        if on_progress:
+            on_progress({
+                "event": "stage_start",
+                "stage": stage_idx,
+                "candidate": 0,
+                "total": n_trials,
+                "score": best_score if best_score > -999.0 else 0.0,
+                "best_score": best_score if best_score > -999.0 else 0.0,
+                "elapsed_seconds": 0.0,
+            })
         # Per-stage bounds: stage 0 uses full; stages 1+ narrow around best_overlay
         if stage_idx == 0:
             stage_bounds = dict(bounds_full)
-            stage_initial = None  # use IC warmstart from inner call
+            stage_initial = dict(initial_overlay) if initial_overlay else None
         else:
             stage_bounds = {}
             for k, (low, high) in bounds_full.items():
@@ -380,6 +391,13 @@ def fit_global_preset_successive_halving(
                 stage_bounds[k] = (stage_low, stage_high)
             stage_initial = dict(best_overlay)
 
+        def _stage_progress(payload: dict[str, Any], *, stage: int = stage_idx) -> None:
+            if not on_progress:
+                return
+            out = dict(payload)
+            out["stage"] = stage
+            on_progress(out)
+
         # Inner fit
         sub_artifact = fit_global_preset_via_panel(
             panel_rows,
@@ -393,7 +411,7 @@ def fit_global_preset_successive_halving(
             search_algo=search_algo,
             bounds_override=stage_bounds,
             initial_overlay=stage_initial,
-            on_progress=on_progress,
+            on_progress=_stage_progress,
             progress_every=max(1, n_trials // 4),
         )
         # Aggregate
@@ -414,6 +432,16 @@ def fit_global_preset_successive_halving(
         elif sub_artifact.overlay:
             # Use current best for next stage's center; do not overwrite best_overlay
             pass
+        if on_progress:
+            on_progress({
+                "event": "stage_done",
+                "stage": stage_idx,
+                "candidate": n_trials,
+                "total": n_trials,
+                "score": sub_artifact.objective_score,
+                "best_score": best_score,
+                "elapsed_seconds": 0.0,
+            })
 
     if best_artifact is None:
         # Edge case: nothing happened; return a degenerate artifact

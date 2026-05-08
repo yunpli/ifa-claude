@@ -7,8 +7,10 @@ artifacts without changing the strategy matrix contract.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from typing import Any
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -57,7 +59,8 @@ def build_right_tail_meta_gbm(
             l2_regularization=float(params.get("l2_regularization", 0.04)),
             random_state=17,
         )
-        model.fit(X_train, y_train)
+        with _quiet_sklearn_panel_warnings():
+            model.fit(X_train, y_train)
         probability = _positive_probability(model, latest)
         oos_prob = _positive_probabilities(model, X_oos)
         oos_hit_rate = float(y_oos[oos_prob >= np.quantile(oos_prob, 0.65)].mean()) if len(oos_prob) >= 10 else None
@@ -110,7 +113,8 @@ def build_temporal_sequence_ranker(
                 n_iter_no_change=12,
             ),
         )
-        model.fit(X_train, y_train)
+        with _quiet_sklearn_panel_warnings():
+            model.fit(X_train, y_train)
         probability = _positive_probability(model, latest)
         oos_prob = _positive_probabilities(model, X_oos)
         oos_hit_rate = float(y_oos[oos_prob >= np.quantile(oos_prob, 0.65)].mean()) if len(oos_prob) >= 10 else None
@@ -510,10 +514,12 @@ def build_path_shape_mixture_model(
                 random_state=97,
             ),
         )
-        model.fit(features)
+        with _quiet_sklearn_panel_warnings():
+            model.fit(features)
         gmm = model.named_steps["gaussianmixture"]
-        posterior = gmm.predict_proba(model.named_steps["standardscaler"].transform(latest))[0]
-        assignments = gmm.predict(model.named_steps["standardscaler"].transform(features))
+        with _quiet_sklearn_panel_warnings():
+            posterior = gmm.predict_proba(model.named_steps["standardscaler"].transform(latest))[0]
+            assignments = gmm.predict(model.named_steps["standardscaler"].transform(features))
         cluster_rows: list[dict[str, Any]] = []
         weighted_prob = 0.0
         weighted_return = 0.0
@@ -726,13 +732,15 @@ def build_entry_price_surface_model(
             n_jobs=1,
         )
         model.fit(X_train, y_train)
-        latest_prob = model.predict_proba(latest)[0]
+        with _quiet_sklearn_panel_warnings():
+            latest_prob = model.predict_proba(latest)[0]
         route_probs = {meta["route_names"][int(cls)]: float(prob) for cls, prob in zip(model.classes_, latest_prob, strict=False)}
         for route in meta["route_names"].values():
             route_probs.setdefault(route, 0.0)
         best_route = max(route_probs, key=route_probs.get)
         probability = float(route_probs[best_route])
-        oos_prob = model.predict_proba(X_oos) if len(X_oos) else np.array([])
+        with _quiet_sklearn_panel_warnings():
+            oos_prob = model.predict_proba(X_oos) if len(X_oos) else np.array([])
         oos_hit_rate = None
         auc_proxy = None
         if len(oos_prob) >= 10:
@@ -1721,7 +1729,8 @@ def _positive_probability(model: Any, frame: pd.DataFrame) -> float:
 def _positive_probabilities(model: Any, frame: pd.DataFrame) -> np.ndarray:
     if frame is None or len(frame) == 0:
         return np.array([])
-    raw = np.asarray(model.predict_proba(frame), dtype=float)
+    with _quiet_sklearn_panel_warnings():
+        raw = np.asarray(model.predict_proba(frame), dtype=float)
     if raw.ndim == 1:
         return np.asarray([_clip01(value) for value in raw], dtype=float)
     if raw.shape[1] == 0:
@@ -1770,3 +1779,22 @@ def _missing(reason: str, model_name: str) -> MetaModelProfile:
         oos_auc_proxy=None,
         feature_snapshot={},
     )
+
+
+@contextmanager
+def _quiet_sklearn_panel_warnings():
+    """Suppress repeated sklearn fit/predict noise that is not an audit signal.
+
+    Panel builds run these single-stock models hundreds of times. MLP convergence
+    warnings and feature-name compatibility warnings are already represented by
+    model OOS fields / availability status; keeping them on stderr makes tuning
+    logs unreadable without improving failure handling.
+    """
+    try:
+        from sklearn.exceptions import ConvergenceWarning
+    except Exception:  # pragma: no cover - sklearn may be absent in minimal envs
+        ConvergenceWarning = Warning
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=ConvergenceWarning)
+        warnings.filterwarnings("ignore", message="X .*feature names.*", category=UserWarning)
+        yield

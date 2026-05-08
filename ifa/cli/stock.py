@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import subprocess
+import sys
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -328,6 +331,82 @@ def tune_global_preset_cmd(
     if write:
         path = write_tuning_artifact(artifact)
         console.print(f"[green]artifact[/green] → {path}")
+
+
+@app.command("tune")
+def tune_cmd(
+    as_of: str | None = typer.Option(None, "--as-of", help="Latest as_of trade date YYYY-MM-DD; defaults to latest raw_daily date"),
+    top: int = typer.Option(100, "--top", min=1, help="Top N by liquidity"),
+    liquidity_offset: int = typer.Option(0, "--liquidity-offset", min=0, help="Skip the top K liquidity names for OOC cohorts"),
+    pit_samples: int = typer.Option(24, "--pit-samples", min=2, help="PIT trading days to sample"),
+    max_candidates: int = typer.Option(768, "--max-candidates", min=1, help="Search candidate budget"),
+    workers: int = typer.Option(-1, "--workers", help="Parallel workers (-1 = auto)"),
+    k_fold: int = typer.Option(4, "--k-fold", min=0, help="Rolling walk-forward folds"),
+    val_dates_per_fold: int = typer.Option(2, "--val-dates-per-fold", min=1, help="Validation dates per fold"),
+    min_train_dates: int = typer.Option(4, "--min-train-dates", min=1, help="Minimum train dates for first fold"),
+    bootstrap_iterations: int = typer.Option(1000, "--bootstrap-iterations", min=0, help="Bootstrap iterations for G5"),
+    search_algo: str = typer.Option("tpe", "--search-algo", help="random | tpe"),
+    successive_halving: bool = typer.Option(True, "--successive-halving/--no-successive-halving", help="Use staged coarse-to-fine search"),
+    auto_promote: bool = typer.Option(True, "--auto-promote/--no-auto-promote", help="Run promotion gates after tuning"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Do not write artifacts/YAML"),
+    apply_to_baseline: bool = typer.Option(False, "--apply-to-baseline", help="If gates pass, overwrite baseline YAML with backup"),
+    variant_output: str | None = typer.Option(None, "--variant-output", help="Variant YAML path when not applying to baseline"),
+    universe_id: str = typer.Option("top_liquidity", "--universe-id", help="Replay panel cache namespace prefix"),
+    universe_mode: str = typer.Option("latest", "--universe-mode", help="latest | pit-local | stratified-pit"),
+    stratified_pool_multiple: int = typer.Option(8, "--stratified-pool-multiple", min=2, help="Candidate pool multiple for stratified-pit"),
+    two_stage: bool = typer.Option(False, "--two-stage", help="Cheap proxy prefilter before expensive replay search"),
+    proxy_candidates: int = typer.Option(128, "--proxy-candidates", min=1, help="Cheap proxy candidate budget"),
+    proxy_max_rows: int = typer.Option(600, "--proxy-max-rows", min=1, help="Max rows for cheap proxy subset"),
+    include_llm: bool = typer.Option(False, "--include-llm", help="Include LLM signals in panel build"),
+) -> None:
+    """Run production-aligned Stock Edge panel tuning.
+
+    This wraps `scripts/stock_edge_panel_tune.py`, not the legacy surrogate
+    global-preset tuner. Use `--liquidity-offset 100` for OOC holdout cohorts.
+    """
+    if universe_mode not in {"latest", "pit-local", "stratified-pit"}:
+        raise typer.BadParameter("--universe-mode must be one of: latest, pit-local, stratified-pit")
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "stock_edge_panel_tune.py"
+    cmd = [
+        sys.executable,
+        str(script),
+        "--top", str(top),
+        "--liquidity-offset", str(liquidity_offset),
+        "--pit-samples", str(pit_samples),
+        "--max-candidates", str(max_candidates),
+        "--workers", str(workers),
+        "--k-fold", str(k_fold),
+        "--val-dates-per-fold", str(val_dates_per_fold),
+        "--min-train-dates", str(min_train_dates),
+        "--bootstrap-iterations", str(bootstrap_iterations),
+        "--search-algo", search_algo,
+        "--universe-id", universe_id,
+        "--universe-mode", universe_mode,
+        "--stratified-pool-multiple", str(stratified_pool_multiple),
+    ]
+    if as_of:
+        cmd.extend(["--as-of", as_of])
+    if successive_halving:
+        cmd.append("--successive-halving")
+    if auto_promote:
+        cmd.append("--auto-promote")
+    if dry_run:
+        cmd.append("--dry-run")
+    if apply_to_baseline:
+        cmd.append("--apply-to-baseline")
+    if variant_output:
+        cmd.extend(["--variant-output", variant_output])
+    if include_llm:
+        cmd.append("--include-llm")
+    if two_stage:
+        cmd.extend([
+            "--two-stage",
+            "--proxy-candidates", str(proxy_candidates),
+            "--proxy-max-rows", str(proxy_max_rows),
+        ])
+    console.print("[bold]running[/] " + " ".join(cmd))
+    raise typer.Exit(code=subprocess.call(cmd, cwd=str(root)))
 
 
 def _parse_as_of_date(raw: str | None, engine) -> dt.date:
