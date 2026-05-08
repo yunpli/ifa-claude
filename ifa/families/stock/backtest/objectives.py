@@ -34,6 +34,11 @@ class HorizonObjectiveInputs:
     decay_penalty: float = 0.0
     auxiliary_penalty: float = 0.0
     rank_ic_quality: float = 0.0
+    top_bucket_return_quality: float = 0.0
+    top_bottom_spread_quality: float = 0.0
+    bucket_monotonicity_quality: float = 0.0
+    top_bucket_win_quality: float = 0.0
+    top_bucket_left_tail_penalty: float = 0.0
 
     def to_dict(self) -> dict[str, float]:
         return asdict(self)
@@ -65,14 +70,23 @@ class PredictionObjectiveInputs:
 
 
 DEFAULT_HORIZON_WEIGHTS: dict[str, float] = {
-    "rank_ic_quality": 0.25,           # NEW: reward score-vs-realized rank correlation directly
-    "positive_return_quality": 0.16,
-    "target_first_quality": 0.14,
-    "entry_fill_quality": 0.10,
-    "reward_risk": 0.12,
-    "risk_adjusted_return": 0.12,
-    "drawdown_penalty": -0.16,
-    "stop_first_penalty": -0.12,
+    # Outcome-first stock selection objective:
+    # reward score-vs-realized forward-return ranking and top-bucket payoff
+    # directly. Target-first and entry-fill remain execution diagnostics, not
+    # the main optimization target.
+    "rank_ic_quality": 0.28,
+    "top_bucket_return_quality": 0.18,
+    "top_bottom_spread_quality": 0.14,
+    "bucket_monotonicity_quality": 0.10,
+    "top_bucket_win_quality": 0.08,
+    "positive_return_quality": 0.08,
+    "target_first_quality": 0.06,
+    "entry_fill_quality": 0.04,
+    "reward_risk": 0.08,
+    "risk_adjusted_return": 0.08,
+    "drawdown_penalty": -0.14,
+    "stop_first_penalty": -0.10,
+    "top_bucket_left_tail_penalty": -0.12,
     "liquidity_penalty": -0.05,
     "chase_failure_penalty": -0.05,
     "overheat_penalty": -0.04,
@@ -119,10 +133,11 @@ def score_prediction_objective(
         return round(float(composite["score"]), 6)
 
     cw = {**DEFAULT_COMPOSITE_WEIGHTS, **dict(weights or {})}
+    horizon_weights = dict(data.get("horizon_weights") or {})
     horizon_scores = {
-        "horizon_5d": score_horizon_objective(data.get("objective_5d") or {}),
-        "horizon_10d": score_horizon_objective(data.get("objective_10d") or {}),
-        "horizon_20d": score_horizon_objective(data.get("objective_20d") or {}),
+        "horizon_5d": score_horizon_objective(data.get("objective_5d") or {}, weights=horizon_weights),
+        "horizon_10d": score_horizon_objective(data.get("objective_10d") or {}, weights=horizon_weights),
+        "horizon_20d": score_horizon_objective(data.get("objective_20d") or {}, weights=horizon_weights),
     }
     score = 0.0
     for key, value in horizon_scores.items():
@@ -142,6 +157,7 @@ def build_composite_objective(
     turnover_liquidity_penalty: float,
     strategy_decay_penalty: float = 0.0,
     weights: Mapping[str, float] | None = None,
+    horizon_weights: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     """Return the artifact-ready composite objective block."""
     payload = {
@@ -149,6 +165,7 @@ def build_composite_objective(
         "objective_5d": dict(objective_5d),
         "objective_10d": dict(objective_10d),
         "objective_20d": dict(objective_20d),
+        "horizon_weights": dict(horizon_weights or {}),
         "composite_objective": {
             "calibration_quality": round(calibration_quality, 6),
             "turnover_liquidity_penalty": round(turnover_liquidity_penalty, 6),
@@ -158,9 +175,9 @@ def build_composite_objective(
     score = score_prediction_objective(payload, weights=weights)
     payload["composite_objective"]["score"] = score
     payload["composite_objective"]["horizon_scores"] = {
-        "5d": score_horizon_objective(objective_5d),
-        "10d": score_horizon_objective(objective_10d),
-        "20d": score_horizon_objective(objective_20d),
+        "5d": score_horizon_objective(objective_5d, weights=horizon_weights),
+        "10d": score_horizon_objective(objective_10d, weights=horizon_weights),
+        "20d": score_horizon_objective(objective_20d, weights=horizon_weights),
     }
     return payload
 

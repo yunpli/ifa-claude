@@ -180,7 +180,13 @@ def _horizon_metrics(
     horizon: int,
     buy_threshold: float = 0.55,
 ) -> dict[str, Any]:
-    """Compute per-horizon objective fields that score_prediction_objective consumes."""
+    """Compute per-horizon objective fields plus outcome-first trading diagnostics.
+
+    Existing quality fields feed the scalar optimizer. The additional top/bottom
+    bucket metrics are emitted for parameter governance: they measure whether the
+    highest-ranked stocks actually earn better forward returns than the lowest
+    ranked stocks, instead of relying on a cosmetically better composite score.
+    """
     n = int(valid.sum())
     if n == 0:
         return {
@@ -193,6 +199,13 @@ def _horizon_metrics(
             "overheat_penalty": 0.0, "decay_penalty": 0.0, "auxiliary_penalty": 0.0,
             "avg_return": 0.0, "median_return": 0.0,
             "positive_return_rate": 0.0, "target_first_rate": 0.0, "stop_first_rate": 0.0,
+            "top_bucket_avg_return": 0.0, "top_bucket_win_rate": 0.0,
+            "top_bucket_profit_loss": 0.0, "top_bucket_left_tail": 0.0,
+            "top_bucket_drawdown_proxy": 0.0, "bottom_bucket_avg_return": 0.0,
+            "top_bottom_spread": 0.0, "bucket_monotonicity": 0.0,
+            "top_bucket_return_quality": 0.0, "top_bottom_spread_quality": 0.0,
+            "bucket_monotonicity_quality": 0.0, "top_bucket_win_quality": 0.0,
+            "top_bucket_left_tail_penalty": 1.0,
             "buy_threshold_used": buy_threshold,
             "buy_signals": 0, "buy_hit_rate": 0.0,
         }
@@ -227,6 +240,7 @@ def _horizon_metrics(
     buy_n = int(buy_mask.sum())
     buy_hit_rate = float(tf[buy_mask].mean()) if buy_n > 0 else 0.0
     buy_avg_return = float(r[buy_mask].mean()) if buy_n > 0 else 0.0
+    bucket_metrics = _rank_bucket_metrics(s, r, dd)
 
     # rank IC quality: maps rank IC of [-0.10, +0.20] → [0, 1]; below -0.10 = 0; above +0.20 = 1
     rank_ic_quality = float(np.clip((rank_ic + 0.10) / 0.30, 0.0, 1.0))
@@ -237,6 +251,16 @@ def _horizon_metrics(
     risk_adjusted_return = float(np.clip((avg_ret / 100.0 + return_scale / 2.0) / (return_scale * 1.5), 0.0, 1.0))
     drawdown_penalty = float(np.clip(avg_dd / drawdown_scale, 0.0, 1.0))
     stop_first_penalty = float(np.clip(stop_first_rate, 0.0, 1.0))
+    top_return_dec = float(bucket_metrics.get("top_bucket_avg_return", 0.0) or 0.0)
+    spread_dec = float(bucket_metrics.get("top_bottom_spread", 0.0) or 0.0)
+    mono = float(bucket_metrics.get("bucket_monotonicity", 0.0) or 0.0)
+    top_win = float(bucket_metrics.get("top_bucket_win_rate", 0.0) or 0.0)
+    left_tail_dec = float(bucket_metrics.get("top_bucket_left_tail", 0.0) or 0.0)
+    top_return_quality = float(np.clip((top_return_dec + return_scale / 2.0) / (return_scale * 1.5), 0.0, 1.0))
+    spread_quality = float(np.clip((spread_dec + return_scale / 3.0) / return_scale, 0.0, 1.0))
+    monotonicity_quality = float(np.clip((mono + 1.0) / 2.0, 0.0, 1.0))
+    top_bucket_win_quality = float(np.clip(top_win, 0.0, 1.0))
+    left_tail_penalty = float(np.clip(abs(min(0.0, left_tail_dec)) / max(drawdown_scale, 1e-9), 0.0, 1.0))
 
     return {
         "sample_count": n,
@@ -250,7 +274,13 @@ def _horizon_metrics(
         "avg_drawdown": round(avg_dd, 6),
         "avg_mfe": round(avg_mfe, 6),
         "mfe_mae_ratio": round(avg_mfe / max(0.01, avg_dd), 6),
+        **bucket_metrics,
         "rank_ic_quality": rank_ic_quality,
+        "top_bucket_return_quality": top_return_quality,
+        "top_bottom_spread_quality": spread_quality,
+        "bucket_monotonicity_quality": monotonicity_quality,
+        "top_bucket_win_quality": top_bucket_win_quality,
+        "top_bucket_left_tail_penalty": left_tail_penalty,
         "positive_return_quality": positive_return_quality,
         "target_first_quality": target_first_quality,
         "entry_fill_quality": entry_fill_quality,
@@ -268,6 +298,79 @@ def _horizon_metrics(
         "buy_hit_rate": round(buy_hit_rate, 6),
         "buy_avg_return_pct": round(buy_avg_return, 6),
     }
+
+
+def _rank_bucket_metrics(
+    score: np.ndarray,
+    forward_return_pct: np.ndarray,
+    max_drawdown_pct: np.ndarray,
+    *,
+    n_buckets: int = 5,
+    top_n: int = 20,
+) -> dict[str, Any]:
+    """Return outcome metrics for score-sorted buckets.
+
+    Returns are stored as decimal returns to match existing `avg_return` fields.
+    `top_bucket` means the highest score bucket; `bottom_bucket` means lowest
+    score bucket. `top_n` is a fixed-name list useful when a PM only acts on a
+    short candidate list; for small panels it naturally collapses to available N.
+    """
+    n = len(score)
+    if n == 0:
+        return {}
+    order = np.argsort(score)  # ascending: bottom first, top last
+    bucket_count = min(n_buckets, n)
+    buckets = np.array_split(order, bucket_count)
+    bottom_idx = buckets[0]
+    top_idx = buckets[-1]
+    top_n_idx = order[-min(top_n, n):]
+
+    bucket_avg_pct = [float(np.nanmean(forward_return_pct[idx])) if len(idx) else 0.0 for idx in buckets]
+    mono = _safe_corr(
+        np.arange(len(bucket_avg_pct), dtype=np.float64),
+        np.asarray(bucket_avg_pct, dtype=np.float64),
+    )
+
+    def _profit_loss_ratio(values: np.ndarray) -> float:
+        wins = values[values > 0]
+        losses = values[values < 0]
+        if len(wins) == 0 or len(losses) == 0:
+            return 0.0
+        return float(np.nanmean(wins) / max(abs(float(np.nanmean(losses))), 1e-9))
+
+    top_ret = forward_return_pct[top_idx]
+    bottom_ret = forward_return_pct[bottom_idx]
+    top_n_ret = forward_return_pct[top_n_idx]
+    top_dd = max_drawdown_pct[top_idx]
+    top_n_dd = max_drawdown_pct[top_n_idx]
+    top_avg_pct = float(np.nanmean(top_ret)) if len(top_ret) else 0.0
+    bottom_avg_pct = float(np.nanmean(bottom_ret)) if len(bottom_ret) else 0.0
+    return {
+        "bucket_count": bucket_count,
+        "bucket_avg_returns": [round(v / 100.0, 6) for v in bucket_avg_pct],
+        "top_bucket_n": int(len(top_idx)),
+        "top_bucket_avg_return": round(top_avg_pct / 100.0, 6),
+        "top_bucket_win_rate": round(float(np.nanmean(top_ret > 0)) if len(top_ret) else 0.0, 6),
+        "top_bucket_profit_loss": round(_profit_loss_ratio(top_ret), 6),
+        "top_bucket_left_tail": round(float(np.nanpercentile(top_ret, 5)) / 100.0 if len(top_ret) else 0.0, 6),
+        "top_bucket_drawdown_proxy": round(float(np.nanmean(np.abs(top_dd))) / 100.0 if len(top_dd) and not np.all(np.isnan(top_dd)) else 0.0, 6),
+        "top_n": int(len(top_n_idx)),
+        "top_n_avg_return": round(float(np.nanmean(top_n_ret)) / 100.0 if len(top_n_ret) else 0.0, 6),
+        "top_n_win_rate": round(float(np.nanmean(top_n_ret > 0)) if len(top_n_ret) else 0.0, 6),
+        "top_n_profit_loss": round(_profit_loss_ratio(top_n_ret), 6),
+        "top_n_left_tail": round(float(np.nanpercentile(top_n_ret, 5)) / 100.0 if len(top_n_ret) else 0.0, 6),
+        "top_n_drawdown_proxy": round(float(np.nanmean(np.abs(top_n_dd))) / 100.0 if len(top_n_dd) and not np.all(np.isnan(top_n_dd)) else 0.0, 6),
+        "bottom_bucket_n": int(len(bottom_idx)),
+        "bottom_bucket_avg_return": round(bottom_avg_pct / 100.0, 6),
+        "top_bottom_spread": round((top_avg_pct - bottom_avg_pct) / 100.0, 6),
+        "bucket_monotonicity": round(mono, 6),
+    }
+
+
+def _safe_corr(x: np.ndarray, y: np.ndarray) -> float:
+    if len(x) < 2 or len(y) < 2 or np.std(x) <= 1e-9 or np.std(y) <= 1e-9:
+        return 0.0
+    return float(np.corrcoef(x, y)[0, 1])
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -316,6 +419,7 @@ def evaluate_overlay_on_panel(
 
     # Composite objective using existing scorer (uses horizon quality fields)
     cw = (eff_params.get("tuning", {}).get("objective", {}).get("composite_weights") or {})
+    hw = (eff_params.get("tuning", {}).get("objective", {}).get("horizon_weights") or {})
     payload = build_composite_objective(
         objective_5d=horizon_results["5d"],
         objective_10d=horizon_results["10d"],
@@ -324,6 +428,7 @@ def evaluate_overlay_on_panel(
         turnover_liquidity_penalty=0.0,
         strategy_decay_penalty=0.0,
         weights=cw,
+        horizon_weights=hw,
     )
     payload["panel_rows_used"] = int(
         panel.forward_5d_valid.sum() + panel.forward_10d_valid.sum() + panel.forward_20d_valid.sum()

@@ -214,15 +214,22 @@ def _digest_codes(codes: list[str]) -> str:
     return hashlib.sha256(json.dumps(codes, ensure_ascii=False).encode()).hexdigest()[:16]
 
 
-def _select_pit_dates(engine, *, n_samples: int, latest_as_of: dt.date, forward_min_days: int = 25) -> list[dt.date]:
+def _select_pit_dates(
+    engine,
+    *,
+    n_samples: int,
+    latest_as_of: dt.date,
+    forward_min_days: int = 25,
+    lookback_days: int = 18 * 30,
+) -> list[dt.date]:
     """Pick N trading days that have at least `forward_min_days` of future bars in DB.
 
-    Strategy: take all SSE trading days between (latest - 18 months) and (latest - forward_min_days * 1.5/business),
+    Strategy: take all SSE trading days between (latest - lookback_days) and (latest - forward_min_days * 1.5/business),
     sort descending, evenly sample.
     """
     horizon_days = max(35, int(forward_min_days * 1.5))
     end_max = latest_as_of - dt.timedelta(days=horizon_days)
-    start = latest_as_of - dt.timedelta(days=18 * 30)
+    start = latest_as_of - dt.timedelta(days=max(30, lookback_days))
     with engine.connect() as c:
         rows = c.execute(text("""
             SELECT cal_date FROM smartmoney.trade_cal
@@ -273,8 +280,10 @@ def main() -> int:
     parser.add_argument("--top", type=int, default=50, help="Top N by liquidity (default 50)")
     parser.add_argument("--liquidity-offset", type=int, default=0, help="Skip the top K liquidity names before selecting --top. Use for OOC cohorts, e.g. 100 = ranks 101..")
     parser.add_argument("--pit-samples", type=int, default=8, help="PIT trading days to sample (default 8)")
+    parser.add_argument("--pit-lookback-days", type=int, default=18 * 30, help="Calendar lookback for PIT date sampling before forward-label cutoff (default ~18 months)")
     parser.add_argument("--max-candidates", type=int, default=256, help="Search candidates (default 256)")
     parser.add_argument("--workers", type=int, default=-1, help="Parallel workers (-1 = auto, default -1)")
+    parser.add_argument("--panel-chunk-size", type=int, default=25, help="Max stocks per replay worker chunk (default 25)")
     parser.add_argument("--universe-id", default="top_liquidity", help="Cache key prefix")
     parser.add_argument(
         "--universe-mode",
@@ -329,6 +338,7 @@ def main() -> int:
     print(f"  liquidity offset:{args.liquidity_offset}")
     print(f"  universe mode:   {args.universe_mode}")
     print(f"  PIT samples:     {args.pit_samples}")
+    print(f"  PIT lookback:    {args.pit_lookback_days} calendar days")
     print(f"  candidates:      {args.max_candidates}")
     print(f"  workers:         {args.workers if args.workers > 0 else os.cpu_count() - 1}")
     print(f"  skip_llm:        {not args.include_llm}")
@@ -346,7 +356,12 @@ def main() -> int:
 
     print(f"\n[1/4] Selecting PIT trading days...")
     t0 = time.monotonic()
-    pit_dates = _select_pit_dates(engine, n_samples=args.pit_samples, latest_as_of=as_of)
+    pit_dates = _select_pit_dates(
+        engine,
+        n_samples=args.pit_samples,
+        latest_as_of=as_of,
+        lookback_days=args.pit_lookback_days,
+    )
     if len(pit_dates) < args.pit_samples:
         print(f"      WARN: only {len(pit_dates)} dates available")
     print(f"      dates: {[d.isoformat() for d in pit_dates]} ({time.monotonic()-t0:.1f}s)")
@@ -475,6 +490,7 @@ def main() -> int:
         skip_llm=not args.include_llm,
         n_workers=n_workers,
         on_progress=on_progress,
+        max_codes_per_chunk=args.panel_chunk_size,
     )
     panel_elapsed = time.monotonic() - t0
     print(f"      panel built: {len(rows)} rows in {panel_elapsed:.1f}s ({len(rows)*60/max(panel_elapsed,1):.1f} rows/min)")
@@ -648,6 +664,17 @@ def main() -> int:
                 print(f"  Fold {i+1}: val rank IC 5d {vb5:+.3f}→{vt5:+.3f} (Δ {vt5-vb5:+.3f}) | "
                       f"10d {vb10:+.3f}→{vt10:+.3f} (Δ {vt10-vb10:+.3f}) | "
                       f"20d {vb20:+.3f}→{vt20:+.3f} (Δ {vt20-vb20:+.3f})")
+                for h in (5, 10, 20):
+                    bm = val_baseline[f"objective_{h}d"]
+                    tm = val_tuned[f"objective_{h}d"]
+                    print(
+                        f"      {h}d payoff: top_ret {float(bm.get('top_bucket_avg_return', 0.0))*100:+.2f}%"
+                        f"→{float(tm.get('top_bucket_avg_return', 0.0))*100:+.2f}% "
+                        f"spread {float(bm.get('top_bottom_spread', 0.0))*100:+.2f}%"
+                        f"→{float(tm.get('top_bottom_spread', 0.0))*100:+.2f}% "
+                        f"mono {float(bm.get('bucket_monotonicity', 0.0)):+.2f}"
+                        f"→{float(tm.get('bucket_monotonicity', 0.0)):+.2f}"
+                    )
             elapsed = time.monotonic() - t0
             print(f"      total search across {len(folds)} folds: {elapsed:.1f}s")
 
@@ -791,8 +818,10 @@ def main() -> int:
         for h in (5, 10, 20):
             m = artifact.metrics.get(f"objective_{h}d", {})
             print(f"  {h}d: n={m.get('sample_count', 0):4d} ic={m.get('ic', 0):+.3f} rank_ic={m.get('rank_ic', 0):+.3f} "
-                  f"pos_ret={m.get('positive_return_rate', 0):.2f} target_first={m.get('target_first_rate', 0):.2f} "
-                  f"buy_n={m.get('buy_signals', 0)} buy_hit={m.get('buy_hit_rate', 0):.2f}")
+                  f"avg_ret={float(m.get('avg_return', 0))*100:+.2f}% top_ret={float(m.get('top_bucket_avg_return', 0))*100:+.2f}% "
+                  f"top_win={m.get('top_bucket_win_rate', 0):.2f} spread={float(m.get('top_bottom_spread', 0))*100:+.2f}% "
+                  f"mono={m.get('bucket_monotonicity', 0):+.2f} left_tail={float(m.get('top_bucket_left_tail', 0))*100:+.2f}% "
+                  f"buy_n={m.get('buy_signals', 0)}")
 
         print(f"\n  Top 10 weight changes:")
         weight_deltas = [(k, v) for k, v in artifact.overlay.items() if "weights." in k]

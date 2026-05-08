@@ -121,6 +121,7 @@ def build_replay_panel(
     n_workers: int | None = None,
     on_progress: Callable[[dict[str, Any]], None] | None = None,
     target_return_pct_by_horizon: dict[int, float] | None = None,
+    max_codes_per_chunk: int | None = 25,
 ) -> tuple[list[PanelRow], PanelManifest]:
     """Build PIT panel for (ts_codes × as_of_dates).
 
@@ -130,13 +131,19 @@ def build_replay_panel(
     base_params = base_params or load_params()
     targets = target_return_pct_by_horizon or {5: 5.0, 10: 8.0, 20: 20.0}
     base_hash = params_hash(_strip_unstable_params(base_params))
-    chunks = _panel_chunks(ts_codes=ts_codes, as_of_dates=as_of_dates, ts_codes_by_date=ts_codes_by_date)
+    membership_chunks = _panel_chunks(ts_codes=ts_codes, as_of_dates=as_of_dates, ts_codes_by_date=ts_codes_by_date)
+    chunks = _panel_chunks(
+        ts_codes=ts_codes,
+        as_of_dates=as_of_dates,
+        ts_codes_by_date=ts_codes_by_date,
+        max_codes_per_chunk=max_codes_per_chunk,
+    )
     universe_mode = universe_mode.strip().lower()
     if universe_mode not in {"latest", "pit-local", "stratified-pit"}:
         raise ValueError(f"unsupported universe_mode={universe_mode!r}")
     universe_selection = dict(universe_selection or {})
     if universe_mode in {"pit-local", "stratified-pit"}:
-        universe_selection.setdefault("membership_hash", _membership_hash(chunks))
+        universe_selection.setdefault("membership_hash", _membership_hash(membership_chunks))
 
     cache_extra = None if universe_mode == "latest" else universe_selection.get("membership_hash")
     cache_path = _panel_cache_path(universe_id, as_of_dates, base_hash, skip_llm, cache_key_extra=cache_extra)
@@ -737,13 +744,26 @@ def _panel_chunks(
     ts_codes: Sequence[str],
     as_of_dates: Sequence[dt.date],
     ts_codes_by_date: Mapping[dt.date, Sequence[str]] | None,
+    max_codes_per_chunk: int | None = None,
 ) -> list[tuple[dt.date, list[str]]]:
+    def _split(as_of_date: dt.date, codes_in: Sequence[str]) -> list[tuple[dt.date, list[str]]]:
+        codes = list(codes_in)
+        if not max_codes_per_chunk or max_codes_per_chunk <= 0 or len(codes) <= max_codes_per_chunk:
+            return [(as_of_date, codes)]
+        return [
+            (as_of_date, codes[i : i + max_codes_per_chunk])
+            for i in range(0, len(codes), max_codes_per_chunk)
+        ]
+
     if ts_codes_by_date is None:
-        return [(date, list(ts_codes)) for date in as_of_dates]
+        chunks: list[tuple[dt.date, list[str]]] = []
+        for date in as_of_dates:
+            chunks.extend(_split(date, ts_codes))
+        return chunks
     chunks: list[tuple[dt.date, list[str]]] = []
     for as_of_date in as_of_dates:
         codes = list(ts_codes_by_date.get(as_of_date) or [])
-        chunks.append((as_of_date, codes))
+        chunks.extend(_split(as_of_date, codes))
     return chunks
 
 

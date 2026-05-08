@@ -4,7 +4,11 @@ import datetime as dt
 import warnings
 import json
 
-from ifa.families.stock.backtest.panel_evaluator import compute_signal_ic_priors, panel_matrix_from_rows
+from ifa.families.stock.backtest.panel_evaluator import (
+    compute_signal_ic_priors,
+    evaluate_overlay_on_panel,
+    panel_matrix_from_rows,
+)
 from ifa.families.stock.backtest.replay_panel import (
     ALL_SIGNAL_KEYS,
     PanelRow,
@@ -66,6 +70,18 @@ def test_pit_local_panel_chunks_use_date_specific_universe():
     assert chunks == [(d1, ["pit_a", "pit_b"]), (d2, ["pit_c"])]
     assert _membership_hash(chunks) == _membership_hash(chunks)
     assert _membership_hash(chunks) != _membership_hash([(d1, ["pit_b", "pit_a"]), (d2, ["pit_c"])])
+
+
+def test_panel_chunks_can_split_large_date_cohorts_for_progress():
+    d1 = dt.date(2026, 1, 2)
+    chunks = _panel_chunks(
+        ts_codes=["a", "b", "c", "d", "e"],
+        as_of_dates=[d1],
+        ts_codes_by_date=None,
+        max_codes_per_chunk=2,
+    )
+
+    assert chunks == [(d1, ["a", "b"]), (d1, ["c", "d"]), (d1, ["e"])]
 
 
 def test_pit_local_cache_key_isolated_from_latest_mode():
@@ -171,3 +187,117 @@ def test_cheap_proxy_rows_balances_regime_and_date():
         ("range", dt.date(2026, 1, 2)),
         ("range", dt.date(2026, 1, 5)),
     }
+
+
+def test_panel_metrics_include_top_bucket_payoff_and_spread():
+    key = "entry_fill_replay"
+    rows = []
+    for i in range(30):
+        rows.append(
+            PanelRow(
+                ts_code=f"000{i:03d}.SZ",
+                as_of_date=dt.date(2026, 1, 1),
+                entry_close=10.0,
+                signals={key: {"score": i / 29.0, "status": "active", "cluster": "test"}},
+                forward_5d_return=float(i - 10),
+                forward_10d_return=float(i - 10),
+                forward_20d_return=float(i - 10),
+                forward_5d_target_first=i >= 20,
+                forward_10d_target_first=i >= 20,
+                forward_20d_target_first=i >= 20,
+                forward_5d_stop_first=False,
+                forward_10d_stop_first=False,
+                forward_20d_stop_first=False,
+                forward_5d_max_drawdown=-float(max(1, 30 - i)),
+                forward_10d_max_drawdown=-float(max(1, 30 - i)),
+                forward_20d_max_drawdown=-float(max(1, 30 - i)),
+                forward_5d_mfe=float(i + 1),
+                forward_10d_mfe=float(i + 1),
+                forward_20d_mfe=float(i + 1),
+                forward_available_days=20,
+            )
+        )
+    base_params = {
+        "decision_layer": {
+            "horizons": {
+                "5d": {"weights": {key: 1.0}, "base_score": 0.5, "raw_edge_scale": 0.5, "thresholds": {"buy": 0.7}},
+                "10d": {"weights": {key: 1.0}, "base_score": 0.5, "raw_edge_scale": 0.5, "thresholds": {"buy": 0.7}},
+                "20d": {"weights": {key: 1.0}, "base_score": 0.5, "raw_edge_scale": 0.5, "thresholds": {"buy": 0.7}},
+            }
+        }
+    }
+
+    metrics = evaluate_overlay_on_panel(panel_matrix_from_rows(rows), {}, base_params)
+    h5 = metrics["objective_5d"]
+
+    assert h5["rank_ic"] > 0.95
+    assert h5["top_bucket_avg_return"] > h5["bottom_bucket_avg_return"]
+    assert h5["top_bottom_spread"] > 0
+    assert h5["bucket_monotonicity"] > 0.95
+    assert h5["top_bucket_win_rate"] == 1.0
+    assert h5["top_bucket_left_tail"] > 0
+    assert h5["top_bucket_return_quality"] > 0
+    assert h5["top_bottom_spread_quality"] > 0
+    assert h5["bucket_monotonicity_quality"] > 0.95
+
+
+def test_panel_objective_uses_yaml_horizon_weights_for_outcome_first_terms():
+    key = "entry_fill_replay"
+    rows = []
+    for i in range(30):
+        rows.append(
+            PanelRow(
+                ts_code=f"000{i:03d}.SZ",
+                as_of_date=dt.date(2026, 1, 1),
+                entry_close=10.0,
+                signals={key: {"score": i / 29.0, "status": "active", "cluster": "test"}},
+                forward_5d_return=float(i - 15),
+                forward_10d_return=float(i - 15),
+                forward_20d_return=float(i - 15),
+                forward_5d_target_first=False,
+                forward_10d_target_first=False,
+                forward_20d_target_first=False,
+                forward_5d_stop_first=False,
+                forward_10d_stop_first=False,
+                forward_20d_stop_first=False,
+                forward_5d_max_drawdown=-2.0,
+                forward_10d_max_drawdown=-2.0,
+                forward_20d_max_drawdown=-2.0,
+                forward_5d_mfe=2.0,
+                forward_10d_mfe=2.0,
+                forward_20d_mfe=2.0,
+                forward_available_days=20,
+            )
+        )
+    params = {
+        "decision_layer": {
+            "horizons": {
+                h: {"weights": {key: 1.0}, "base_score": 0.5, "raw_edge_scale": 0.5, "thresholds": {"buy": 0.7}}
+                for h in ("5d", "10d", "20d")
+            }
+        },
+        "tuning": {
+            "objective": {
+                "horizon_weights": {
+                    "rank_ic_quality": 1.0,
+                    "positive_return_quality": 0.0,
+                    "target_first_quality": 0.0,
+                    "entry_fill_quality": 0.0,
+                    "reward_risk": 0.0,
+                    "risk_adjusted_return": 0.0,
+                    "drawdown_penalty": 0.0,
+                    "stop_first_penalty": 0.0,
+                    "liquidity_penalty": 0.0,
+                    "top_bucket_return_quality": 0.0,
+                    "top_bottom_spread_quality": 0.0,
+                    "bucket_monotonicity_quality": 0.0,
+                    "top_bucket_win_quality": 0.0,
+                    "top_bucket_left_tail_penalty": 0.0,
+                }
+            }
+        },
+    }
+
+    metrics = evaluate_overlay_on_panel(panel_matrix_from_rows(rows), {}, params)
+
+    assert metrics["composite_objective"]["horizon_scores"]["5d"] == metrics["objective_5d"]["rank_ic_quality"]
