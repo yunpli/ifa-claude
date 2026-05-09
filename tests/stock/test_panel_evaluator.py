@@ -21,7 +21,7 @@ from ifa.families.stock.backtest.replay_panel import (
     _panel_chunks,
     _save_chunk_checkpoint,
 )
-from ifa.families.stock.backtest.outcome_proxy import summarize_outcome_proxy
+from ifa.families.stock.backtest.outcome_proxy import compare_proxy_candidate_families, summarize_outcome_proxy
 from scripts.stock_edge_panel_tune import _cheap_proxy_rows, _strata_counts
 
 
@@ -291,6 +291,41 @@ def test_outcome_proxy_summary_reports_feature_rank_ic():
     assert summary["horizons"]["5d"]["n"] == 40
     assert summary["feature_rank_ic"]["5d"]["ret_5d_pct"] > 0.99
     assert summary["cheap_composite_rank_ic"]["10d"] > 0
+
+
+def test_proxy_candidate_family_comparison_reports_month_stability():
+    import pandas as pd
+
+    rows = []
+    industries = ["有色金属", "房地产", "家用电器", "商贸零售"]
+    regimes = ["trend_continuation", "range_bound"]
+    for month, date in [("2026-02", dt.date(2026, 2, 10)), ("2026-03", dt.date(2026, 3, 10))]:
+        for i in range(60):
+            good = i % 4 in {0, 2}
+            rows.append({
+                "ts_code": f"000{i:03d}.SZ",
+                "as_of_date": date,
+                "l1_name": industries[i % len(industries)],
+                "regime": regimes[i % len(regimes)],
+                "ret_5d_pct": float(i % 7 - 3),
+                "ret_20d_pct": float(20 - i % 30),
+                "volatility_20d_pct": float(8 if good else 25),
+                "avg_amount_20d": float(1000 + (i % 20) * 100),
+                "moneyflow_net_5d_pct_amount": float(0.05 if good else -0.04),
+                "total_mv": float(5000 + (i if good else -i) * 10),
+                "turnover_rate": float(2 if good else 8),
+                "forward_5d_return": float(3 if good else -2),
+                "forward_10d_return": float(5 if good else -4),
+                "forward_20d_return": float(8 if good else -6),
+            })
+
+    comparison = compare_proxy_candidate_families(pd.DataFrame(rows))
+
+    assert comparison["rows"] == 120
+    assert "mid_liquidity_large_cap_quality_flow" in comparison["families"]
+    assert "2026-03" in comparison["families"]["weak_industry_avoid_quality_flow"]["month_stability"]
+    assert comparison["families"]["weak_industry_avoid_quality_flow"]["horizons"]["10d"]["rank_ic"] > 0
+    assert comparison["ranking"][0]["family"] != "baseline_cheap_composite_v1"
 
 
 def test_panel_metrics_include_top_bucket_payoff_and_spread():

@@ -154,6 +154,191 @@ def summarize_outcome_proxy(df: pd.DataFrame) -> dict[str, Any]:
     return out
 
 
+def compare_proxy_candidate_families(df: pd.DataFrame) -> dict[str, Any]:
+    """Compare finance-motivated cheap proxy score families on one cached panel.
+
+    This is still a pre-replay diagnostic surface. It intentionally does not
+    mutate production Stock Edge YAML or call the expensive strategy matrix. The
+    families below encode hypotheses from recent outcome diagnostics: short-term
+    price momentum has been unstable, while medium liquidity, large-cap bias,
+    quality moneyflow, weak-industry avoidance, and left-tail control have shown
+    more durable 10d/20d alignment.
+    """
+    if df.empty:
+        return {"rows": 0, "families": {}, "ranking": []}
+
+    features = _proxy_candidate_features(df)
+    families: dict[str, pd.Series] = {
+        "baseline_cheap_composite_v1": _cheap_composite_score(df),
+        "mid_liquidity_large_cap_quality_flow": (
+            0.30 * features["moneyflow_quality"]
+            + 0.22 * features["mid_liquidity"]
+            + 0.18 * features["large_cap"]
+            + 0.14 * features["industry_tilt_static"]
+            + 0.10 * features["low_left_tail_risk"]
+            + 0.06 * features["regime_gate"]
+        ),
+        "industry_relative_momentum_flow": (
+            0.28 * features["industry_relative_flow"]
+            + 0.22 * features["industry_relative_reversal"]
+            + 0.20 * features["industry_tilt_static"]
+            + 0.12 * features["mid_liquidity"]
+            + 0.10 * features["large_cap"]
+            + 0.08 * features["low_left_tail_risk"]
+        ),
+        "regime_aware_10_20d_selection": (
+            0.24 * features["moneyflow_quality"]
+            + 0.20 * features["large_cap"]
+            + 0.18 * features["mid_liquidity"]
+            + 0.14 * features["low_left_tail_risk"]
+            + 0.14 * features["regime_adjusted_momentum"]
+            + 0.10 * features["industry_tilt_dynamic"]
+        ),
+        "weak_industry_avoid_quality_flow": (
+            0.30 * features["moneyflow_quality"]
+            + 0.22 * features["weak_industry_avoid"]
+            + 0.16 * features["large_cap"]
+            + 0.14 * features["mid_liquidity"]
+            + 0.12 * features["low_left_tail_risk"]
+            + 0.06 * features["industry_relative_flow"]
+        ),
+    }
+
+    out: dict[str, Any] = {
+        "rows": int(len(df)),
+        "date_count": int(df["as_of_date"].nunique()) if "as_of_date" in df else 0,
+        "stock_count": int(df["ts_code"].nunique()) if "ts_code" in df else 0,
+        "families": {},
+    }
+    for name, score in families.items():
+        out["families"][name] = _score_proxy_family(df, score)
+
+    def ranking_key(item: tuple[str, dict[str, Any]]) -> tuple[float, float, float]:
+        metrics = item[1].get("horizons", {})
+        h10 = float(metrics.get("10d", {}).get("rank_ic", 0.0) or 0.0)
+        h20 = float(metrics.get("20d", {}).get("rank_ic", 0.0) or 0.0)
+        mar = float(item[1].get("month_stability", {}).get("2026-03", {}).get("10d", {}).get("rank_ic", -1.0) or -1.0)
+        return (h10 + h20, min(h10, h20), mar)
+
+    out["ranking"] = [
+        {"family": name, "score": round(ranking_key((name, payload))[0], 6)}
+        for name, payload in sorted(out["families"].items(), key=ranking_key, reverse=True)
+    ]
+    return out
+
+
+def _proxy_candidate_features(df: pd.DataFrame) -> dict[str, pd.Series]:
+    date_key = df["as_of_date"] if "as_of_date" in df else pd.Series("all", index=df.index)
+    industry_key = df["l1_name"] if "l1_name" in df else pd.Series("unknown", index=df.index)
+    industry_name = industry_key.fillna("unknown").astype(str)
+
+    ret_5 = _num(df, "ret_5d_pct")
+    ret_20 = _num(df, "ret_20d_pct")
+    flow = _num(df, "moneyflow_net_5d_pct_amount")
+    amount = _num(df, "avg_amount_20d")
+    mv = _num(df, "total_mv")
+    vol = _num(df, "volatility_20d_pct")
+    turnover = _num(df, "turnover_rate")
+
+    liquidity_rank = _group_rank(amount, date_key)
+    size_rank = _group_rank(mv, date_key)
+    vol_rank = _group_rank(vol, date_key)
+    turnover_rank = _group_rank(turnover, date_key)
+    flow_rank = _group_rank(flow.clip(lower=-0.12, upper=0.12), date_key)
+
+    industry_flow_rank = _group_rank(flow, [date_key, industry_key])
+    industry_ret5_rank = _group_rank(ret_5, [date_key, industry_key])
+    industry_ret20_rank = _group_rank(ret_20, [date_key, industry_key])
+
+    favored = {"有色金属", "家用电器", "建筑装饰"}
+    weak = {"房地产", "商贸零售", "医药生物", "食品饮料", "轻工制造"}
+    industry_tilt = pd.Series(0.50, index=df.index, dtype=float)
+    industry_tilt[industry_name.isin(favored)] = 0.75
+    industry_tilt[industry_name.isin(weak)] = 0.25
+
+    dynamic_tilt = industry_tilt.copy()
+    dynamic_tilt = dynamic_tilt.where(flow_rank < 0.85, dynamic_tilt + 0.08).clip(0.0, 1.0)
+    weak_avoid = pd.Series(0.65, index=df.index, dtype=float)
+    weak_avoid[industry_name.isin(weak)] = 0.20
+    weak_avoid = weak_avoid.where(flow_rank < 0.80, weak_avoid + 0.12).clip(0.0, 1.0)
+
+    regime = df["regime"].fillna("unknown") if "regime" in df else pd.Series("unknown", index=df.index)
+    regime_gate = pd.Series(0.55, index=df.index, dtype=float)
+    regime_gate[regime.isin(["trend_continuation", "early_risk_on"])] = 0.68
+    regime_gate[regime.isin(["cooldown"])] = 0.35
+
+    # Momentum is de-emphasized and made regime-aware: avoid rewarding extended
+    # 20d winners in cooldown/range-bound regimes where March 2026 reversed hard.
+    reversal = 1.0 - industry_ret20_rank
+    trend_follow = 0.65 * industry_ret5_rank + 0.35 * industry_ret20_rank
+    regime_adjusted = trend_follow.where(regime.isin(["trend_continuation", "early_risk_on"]), reversal)
+
+    return {
+        "moneyflow_quality": (0.70 * flow_rank + 0.30 * (1.0 - vol_rank)).clip(0.0, 1.0),
+        "mid_liquidity": (1.0 - (liquidity_rank - 0.52).abs() / 0.52).clip(0.0, 1.0),
+        "large_cap": size_rank.fillna(0.5).clip(0.0, 1.0),
+        "industry_tilt_static": industry_tilt,
+        "industry_tilt_dynamic": dynamic_tilt,
+        "weak_industry_avoid": weak_avoid,
+        "low_left_tail_risk": (0.65 * (1.0 - vol_rank) + 0.35 * (1.0 - turnover_rank)).clip(0.0, 1.0),
+        "regime_gate": regime_gate,
+        "industry_relative_flow": industry_flow_rank.fillna(flow_rank).clip(0.0, 1.0),
+        "industry_relative_reversal": reversal.clip(0.0, 1.0),
+        "regime_adjusted_momentum": regime_adjusted.clip(0.0, 1.0),
+    }
+
+
+def _score_proxy_family(df: pd.DataFrame, score: pd.Series) -> dict[str, Any]:
+    payload: dict[str, Any] = {"horizons": {}, "month_stability": {}}
+    for h in HORIZONS:
+        label = f"forward_{h}d_return"
+        if label not in df:
+            continue
+        payload["horizons"][f"{h}d"] = _proxy_horizon_metrics(score, df[label])
+
+    months = pd.to_datetime(df["as_of_date"]).dt.strftime("%Y-%m") if "as_of_date" in df else pd.Series("all", index=df.index)
+    for month, sub_idx in months.groupby(months).groups.items():
+        month_payload: dict[str, Any] = {}
+        for h in HORIZONS:
+            label = f"forward_{h}d_return"
+            if label not in df:
+                continue
+            idx = list(sub_idx)
+            month_payload[f"{h}d"] = _proxy_horizon_metrics(score.iloc[idx], df[label].iloc[idx])
+        payload["month_stability"][str(month)] = month_payload
+    return payload
+
+
+def _proxy_horizon_metrics(score: pd.Series, label: pd.Series) -> dict[str, Any]:
+    mask = score.notna() & label.notna()
+    score_v = score[mask].astype(float)
+    label_v = label[mask].astype(float)
+    if len(score_v) < 30:
+        return {"n": int(len(score_v)), "rank_ic": 0.0, "top_bucket_return": 0.0, "top_bucket_win_rate": 0.0, "top_vs_bottom_spread": 0.0}
+
+    top_cut = score_v.quantile(0.80)
+    bottom_cut = score_v.quantile(0.20)
+    top = label_v[score_v >= top_cut]
+    bottom = label_v[score_v <= bottom_cut]
+    return {
+        "n": int(len(score_v)),
+        "rank_ic": round(_rank_ic(score_v, label_v), 6),
+        "top_bucket_return": round(float(top.mean() / 100.0) if len(top) else 0.0, 6),
+        "top_bucket_win_rate": round(float((top > 0).mean()) if len(top) else 0.0, 6),
+        "top_vs_bottom_spread": round(float((top.mean() - bottom.mean()) / 100.0) if len(top) and len(bottom) else 0.0, 6),
+    }
+
+
+def _num(df: pd.DataFrame, col: str) -> pd.Series:
+    if col not in df:
+        return pd.Series(np.nan, index=df.index, dtype=float)
+    return pd.to_numeric(df[col], errors="coerce")
+
+
+def _group_rank(values: pd.Series, group_keys: Any) -> pd.Series:
+    return values.groupby(group_keys).rank(pct=True).fillna(0.5)
+
+
 def _proxy_cache_path(universe_id: str, as_of_dates: Sequence[dt.date], membership_hash: str) -> Path:
     sorted_dates = sorted(as_of_dates)
     date_sig = f"{sorted_dates[0].isoformat()}_{sorted_dates[-1].isoformat()}_{len(sorted_dates)}"
