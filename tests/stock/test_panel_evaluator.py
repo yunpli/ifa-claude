@@ -306,12 +306,26 @@ def test_proxy_candidate_family_comparison_reports_month_stability():
                 "ts_code": f"000{i:03d}.SZ",
                 "as_of_date": date,
                 "l1_name": industries[i % len(industries)],
+                "l2_code": f"801{i % 4:03d}",
                 "regime": regimes[i % len(regimes)],
                 "ret_5d_pct": float(i % 7 - 3),
                 "ret_20d_pct": float(20 - i % 30),
                 "volatility_20d_pct": float(8 if good else 25),
                 "avg_amount_20d": float(1000 + (i % 20) * 100),
                 "moneyflow_net_5d_pct_amount": float(0.05 if good else -0.04),
+                "stock_main_net_5d_pct_amount": float(0.06 if good else -0.03),
+                "stock_main_persistence_5d": float(0.8 if good else 0.2),
+                "sector_main_net_5d_pct_amount": float(0.08 if good else -0.02),
+                "sector_retail_net_5d_pct_amount": float(-0.01 if good else 0.07),
+                "sector_main_persistence_5d": float(0.8 if good else 0.2),
+                "sector_retail_chase_5d": float(0.2 if good else 0.9),
+                "sector_return_5d": float(2.0 if good else -1.0),
+                "sector_diffusion_score": float(0.75 if good else 0.25),
+                "sector_price_positive_breadth": float(0.7 if good else 0.3),
+                "sector_top5_main_net_share": float(0.35 if good else 0.85),
+                "sector_cycle_accumulation_score": float(0.8 if good else 0.2),
+                "leader_quality_score": float(0.75 if good else 0.25),
+                "sector_risk_flags": "" if good else "retail_chase",
                 "total_mv": float(5000 + (i if good else -i) * 10),
                 "turnover_rate": float(2 if good else 8),
                 "forward_5d_return": float(3 if good else -2),
@@ -323,8 +337,10 @@ def test_proxy_candidate_family_comparison_reports_month_stability():
 
     assert comparison["rows"] == 120
     assert "mid_liquidity_large_cap_quality_flow" in comparison["families"]
+    assert "sector_cycle_leader" in comparison["families"]
     assert "2026-03" in comparison["families"]["weak_industry_avoid_quality_flow"]["month_stability"]
     assert comparison["families"]["weak_industry_avoid_quality_flow"]["horizons"]["10d"]["rank_ic"] > 0
+    assert comparison["families"]["sector_cycle_leader"]["horizons"]["10d"]["rank_ic"] > 0
     assert comparison["ranking"][0]["family"] != "baseline_cheap_composite_v1"
 
 
@@ -341,6 +357,17 @@ def test_proxy_candidate_family_scores_are_reusable_for_gate_selection():
         "volatility_20d_pct": [float(10 + i % 4) for i in range(40)],
         "avg_amount_20d": [float(1000 + i * 10) for i in range(40)],
         "moneyflow_net_5d_pct_amount": [float(i / 1000.0) for i in range(40)],
+        "stock_main_net_5d_pct_amount": [float(i / 1000.0) for i in range(40)],
+        "stock_main_persistence_5d": [0.8 if i % 2 == 0 else 0.2 for i in range(40)],
+        "sector_main_net_5d_pct_amount": [0.06 if i % 2 == 0 else -0.03 for i in range(40)],
+        "sector_retail_net_5d_pct_amount": [-0.01 if i % 2 == 0 else 0.05 for i in range(40)],
+        "sector_main_persistence_5d": [0.8 if i % 2 == 0 else 0.2 for i in range(40)],
+        "sector_retail_chase_5d": [0.2 if i % 2 == 0 else 0.9 for i in range(40)],
+        "sector_return_5d": [1.5 if i % 2 == 0 else -1.5 for i in range(40)],
+        "sector_diffusion_score": [0.7 if i % 2 == 0 else 0.3 for i in range(40)],
+        "sector_price_positive_breadth": [0.7 if i % 2 == 0 else 0.3 for i in range(40)],
+        "sector_top5_main_net_share": [0.35 if i % 2 == 0 else 0.8 for i in range(40)],
+        "sector_risk_flags": ["" if i % 2 == 0 else "retail_chase" for i in range(40)],
         "total_mv": [float(5000 + i * 20) for i in range(40)],
         "turnover_rate": [float(2 + i % 3) for i in range(40)],
     })
@@ -349,8 +376,10 @@ def test_proxy_candidate_family_scores_are_reusable_for_gate_selection():
 
     assert "weak_industry_avoid_quality_flow" in scores
     assert "industry_relative_momentum_flow" in scores
+    assert "sector_cycle_leader" in scores
     assert len(scores["weak_industry_avoid_quality_flow"]) == len(df)
     assert scores["weak_industry_avoid_quality_flow"].notna().all()
+    assert scores["sector_cycle_leader"].notna().all()
 
 
 def test_panel_metrics_include_top_bucket_payoff_and_spread():

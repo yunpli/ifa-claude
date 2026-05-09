@@ -37,7 +37,7 @@ class OutcomeProxyManifest:
     manifest_path: str
     built_at: dt.datetime
     runtime_sec: float
-    feature_version: str = "outcome_proxy_v1"
+    feature_version: str = "outcome_proxy_v2"
     universe_selection: dict[str, Any] = field(default_factory=dict)
     failure_details: list[dict[str, Any]] = field(default_factory=list)
     timing: dict[str, float] = field(default_factory=dict)
@@ -175,6 +175,8 @@ def summarize_outcome_proxy(df: pd.DataFrame) -> dict[str, Any]:
         "avg_amount_20d",
         "moneyflow_net_5d_pct_amount",
         "total_mv",
+        "sector_cycle_accumulation_score",
+        "leader_quality_score",
     ]
     out: dict[str, Any] = {
         "rows": int(len(df)),
@@ -289,6 +291,15 @@ def score_proxy_candidate_families(df: pd.DataFrame) -> dict[str, pd.Series]:
             + 0.12 * features["low_left_tail_risk"]
             + 0.06 * features["industry_relative_flow"]
         ),
+        "sector_cycle_leader": (
+            0.30 * features["sector_cycle_accumulation"]
+            + 0.22 * features["leader_quality"]
+            + 0.14 * features["sector_flow_persistence"]
+            + 0.12 * features["anti_retail_crowding"]
+            + 0.10 * features["sector_heat_confirmation"]
+            + 0.08 * features["tradability"]
+            + 0.04 * features["theme_heat_match"]
+        ),
     }
 
 
@@ -304,12 +315,31 @@ def _proxy_candidate_features(df: pd.DataFrame) -> dict[str, pd.Series]:
     mv = _num(df, "total_mv")
     vol = _num(df, "volatility_20d_pct")
     turnover = _num(df, "turnover_rate")
+    sector_main_5d = _num(df, "sector_main_net_5d_pct_amount")
+    sector_retail_5d = _num(df, "sector_retail_net_5d_pct_amount")
+    sector_main_persist = _num(df, "sector_main_persistence_5d")
+    sector_return_5d = _num(df, "sector_return_5d")
+    sector_diffusion = _num(df, "sector_diffusion_score")
+    sector_top5_share = _num(df, "sector_top5_main_net_share")
+    stock_main_5d = _num(df, "stock_main_net_5d_pct_amount")
+    stock_main_persist = _num(df, "stock_main_persistence_5d")
+    leader_quality_raw = _num(df, "leader_quality_score")
+    sector_cycle_raw = _num(df, "sector_cycle_accumulation_score")
+    theme_heat = _num(df, "theme_heat_score")
 
     liquidity_rank = _group_rank(amount, date_key)
     size_rank = _group_rank(mv, date_key)
     vol_rank = _group_rank(vol, date_key)
     turnover_rank = _group_rank(turnover, date_key)
     flow_rank = _group_rank(flow.clip(lower=-0.12, upper=0.12), date_key)
+    sector_main_rank = _group_rank(sector_main_5d.clip(lower=-0.12, upper=0.12), date_key)
+    sector_retail_rank = _group_rank(sector_retail_5d.clip(lower=-0.12, upper=0.12), date_key)
+    sector_return_rank = _group_rank(sector_return_5d, date_key)
+    sector_diffusion_rank = _group_rank(sector_diffusion, date_key)
+    stock_main_rank = _group_rank(stock_main_5d.clip(lower=-0.12, upper=0.12), [date_key, industry_key])
+    leader_quality_rank = _group_rank(leader_quality_raw, date_key)
+    sector_cycle_rank = _group_rank(sector_cycle_raw, date_key)
+    theme_heat_rank = _group_rank(theme_heat, date_key)
 
     industry_flow_rank = _group_rank(flow, [date_key, industry_key])
     industry_ret5_rank = _group_rank(ret_5, [date_key, industry_key])
@@ -337,10 +367,35 @@ def _proxy_candidate_features(df: pd.DataFrame) -> dict[str, pd.Series]:
     reversal = 1.0 - industry_ret20_rank
     trend_follow = 0.65 * industry_ret5_rank + 0.35 * industry_ret20_rank
     regime_adjusted = trend_follow.where(regime.isin(["trend_continuation", "early_risk_on"]), reversal)
+    risk_flags = df["sector_risk_flags"].fillna("").astype(str) if "sector_risk_flags" in df else pd.Series("", index=df.index)
+    crowded_flag = risk_flags.str.contains("retail_chase|leader_crowded|crowding", case=False, regex=True)
+    anti_crowding = (0.62 * (1.0 - sector_retail_rank) + 0.38 * (1.0 - _safe_rank(sector_top5_share, date_key))).clip(0.0, 1.0)
+    anti_crowding = anti_crowding.where(~crowded_flag, anti_crowding * 0.55)
+    sector_accumulation = (
+        0.44 * sector_main_rank
+        + 0.22 * _bounded01(sector_main_persist)
+        + 0.18 * anti_crowding
+        + 0.10 * sector_diffusion_rank
+        + 0.06 * sector_cycle_rank
+    ).clip(0.0, 1.0)
+    leader_quality = (
+        0.30 * stock_main_rank
+        + 0.20 * _bounded01(stock_main_persist)
+        + 0.18 * industry_ret5_rank
+        + 0.14 * industry_flow_rank
+        + 0.10 * leader_quality_rank
+        + 0.08 * (1.0 - vol_rank)
+    ).clip(0.0, 1.0)
+    heat_confirmation = (
+        0.42 * sector_return_rank
+        + 0.34 * sector_diffusion_rank
+        + 0.24 * _bounded01(_num(df, "sector_price_positive_breadth"))
+    ).clip(0.0, 1.0)
+    mid_liquidity = (1.0 - (liquidity_rank - 0.52).abs() / 0.52).clip(0.0, 1.0)
 
     return {
         "moneyflow_quality": (0.70 * flow_rank + 0.30 * (1.0 - vol_rank)).clip(0.0, 1.0),
-        "mid_liquidity": (1.0 - (liquidity_rank - 0.52).abs() / 0.52).clip(0.0, 1.0),
+        "mid_liquidity": mid_liquidity,
         "large_cap": size_rank.fillna(0.5).clip(0.0, 1.0),
         "industry_tilt_static": industry_tilt,
         "industry_tilt_dynamic": dynamic_tilt,
@@ -350,6 +405,13 @@ def _proxy_candidate_features(df: pd.DataFrame) -> dict[str, pd.Series]:
         "industry_relative_flow": industry_flow_rank.fillna(flow_rank).clip(0.0, 1.0),
         "industry_relative_reversal": reversal.clip(0.0, 1.0),
         "regime_adjusted_momentum": regime_adjusted.clip(0.0, 1.0),
+        "sector_cycle_accumulation": sector_accumulation.fillna(0.5),
+        "leader_quality": leader_quality.fillna(0.5),
+        "sector_flow_persistence": _bounded01(sector_main_persist).fillna(sector_main_rank).fillna(0.5),
+        "anti_retail_crowding": anti_crowding.fillna(0.5),
+        "sector_heat_confirmation": heat_confirmation.fillna(0.5),
+        "tradability": (0.55 * mid_liquidity + 0.45 * (1.0 - vol_rank)).clip(0.0, 1.0),
+        "theme_heat_match": theme_heat_rank.fillna(0.5).clip(0.0, 1.0),
     }
 
 
@@ -404,10 +466,18 @@ def _group_rank(values: pd.Series, group_keys: Any) -> pd.Series:
     return values.groupby(group_keys).rank(pct=True).fillna(0.5)
 
 
+def _safe_rank(values: pd.Series, group_keys: Any) -> pd.Series:
+    return _group_rank(values, group_keys).fillna(0.5).clip(0.0, 1.0)
+
+
+def _bounded01(values: pd.Series) -> pd.Series:
+    return pd.to_numeric(values, errors="coerce").clip(0.0, 1.0)
+
+
 def _proxy_cache_path(universe_id: str, as_of_dates: Sequence[dt.date], membership_hash: str) -> Path:
     sorted_dates = sorted(as_of_dates)
     date_sig = f"{sorted_dates[0].isoformat()}_{sorted_dates[-1].isoformat()}_{len(sorted_dates)}"
-    suffix = hashlib.sha256(f"{universe_id}|{date_sig}|{membership_hash}|outcome_proxy_v1".encode()).hexdigest()[:12]
+    suffix = hashlib.sha256(f"{universe_id}|{date_sig}|{membership_hash}|outcome_proxy_v2".encode()).hexdigest()[:12]
     return OUTCOME_PROXY_ROOT / f"{universe_id}__{sorted_dates[0]:%Y%m%d}_{sorted_dates[-1]:%Y%m%d}__{suffix}.parquet"
 
 
@@ -504,6 +574,46 @@ def _build_proxy_rows_batch(
             conn,
             params={"codes": union_codes, "max_snapshot": max_snapshot},
         )
+        stock_orderflow = pd.read_sql_query(
+            text("""
+                SELECT trade_date, ts_code, amount_yuan, main_net_yuan, retail_net_yuan,
+                       main_net_ratio, retail_net_ratio, turnover_rate, quality_flag
+                FROM sme.sme_stock_orderflow_daily
+                WHERE ts_code = ANY(:codes)
+                  AND trade_date >= :start AND trade_date <= :end
+                ORDER BY ts_code, trade_date
+            """),
+            conn,
+            params={"codes": union_codes, "start": daily_start, "end": max_as_of},
+        )
+        sector_flow = pd.read_sql_query(
+            text("""
+                SELECT f.trade_date, f.l2_code, f.l2_name, f.l1_code, f.l1_name,
+                       f.sector_amount_yuan, f.sector_return_amount_weight,
+                       f.main_net_yuan, f.retail_net_yuan, f.main_net_ratio,
+                       f.retail_net_ratio, f.main_positive_breadth,
+                       f.retail_positive_breadth, f.price_positive_breadth,
+                       f.top5_main_net_share, f.leader_ts_code, f.leader_main_net_yuan,
+                       d.diffusion_score, d.diffusion_phase,
+                       s.current_state, s.state_score, s.state_confidence, s.risk_flags_json
+                FROM sme.sme_sector_orderflow_daily f
+                LEFT JOIN sme.sme_sector_diffusion_daily d
+                  ON d.trade_date = f.trade_date AND d.l2_code = f.l2_code
+                LEFT JOIN sme.sme_sector_state_daily s
+                  ON s.trade_date = f.trade_date AND s.l2_code = f.l2_code
+                WHERE f.trade_date >= :start AND f.trade_date <= :end
+                  AND f.l2_code IN (
+                      SELECT DISTINCT l2_code
+                      FROM smartmoney.sw_member_monthly
+                      WHERE ts_code = ANY(:codes)
+                        AND snapshot_month <= :max_snapshot
+                        AND l2_code IS NOT NULL
+                  )
+                ORDER BY f.l2_code, f.trade_date
+            """),
+            conn,
+            params={"codes": union_codes, "start": daily_start, "end": max_as_of, "max_snapshot": max_snapshot},
+        )
         regimes = pd.read_sql_query(
             text("""
                 SELECT trade_date, regime
@@ -521,6 +631,9 @@ def _build_proxy_rows_batch(
             df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
     if not members.empty:
         members["snapshot_month"] = pd.to_datetime(members["snapshot_month"]).dt.date
+    for df in (stock_orderflow, sector_flow):
+        if not df.empty:
+            df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
     if not regimes.empty:
         regimes["trade_date"] = pd.to_datetime(regimes["trade_date"]).dt.date
 
@@ -528,6 +641,8 @@ def _build_proxy_rows_batch(
     flow_by_code = _group_sorted_frames(flow, "ts_code", "trade_date")
     basic_by_code = _group_sorted_frames(basic, "ts_code", "trade_date")
     member_by_code = _group_sorted_frames(members, "ts_code", "snapshot_month")
+    stock_orderflow_by_code = _group_sorted_frames(stock_orderflow, "ts_code", "trade_date")
+    sector_flow_by_l2 = _group_sorted_frames(sector_flow, "l2_code", "trade_date")
     regime_by_date = {
         row["trade_date"]: str(row["regime"])
         for row in regimes.to_dict(orient="records")
@@ -555,6 +670,8 @@ def _build_proxy_rows_batch(
                 flow=flow_by_code.get(str(code)),
                 basic=basic_by_code.get(str(code)),
                 members=member_by_code.get(str(code)),
+                stock_orderflow=stock_orderflow_by_code.get(str(code)),
+                sector_flow_by_l2=sector_flow_by_l2,
             )
             if row is None:
                 failures.append({"ts_code": str(code), "as_of_date": as_of.isoformat(), "reason": "missing_forward_anchor"})
@@ -570,6 +687,8 @@ def _build_proxy_rows_batch(
         "query_flow_rows": float(len(flow)),
         "query_basic_rows": float(len(basic)),
         "query_member_rows": float(len(members)),
+        "query_stock_orderflow_rows": float(len(stock_orderflow)),
+        "query_sector_flow_rows": float(len(sector_flow)),
     }
 
 
@@ -592,6 +711,8 @@ def _build_proxy_row_from_frames(
     flow: pd.DataFrame | None,
     basic: pd.DataFrame | None,
     members: pd.DataFrame | None,
+    stock_orderflow: pd.DataFrame | None = None,
+    sector_flow_by_l2: Mapping[str, pd.DataFrame] | None = None,
 ) -> dict[str, Any] | None:
     label = _forward_labels_from_daily_frame(daily, as_of)
     if label is None:
@@ -621,6 +742,11 @@ def _build_proxy_row_from_frames(
         m_hist = members[members["snapshot_month"] <= snapshot_month].tail(1)
         if not m_hist.empty:
             m = m_hist.iloc[0].to_dict()
+    stock_cycle = _stock_cycle_features(stock_orderflow, as_of)
+    sector_cycle = _sector_cycle_features(
+        (sector_flow_by_l2 or {}).get(str(m.get("l2_code"))) if m.get("l2_code") else None,
+        as_of,
+    )
 
     return {
         "ts_code": code,
@@ -641,6 +767,8 @@ def _build_proxy_row_from_frames(
         "total_mv": _float_or_nan(b.get("total_mv")),
         "circ_mv": _float_or_nan(b.get("circ_mv")),
         "turnover_rate": _float_or_nan(b.get("turnover_rate")),
+        **stock_cycle,
+        **sector_cycle,
         **label,
     }
 
@@ -753,6 +881,117 @@ def _build_proxy_rows_for_date(engine: Engine, as_of: dt.date, codes: Sequence[s
         if code not in seen and not any(f["ts_code"] == code for f in failures):
             failures.append({"ts_code": str(code), "as_of_date": as_of.isoformat(), "reason": "missing_daily_rows"})
     return rows, failures
+
+
+def _stock_cycle_features(stock_orderflow: pd.DataFrame | None, as_of: dt.date) -> dict[str, Any]:
+    if stock_orderflow is None or stock_orderflow.empty:
+        return {
+            "stock_main_net_5d_pct_amount": math.nan,
+            "stock_retail_net_5d_pct_amount": math.nan,
+            "stock_main_persistence_5d": math.nan,
+            "stock_retail_chase_5d": math.nan,
+        }
+    hist = stock_orderflow[stock_orderflow["trade_date"] <= as_of].tail(5)
+    if hist.empty:
+        return {
+            "stock_main_net_5d_pct_amount": math.nan,
+            "stock_retail_net_5d_pct_amount": math.nan,
+            "stock_main_persistence_5d": math.nan,
+            "stock_retail_chase_5d": math.nan,
+        }
+    amount = float(pd.to_numeric(hist.get("amount_yuan"), errors="coerce").sum() or 0.0)
+    main = pd.to_numeric(hist.get("main_net_yuan"), errors="coerce")
+    retail = pd.to_numeric(hist.get("retail_net_yuan"), errors="coerce")
+    return {
+        "stock_main_net_5d_pct_amount": float(main.sum() / amount) if amount else math.nan,
+        "stock_retail_net_5d_pct_amount": float(retail.sum() / amount) if amount else math.nan,
+        "stock_main_persistence_5d": float((main > 0).mean()) if main.notna().any() else math.nan,
+        "stock_retail_chase_5d": float((retail > 0).mean()) if retail.notna().any() else math.nan,
+    }
+
+
+def _sector_cycle_features(sector_flow: pd.DataFrame | None, as_of: dt.date) -> dict[str, Any]:
+    empty = {
+        "sector_main_net_5d_pct_amount": math.nan,
+        "sector_retail_net_5d_pct_amount": math.nan,
+        "sector_main_persistence_5d": math.nan,
+        "sector_retail_chase_5d": math.nan,
+        "sector_return_5d": math.nan,
+        "sector_diffusion_score": math.nan,
+        "sector_price_positive_breadth": math.nan,
+        "sector_top5_main_net_share": math.nan,
+        "sector_state": None,
+        "sector_state_score": math.nan,
+        "sector_risk_flags": None,
+        "sector_cycle_accumulation_score": math.nan,
+        "leader_quality_score": math.nan,
+        "theme_heat_score": math.nan,
+    }
+    if sector_flow is None or sector_flow.empty:
+        return empty
+    hist = sector_flow[sector_flow["trade_date"] <= as_of].tail(10)
+    if hist.empty:
+        return empty
+    recent = hist.tail(5)
+    latest = hist.iloc[-1].to_dict()
+    amount = float(pd.to_numeric(recent.get("sector_amount_yuan"), errors="coerce").sum() or 0.0)
+    main = pd.to_numeric(recent.get("main_net_yuan"), errors="coerce")
+    retail = pd.to_numeric(recent.get("retail_net_yuan"), errors="coerce")
+    ret = pd.to_numeric(recent.get("sector_return_amount_weight"), errors="coerce")
+    main_ratio_5d = float(main.sum() / amount) if amount else math.nan
+    retail_ratio_5d = float(retail.sum() / amount) if amount else math.nan
+    main_persist = float((main > 0).mean()) if main.notna().any() else math.nan
+    retail_chase = float((retail > 0).mean()) if retail.notna().any() else math.nan
+    diffusion = _float_or_nan(latest.get("diffusion_score"))
+    price_breadth = _float_or_nan(latest.get("price_positive_breadth"))
+    top5_share = _float_or_nan(latest.get("top5_main_net_share"))
+    sector_return = float(ret.sum()) if ret.notna().any() else math.nan
+    risk_flags = latest.get("risk_flags_json")
+    risk_text = json.dumps(risk_flags, ensure_ascii=False, default=str) if risk_flags is not None else None
+    anti_retail = 1.0 - min(max(retail_chase if not math.isnan(retail_chase) else 0.5, 0.0), 1.0)
+    accumulation = _weighted_mean([
+        (main_persist, 0.34),
+        (_signed_ratio_to_unit(main_ratio_5d), 0.30),
+        (anti_retail, 0.18),
+        (diffusion, 0.10),
+        (price_breadth, 0.08),
+    ])
+    leader_quality = _weighted_mean([
+        (_signed_ratio_to_unit(_float_or_nan(latest.get("leader_main_net_yuan")) / amount if amount else math.nan), 0.40),
+        (main_persist, 0.24),
+        (price_breadth, 0.18),
+        (diffusion, 0.18),
+    ])
+    return {
+        "sector_main_net_5d_pct_amount": main_ratio_5d,
+        "sector_retail_net_5d_pct_amount": retail_ratio_5d,
+        "sector_main_persistence_5d": main_persist,
+        "sector_retail_chase_5d": retail_chase,
+        "sector_return_5d": sector_return,
+        "sector_diffusion_score": diffusion,
+        "sector_price_positive_breadth": price_breadth,
+        "sector_top5_main_net_share": top5_share,
+        "sector_state": latest.get("current_state"),
+        "sector_state_score": _float_or_nan(latest.get("state_score")),
+        "sector_risk_flags": risk_text,
+        "sector_cycle_accumulation_score": accumulation,
+        "leader_quality_score": leader_quality,
+        "theme_heat_score": math.nan,
+    }
+
+
+def _signed_ratio_to_unit(value: float) -> float:
+    if value != value:
+        return math.nan
+    return max(0.0, min(1.0, 0.5 + float(value) * 5.0))
+
+
+def _weighted_mean(items: Sequence[tuple[float, float]]) -> float:
+    valid = [(float(v), float(w)) for v, w in items if v == v and w > 0]
+    if not valid:
+        return math.nan
+    total_w = sum(w for _, w in valid)
+    return sum(v * w for v, w in valid) / total_w
 
 
 def _forward_labels_from_daily_frame(df: pd.DataFrame, as_of: dt.date) -> dict[str, Any] | None:

@@ -887,7 +887,7 @@ def main() -> int:
                 f"positive={float(hdiag.get('positive_rate', 0.0)):.2f} cheap_rank_ic={cheap_ic:+.3f}"
             )
         print("      candidate families:")
-        for family in ("weak_industry_avoid_quality_flow", "industry_relative_momentum_flow"):
+        for family in ("sector_cycle_leader", "weak_industry_avoid_quality_flow", "industry_relative_momentum_flow"):
             payload = family_comparison.get("families", {}).get(family, {})
             horizons = payload.get("horizons", {})
             mar = payload.get("month_stability", {}).get("2026-03", {})
