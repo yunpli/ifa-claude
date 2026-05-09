@@ -3,7 +3,14 @@ from __future__ import annotations
 import datetime as dt
 import json
 
-from ifa.families.stock.theme_heat import _aggregate_theme_rows, default_stub_themes, week_start
+from ifa.families.stock.theme_heat import (
+    _aggregate_theme_rows,
+    _keyword_theme_label,
+    _quality_flag_for_sources,
+    _tushare_row_importance,
+    default_stub_themes,
+    week_start,
+)
 from scripts.stock_edge_theme_heat_stub import _load_theme_rows
 
 
@@ -89,3 +96,10 @@ def test_theme_heat_local_source_aggregation_outputs_non_stub_rows():
     assert rows[0].prompt_version == "stock_theme_heat_local_sources_v1"
     assert rows[0].representative_stocks[0]["ts_code"] in {"300042.SZ", "002888.SZ"}
     assert rows[0].evidence["source_rows"] == 2
+
+
+def test_theme_heat_keyword_mapping_for_tushare_cache_rows():
+    assert _keyword_theme_label("公司签署端侧AI算力合作协议") == "AI与算力"
+    assert _keyword_theme_label("拟收购半导体封测资产") == "半导体与国产替代"
+    assert _tushare_row_importance("关于重大资产重组的公告") == "high"
+    assert _quality_flag_for_sources({"research.api_cache.anns_d"}) == "tushare_cached"

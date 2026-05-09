@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+from dataclasses import asdict, is_dataclass
 
 from ifa.core.db import get_engine
 from pathlib import Path
@@ -31,8 +32,11 @@ def main() -> int:
     parser.add_argument("--write", action="store_true", help="Upsert five explicit stub rows into stock.theme_heat_weekly.")
     parser.add_argument("--from-json", "--input-json", dest="input_json", type=Path, help="Upsert operator/LLM-batch theme rows from one JSON file; no per-row LLM calls.")
     parser.add_argument("--build-local", action="store_true", help="Build non-stub rows from existing local event/report memory tables only.")
+    parser.add_argument("--source", choices=["local-cache", "tushare-cache", "all-cache"], default="local-cache", help="Cached source bundle for --build-local. Never makes online Tushare calls.")
     parser.add_argument("--dry-run", action="store_true", help="For --build-local/--from-json, validate and print rows without DB writes.")
     parser.add_argument("--min-source-rows", type=int, default=3, help="Minimum local source rows required for --build-local.")
+    parser.add_argument("--source-row-limit", type=int, default=None, help="Maximum cached source rows to read for the target week.")
+    parser.add_argument("--max-themes", type=int, default=5, help="Maximum weekly theme rows to emit.")
     parser.add_argument("--run-mode", default="manual", help="Run mode to store for generated/cache rows.")
     parser.add_argument("--json", action="store_true", help="Print JSON instead of a short text summary.")
     args = parser.parse_args()
@@ -47,7 +51,10 @@ def main() -> int:
         built = build_weekly_theme_heat_from_local_sources(
             engine,
             week,
+            source=args.source,
             min_source_rows=args.min_source_rows,
+            max_themes=args.max_themes,
+            source_row_limit=args.source_row_limit,
             run_mode=args.run_mode,
         )
         if built["status"] != "ready":
@@ -59,7 +66,8 @@ def main() -> int:
                 "status": "dry_run" if args.dry_run else "written",
                 "valid_week": week.isoformat(),
                 "rows": len(rows) if args.dry_run else n,
-                "quality_flag": "local_source_cache",
+                "quality_flag": rows[0].quality_flag if rows else "cache",
+                "source": built["source"],
                 "source_policy": built["source_policy"],
                 "source_rows": built["source_rows"],
                 "themes": rows,
@@ -73,7 +81,7 @@ def main() -> int:
         payload = {"status": "read", "valid_week": week.isoformat(), "rows": len(rows), "themes": rows}
 
     if args.json:
-        print(json.dumps(payload, ensure_ascii=False, default=str, indent=2))
+        print(json.dumps(_json_payload(payload), ensure_ascii=False, default=str, indent=2))
     else:
         print(f"{payload['status']} week={payload['valid_week']} rows={payload.get('rows', 0)}")
         if payload.get("status") == "blocked":
@@ -86,6 +94,16 @@ def main() -> int:
                 else:
                     print(f"  {row['theme_rank']}. {row['theme_label']} [{row['category']}] heat={row['heat_score']}")
     return 0
+
+
+def _json_payload(payload: dict) -> dict:
+    out = dict(payload)
+    if "themes" in out:
+        out["themes"] = [
+            asdict(row) if is_dataclass(row) else row
+            for row in (out.get("themes") or [])
+        ]
+    return out
 
 
 def _load_theme_rows(path: Path, week: dt.date, run_mode: str) -> list[WeeklyThemeHeat]:

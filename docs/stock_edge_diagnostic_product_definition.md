@@ -63,12 +63,20 @@ P0 writes structured JSON artifacts and persists DB audit rows once migrations a
 - `stock.diagnostic_runs(run_id, ts_code, name, requested_at, generated_at, as_of_trade_date, run_mode, status, conclusion, confidence, logic_version, output_paths_json, perspective_status_json, evidence_freshness_json, synthesis_json, manifest_json)`.
 - `stock.diagnostic_perspective_evidence(run_id, perspective_key, title, status, view, freshness_status, latency_ms, source_tables_json, missing_evidence_json, missing_required_json, source_as_of, summary, evidence_json, raw_json)`.
 - `stock.sector_cycle_leader_daily(trade_date, ts_code, l2_code, rank_in_sector, sector_rank_count, leader_score, sector_score, stock_score, quality_flag, logic_version, evidence_json)` is the new P1 PIT rank/score surface for sector-first leader evidence. The diagnostic reads it when populated.
-- `stock.theme_heat_weekly` is the weekly theme heat cache. Non-stub rows can come from approved JSON ingestion (`--from-json`) or the local-source builder when existing `research.company_event_memory` / `ta.catalyst_event_memory` rows are sufficient. The builder does not call external LLM/news APIs and returns a source-policy blocker when local evidence is too thin.
+- `stock.theme_heat_weekly` is the weekly theme heat cache. Non-stub rows can come from approved JSON ingestion (`--from-json`), structured local event memories (`research.company_event_memory` / `ta.catalyst_event_memory`), or already-cached Tushare rows in `research.api_cache` for `anns_d` / `research_report`. The builder does not call external LLM/news APIs and returns a source-policy blocker when cached evidence is too thin.
+
+Theme heat source policy:
+
+- `local-cache` reads only already-derived event memory rows. Quality flag: `local_source_cache`.
+- `tushare-cache` expands `research.api_cache.response_json` for cached Tushare `anns_d` and `research_report` rows in the target week. Quality flag: `tushare_cached`.
+- `all-cache` combines both cached layers, dedups by source URL/title/date/stock/source table, and emits `local_news_cache` when a theme bucket has both local memory and Tushare-cache evidence.
+- Future LLM use is optional weekly batch classification/summarization over these cached rows only. LLM output is not a source of truth and must be persisted before backtests or reports consume it.
 
 Theme heat examples:
 
 ```bash
 uv run python scripts/stock_edge_theme_heat_builder.py --week 2026-05-04 --build-local --dry-run --json
+uv run python scripts/stock_edge_theme_heat_builder.py --week 2026-05-04 --build-local --source tushare-cache --source-row-limit 500 --dry-run --json
 uv run python scripts/stock_edge_theme_heat_builder.py --week 2026-05-04 --from-json /path/to/approved_theme_cache.json --dry-run --json
 ```
 
