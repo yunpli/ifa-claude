@@ -6,6 +6,8 @@ Date: 2026-05-08
 
 `sector_cycle_leader` reconstructs Stock Edge selection as sector-first, then leader-within-sector.  The strategy is not a production baseline yet.  It is a research/proxy family whose job is to test whether "main-money accumulation before retail crowding" predicts 5/10/20 trading-day forward returns better than current cheap momentum/liquidity families.
 
+The Stock Edge recommendation brief is the client-facing sector-cycle/leader specialization of this design.  Its recommendation pool is built only from sector cycle, leader-within-sector, SME money-flow/heat/crowding, horizon suitability, and hard risk/invalidation evidence on the last fully closed trading day.  TA, Ningbo, and Research diagnostics are independent reports; they must not be blended into this brief's scoring, fallback path, or candidate pool.
+
 ## Current Data Audit
 
 Available local PIT inputs:
@@ -39,6 +41,10 @@ Leader features:
 - Within-sector 5-day relative strength and raw moneyflow rank.
 - Liquidity/tradability: mid-liquidity preference plus lower volatility.
 - Drawdown resilience remains for full replay; proxy only has volatility/left-tail proxies.
+
+Score normalization note:
+
+- `sector_cycle_leader_v1` scores are intended to stay in `[0,1]`.  The sector score clamps `top5_main_net_share` before weighting; older rows computed before 2026-05-09 may need recompute if `sector_score` or `leader_score` is greater than 1.  Recompute with `uv run python -m ifa.cli stock sector-cycle-leader-backfill --start <date> --end <date>`.
 
 Theme/news feature:
 
@@ -78,13 +84,13 @@ uv run python scripts/stock_edge_theme_heat_stub.py \
   --json
 ```
 
-`scripts/stock_edge_theme_heat_llm.py` is the preferred MVP entrypoint.  `--dry-run` emits the prompt, response schema, and compact fact pack with no external LLM call or DB/artifact write.  Daily `--persist` writes a local JSON artifact under `/Users/neoclaw/claude/ifaenv/data/stock/theme_heat/llm/`; weekly `--persist` writes into the existing `stock.theme_heat_weekly` columns.  `--from-json` ingests reviewed model output without a live LLM call.  The legacy `stock_edge_theme_heat_stub.py --build-llm` path remains weekly-compatible.  Parsed weekly rows store `persistence_score`, `freshness`, `leader_candidates`, `one_day_wonder_risk`, flow/crowding judgements, `validation_signals`, horizon validation signals, and evidence refs in `evidence_json`.
+`scripts/stock_edge_theme_heat_llm.py` is the preferred MVP entrypoint.  `--dry-run` emits the prompt, response schema, and compact fact pack with no external LLM call or DB/artifact write.  Daily `--persist` now writes both a local JSON artifact under `/Users/neoclaw/claude/ifaenv/data/stock/theme_heat/llm/` and queryable `stock.theme_heat_daily` rows; weekly `--persist` writes into `stock.theme_heat_weekly`.  `--from-json` ingests reviewed model output without a live LLM call.  The legacy `stock_edge_theme_heat_stub.py --build-llm` path remains weekly-compatible.  Parsed daily rows persist `heat_level`, `heat_delta`, `heat_acceleration`, `persistence_days`, sector/stock breadth, main-money vs retail alignment, crowding/distribution risk, and horizon validation evidence; parsed weekly rows store `persistence_score`, `freshness`, `leader_candidates`, `one_day_wonder_risk`, flow/crowding judgements, `validation_signals`, horizon validation signals, and evidence refs in `evidence_json`.
 
 Proposed table progression:
 
 1. `stock.theme_raw_events`: raw normalized event rows plus source/endpoint watermark audit.
 2. `stock.theme_heat_snapshots`: intraday/hourly rolling snapshots, optional when source frequency is good enough.
-3. `stock.theme_heat_daily`: daily theme curve and flow-alignment features for stock selection.
+3. `stock.theme_heat_daily`: implemented daily theme curve and flow-alignment cache for stock selection/recommendation evidence.
 4. `stock.theme_heat_weekly`: weekly top themes and cached LLM summary for reporting/history.
 
 ## Objective and Gates

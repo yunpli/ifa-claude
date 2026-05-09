@@ -1,8 +1,9 @@
-"""Typed model for Stock Edge recommendation briefs.
+"""Typed model for Stock Edge sector-cycle/leader recommendation briefs.
 
 The brief is a cross-sectional, last-closed-trading-day product.  It does not
-run tuning, mutate YAML, or infer missing data.  Each source is either cited in
-candidate evidence or recorded as unavailable in `source_status`.
+run tuning, mutate YAML, or infer missing data.  It is deliberately scoped to
+sector-cycle/leader evidence; TA, Ningbo, and Research diagnostics are separate
+reports and are not recommendation sources here.
 """
 from __future__ import annotations
 

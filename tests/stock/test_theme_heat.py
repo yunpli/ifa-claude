@@ -10,6 +10,7 @@ from ifa.families.stock.theme_heat import (
     _tushare_row_importance,
     daily_theme_heat_artifact_from_llm_response,
     daily_theme_heat_llm_messages,
+    daily_theme_heat_rows_from_artifact,
     daily_theme_heat_response_schema,
     default_stub_themes,
     weekly_theme_heat_llm_messages,
@@ -237,3 +238,44 @@ def test_daily_theme_heat_artifact_preserves_quality_and_flow_fields():
     assert artifact["themes"][0]["main_money_judgement"].startswith("主力")
     assert artifact["themes"][0]["validation_signals_by_horizon"]["5d"] == "龙头不破位"
     assert _parse_window_days("7d") == 7
+
+
+def test_daily_theme_heat_artifact_converts_to_sector_curve_rows():
+    artifact = daily_theme_heat_artifact_from_llm_response(
+        {
+            "market_summary": "AI主线继续扩散。",
+            "themes": [
+                {
+                    "theme_label": "AI端侧应用",
+                    "category": "AI",
+                    "heat_score": 0.81,
+                    "persistence_score": 0.68,
+                    "freshness": "accelerating",
+                    "affected_sectors": [{"l2_code": "801081.SI", "l2_name": "半导体"}],
+                    "representative_stocks": [{"ts_code": "300042.SZ"}],
+                    "main_money_judgement": "主力净流入扩散。",
+                    "retail_chase_judgement": "散户追涨不极端。",
+                    "crowding_distribution_risk": "暂无明显出货。",
+                    "quality_flag": "batch_llm_cache",
+                }
+            ],
+        },
+        as_of=dt.date(2026, 5, 8),
+        window_days=7,
+        run_mode="manual",
+        model_name="fake-model",
+        endpoint="primary",
+        source="all-cache",
+        source_rows=[],
+        evidence_quality="local_evidence",
+        max_themes=8,
+    )
+
+    rows = daily_theme_heat_rows_from_artifact(artifact)
+
+    assert len(rows) == 1
+    assert rows[0].trade_date == dt.date(2026, 5, 8)
+    assert rows[0].l2_code == "801081.SI"
+    assert rows[0].heat_level == 0.81
+    assert rows[0].main_retail_alignment in {"main_money_supported", "crowding_or_distribution_risk"}
+    assert rows[0].evidence["validation_signals_by_horizon"] == {}

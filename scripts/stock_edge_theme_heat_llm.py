@@ -21,7 +21,9 @@ from ifa.families.stock.theme_heat import (
     build_daily_theme_heat_with_llm,
     build_weekly_theme_heat_with_llm,
     daily_theme_heat_artifact_from_llm_response,
+    daily_theme_heat_rows_from_artifact,
     upsert_weekly_theme_heat,
+    upsert_daily_theme_heat,
     week_start,
     weekly_theme_heat_rows_from_llm_response,
 )
@@ -164,9 +166,12 @@ def _run_daily(
         no_external=dry_run,
     )
     if built.get("status") in {"ready", "llm_dry_run"} and persist and not dry_run:
+        daily_rows = daily_theme_heat_rows_from_artifact(built)
+        persisted_rows = upsert_daily_theme_heat(engine, daily_rows)
         path = _write_daily_artifact(built, output_dir=output_dir)
         built = dict(built)
         built["artifact_path"] = str(path)
+        built["persisted_rows"] = persisted_rows
         built["status"] = "written"
     return built
 
@@ -219,8 +224,11 @@ def _ingest_from_json(
         max_themes=max_themes,
     )
     if persist:
+        daily_rows = daily_theme_heat_rows_from_artifact(artifact)
+        persisted_rows = upsert_daily_theme_heat(engine, daily_rows)
         artifact = dict(artifact)
         artifact["artifact_path"] = str(_write_daily_artifact(artifact, output_dir=output_dir))
+        artifact["persisted_rows"] = persisted_rows
         artifact["status"] = "written"
     return artifact
 

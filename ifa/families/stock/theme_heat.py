@@ -56,6 +56,37 @@ class WeeklyThemeHeat:
     quality_flag: str = "stub"
 
 
+@dataclass(frozen=True)
+class DailyThemeHeat:
+    trade_date: dt.date
+    theme_rank: int
+    theme_label: str
+    category: str
+    l2_code: str = "__UNMAPPED__"
+    l2_name: str | None = None
+    l1_code: str | None = None
+    l1_name: str | None = None
+    heat_level: float = 0.0
+    heat_delta: float | None = None
+    heat_acceleration: float | None = None
+    persistence_days: int = 1
+    theme_breadth: int | None = None
+    sector_breadth: int | None = None
+    stock_breadth: int | None = None
+    main_money_judgement: str | None = None
+    retail_chase_judgement: str | None = None
+    main_retail_alignment: str | None = None
+    crowding_distribution_risk: str | None = None
+    one_day_wonder_risk: float | None = None
+    persistence_score: float | None = None
+    freshness: str | None = None
+    quality_flag: str = "batch_llm_cache"
+    prompt_version: str = LLM_DAILY_PROMPT_VERSION
+    model_name: str | None = None
+    run_mode: str = "manual"
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+
 def week_start(value: dt.date) -> dt.date:
     return value - dt.timedelta(days=value.weekday())
 
@@ -140,6 +171,111 @@ def load_weekly_theme_heat(engine: Engine, valid_week: dt.date) -> list[dict[str
     """)
     with engine.connect() as conn:
         return [dict(row) for row in conn.execute(sql, {"valid_week": week_start(valid_week)}).mappings().all()]
+
+
+def upsert_daily_theme_heat(engine: Engine, rows: Sequence[DailyThemeHeat]) -> int:
+    """Persist daily heat-curve rows with PIT deltas from prior cached rows."""
+    if not rows:
+        return 0
+    enriched = _enrich_daily_theme_curve(engine, rows)
+    sql = text("""
+        INSERT INTO stock.theme_heat_daily (
+            trade_date, theme_rank, theme_label, category, l1_code, l1_name,
+            l2_code, l2_name, heat_level, heat_delta, heat_acceleration,
+            persistence_days, theme_breadth, sector_breadth, stock_breadth,
+            main_money_judgement, retail_chase_judgement, main_retail_alignment,
+            crowding_distribution_risk, one_day_wonder_risk, persistence_score,
+            freshness, quality_flag, prompt_version, model_name, run_mode,
+            evidence_json, updated_at
+        ) VALUES (
+            :trade_date, :theme_rank, :theme_label, :category, :l1_code, :l1_name,
+            :l2_code, :l2_name, :heat_level, :heat_delta, :heat_acceleration,
+            :persistence_days, :theme_breadth, :sector_breadth, :stock_breadth,
+            :main_money_judgement, :retail_chase_judgement, :main_retail_alignment,
+            :crowding_distribution_risk, :one_day_wonder_risk, :persistence_score,
+            :freshness, :quality_flag, :prompt_version, :model_name, :run_mode,
+            CAST(:evidence AS JSONB), now()
+        )
+        ON CONFLICT (trade_date, theme_rank, l2_code) DO UPDATE SET
+            theme_label=EXCLUDED.theme_label,
+            category=EXCLUDED.category,
+            l1_code=EXCLUDED.l1_code,
+            l1_name=EXCLUDED.l1_name,
+            l2_name=EXCLUDED.l2_name,
+            heat_level=EXCLUDED.heat_level,
+            heat_delta=EXCLUDED.heat_delta,
+            heat_acceleration=EXCLUDED.heat_acceleration,
+            persistence_days=EXCLUDED.persistence_days,
+            theme_breadth=EXCLUDED.theme_breadth,
+            sector_breadth=EXCLUDED.sector_breadth,
+            stock_breadth=EXCLUDED.stock_breadth,
+            main_money_judgement=EXCLUDED.main_money_judgement,
+            retail_chase_judgement=EXCLUDED.retail_chase_judgement,
+            main_retail_alignment=EXCLUDED.main_retail_alignment,
+            crowding_distribution_risk=EXCLUDED.crowding_distribution_risk,
+            one_day_wonder_risk=EXCLUDED.one_day_wonder_risk,
+            persistence_score=EXCLUDED.persistence_score,
+            freshness=EXCLUDED.freshness,
+            quality_flag=EXCLUDED.quality_flag,
+            prompt_version=EXCLUDED.prompt_version,
+            model_name=EXCLUDED.model_name,
+            run_mode=EXCLUDED.run_mode,
+            evidence_json=EXCLUDED.evidence_json,
+            updated_at=now()
+    """)
+    payload = [
+        {
+            "trade_date": row.trade_date,
+            "theme_rank": row.theme_rank,
+            "theme_label": row.theme_label,
+            "category": row.category,
+            "l1_code": row.l1_code,
+            "l1_name": row.l1_name,
+            "l2_code": row.l2_code or "__UNMAPPED__",
+            "l2_name": row.l2_name,
+            "heat_level": row.heat_level,
+            "heat_delta": row.heat_delta,
+            "heat_acceleration": row.heat_acceleration,
+            "persistence_days": row.persistence_days,
+            "theme_breadth": row.theme_breadth,
+            "sector_breadth": row.sector_breadth,
+            "stock_breadth": row.stock_breadth,
+            "main_money_judgement": row.main_money_judgement,
+            "retail_chase_judgement": row.retail_chase_judgement,
+            "main_retail_alignment": row.main_retail_alignment,
+            "crowding_distribution_risk": row.crowding_distribution_risk,
+            "one_day_wonder_risk": row.one_day_wonder_risk,
+            "persistence_score": row.persistence_score,
+            "freshness": row.freshness,
+            "quality_flag": row.quality_flag,
+            "prompt_version": row.prompt_version,
+            "model_name": row.model_name,
+            "run_mode": row.run_mode,
+            "evidence": json.dumps(row.evidence, ensure_ascii=False, default=str),
+        }
+        for row in enriched
+    ]
+    with engine.begin() as conn:
+        conn.execute(sql, payload)
+    return len(payload)
+
+
+def load_daily_theme_heat(engine: Engine, trade_date: dt.date, *, l2_code: str | None = None) -> list[dict[str, Any]]:
+    sql = text("""
+        SELECT trade_date, theme_rank, theme_label, category, l1_code, l1_name,
+               l2_code, l2_name, heat_level, heat_delta, heat_acceleration,
+               persistence_days, theme_breadth, sector_breadth, stock_breadth,
+               main_money_judgement, retail_chase_judgement, main_retail_alignment,
+               crowding_distribution_risk, one_day_wonder_risk, persistence_score,
+               freshness, quality_flag, prompt_version, model_name, run_mode,
+               evidence_json, updated_at
+        FROM stock.theme_heat_daily
+        WHERE trade_date = :trade_date
+          AND (CAST(:l2_code AS text) IS NULL OR l2_code = CAST(:l2_code AS text))
+        ORDER BY theme_rank, l2_code
+    """)
+    with engine.connect() as conn:
+        return [dict(row) for row in conn.execute(sql, {"trade_date": trade_date, "l2_code": l2_code}).mappings().all()]
 
 
 def build_weekly_theme_heat_from_local_sources(
@@ -661,6 +797,143 @@ def daily_theme_heat_artifact_from_llm_response(
     }
 
 
+def daily_theme_heat_rows_from_artifact(artifact: dict[str, Any]) -> list[DailyThemeHeat]:
+    """Convert a reviewed daily LLM artifact into queryable theme/sector rows."""
+    as_of_raw = artifact.get("as_of") or artifact.get("scan_date")
+    if not as_of_raw:
+        raise ValueError("daily theme artifact must include as_of or scan_date")
+    trade_date = dt.date.fromisoformat(str(as_of_raw)[:10])
+    themes = artifact.get("themes")
+    if not isinstance(themes, list):
+        raise ValueError("daily theme artifact must include themes")
+    rows: list[DailyThemeHeat] = []
+    for raw in themes:
+        if not isinstance(raw, dict):
+            continue
+        rank = int(raw.get("theme_rank") or len(rows) + 1)
+        sectors = _theme_sector_rows(raw)
+        stocks = list(raw.get("representative_stocks") or [])
+        base = {
+            "trade_date": trade_date,
+            "theme_rank": rank,
+            "theme_label": str(raw.get("theme_label") or f"theme_{rank}"),
+            "category": str(raw.get("category") or raw.get("theme_label") or f"theme_{rank}"),
+            "heat_level": round(_clip_float(raw.get("heat_score"), default=0.0), 4),
+            "theme_breadth": int(raw.get("theme_breadth") or len(themes)),
+            "sector_breadth": len(sectors),
+            "stock_breadth": len(stocks),
+            "main_money_judgement": str(raw.get("main_money_judgement") or ""),
+            "retail_chase_judgement": str(raw.get("retail_chase_judgement") or ""),
+            "main_retail_alignment": _main_retail_alignment(raw),
+            "crowding_distribution_risk": str(raw.get("crowding_distribution_risk") or ""),
+            "one_day_wonder_risk": round(_clip_float(raw.get("one_day_wonder_risk"), default=0.5), 4),
+            "persistence_score": round(_clip_float(raw.get("persistence_score"), default=0.0), 4),
+            "freshness": str(raw.get("freshness") or "unknown"),
+            "quality_flag": str(raw.get("quality_flag") or artifact.get("quality_flag") or "batch_llm_cache"),
+            "prompt_version": str(artifact.get("prompt_version") or LLM_DAILY_PROMPT_VERSION),
+            "model_name": str(artifact.get("model_name")) if artifact.get("model_name") else None,
+            "run_mode": str(artifact.get("run_mode") or "manual"),
+            "evidence": {
+                "source_marker": artifact.get("source_marker"),
+                "source": artifact.get("source"),
+                "source_rows": artifact.get("source_rows"),
+                "evidence_quality": artifact.get("evidence_quality"),
+                "window_days": artifact.get("window_days"),
+                "market_summary": artifact.get("market_summary"),
+                "leader_candidates": list(raw.get("leader_candidates") or [])[:20],
+                "validation_signals": list(raw.get("validation_signals") or [])[:20],
+                "validation_signals_by_horizon": dict(raw.get("validation_signals_by_horizon") or {}),
+                "risks": list(raw.get("risks") or [])[:10],
+                "evidence_refs": list(raw.get("evidence_refs") or [])[:20],
+                "source_urls": list(raw.get("source_urls") or [])[:20],
+            },
+        }
+        if not sectors:
+            rows.append(DailyThemeHeat(**base))
+            continue
+        for sector in sectors:
+            rows.append(
+                DailyThemeHeat(
+                    **base,
+                    l1_code=sector.get("l1_code"),
+                    l1_name=sector.get("l1_name"),
+                    l2_code=sector.get("l2_code") or sector.get("sector_code") or "__UNMAPPED__",
+                    l2_name=sector.get("l2_name") or sector.get("sector_name") or sector.get("name"),
+                )
+            )
+    return rows
+
+
+def _enrich_daily_theme_curve(engine: Engine, rows: Sequence[DailyThemeHeat]) -> list[DailyThemeHeat]:
+    out: list[DailyThemeHeat] = []
+    sql = text("""
+        SELECT heat_level, heat_delta, persistence_days
+        FROM stock.theme_heat_daily
+        WHERE trade_date < :trade_date
+          AND theme_label = :theme_label
+          AND l2_code = :l2_code
+        ORDER BY trade_date DESC
+        LIMIT 1
+    """)
+    try:
+        with engine.connect() as conn:
+            for row in rows:
+                prev = conn.execute(
+                    sql,
+                    {
+                        "trade_date": row.trade_date,
+                        "theme_label": row.theme_label,
+                        "l2_code": row.l2_code or "__UNMAPPED__",
+                    },
+                ).mappings().first()
+                heat_delta = row.heat_delta
+                heat_acceleration = row.heat_acceleration
+                persistence_days = row.persistence_days
+                if prev:
+                    prior_delta = _float(prev.get("heat_delta")) or 0.0
+                    heat_delta = round(row.heat_level - float(prev["heat_level"]), 4)
+                    heat_acceleration = round(heat_delta - prior_delta, 4)
+                    persistence_days = (int(prev["persistence_days"] or 0) + 1) if row.heat_level >= 0.5 else 1
+                out.append(
+                    DailyThemeHeat(
+                        **{
+                            **row.__dict__,
+                            "heat_delta": heat_delta,
+                            "heat_acceleration": heat_acceleration,
+                            "persistence_days": persistence_days,
+                        }
+                    )
+                )
+    except Exception:
+        return list(rows)
+    return out
+
+
+def _theme_sector_rows(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    sectors = raw.get("affected_sectors") or []
+    if not isinstance(sectors, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for item in sectors:
+        if isinstance(item, dict):
+            out.append({str(k): v for k, v in item.items()})
+        elif item:
+            out.append({"sector_name": str(item)})
+    return out
+
+
+def _main_retail_alignment(raw: dict[str, Any]) -> str:
+    main = str(raw.get("main_money_judgement") or "")
+    retail = str(raw.get("retail_chase_judgement") or "")
+    crowding = str(raw.get("crowding_distribution_risk") or "")
+    text_blob = f"{main} {retail} {crowding}"
+    if any(token in text_blob for token in ("出货", "拥挤", "追涨", "过热")):
+        return "crowding_or_distribution_risk"
+    if any(token in text_blob for token in ("主力", "净流入", "扩散", "承接")):
+        return "main_money_supported"
+    return "needs_confirmation"
+
+
 def _load_theme_source_rows(
     engine: Engine,
     week: dt.date,
@@ -1025,3 +1298,12 @@ def _clip_float(value: Any, *, default: float) -> float:
     except (TypeError, ValueError):
         numeric = default
     return max(0.0, min(1.0, numeric))
+
+
+def _float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

@@ -111,7 +111,7 @@ scored AS (
             0.20 * COALESCE(diffusion_score, 0.5) +
             0.18 * COALESCE(state_score, 0.5) +
             0.14 * COALESCE(price_positive_breadth, 0.5) +
-            0.14 * COALESCE(top5_main_net_share, 0.5)
+            0.14 * GREATEST(0.0, LEAST(1.0, COALESCE(top5_main_net_share, 0.5)))
         ) AS sector_score
     FROM base
 ),

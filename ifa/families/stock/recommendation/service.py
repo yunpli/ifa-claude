@@ -59,7 +59,15 @@ def build_recommendation_brief(request: RecommendationBriefRequest, *, engine: E
         requested_at=request.requested_at,
     )
     source_status = _source_status(engine, trade_date)
-    rows = _load_sector_cycle_rows(engine, trade_date) if source_status["stock.sector_cycle_leader_daily"]["available"] else []
+    rows = (
+        _load_sector_cycle_rows(
+            engine,
+            trade_date,
+            include_theme_heat=source_status["stock.theme_heat_daily"]["table_exists"],
+        )
+        if source_status["stock.sector_cycle_leader_daily"]["available"]
+        else []
+    )
     if not rows:
         rows = _load_fallback_rows(engine, trade_date, source_status)
 
@@ -92,10 +100,10 @@ def build_recommendation_brief(request: RecommendationBriefRequest, *, engine: E
             "selection_order": [
                 "stock.sector_cycle_leader_daily",
                 "stock.risk_veto_daily",
-                "ta.candidates_daily",
-                "ningbo.recommendations_daily",
-                "outcome proxy artifacts",
+                "sme orderflow/diffusion/state evidence embedded in sector-cycle rows",
             ],
+            "scope": "sector_cycle_leader_only",
+            "excluded_sources": ["ta.candidates_daily", "ningbo.recommendations_daily", "research diagnostics"],
         },
         disclaimer={
             "short_header_zh": SHORT_HEADER_ZH,
@@ -112,8 +120,7 @@ def _source_status(engine: Engine, trade_date: dt.date) -> dict[str, dict[str, A
     specs = {
         "stock.sector_cycle_leader_daily": ("stock", "sector_cycle_leader_daily", "trade_date"),
         "stock.risk_veto_daily": ("stock", "risk_veto_daily", "trade_date"),
-        "ta.candidates_daily": ("ta", "candidates_daily", "trade_date"),
-        "ningbo.recommendations_daily": ("ningbo", "recommendations_daily", "rec_date"),
+        "stock.theme_heat_daily": ("stock", "theme_heat_daily", "trade_date"),
         "stock.theme_heat_weekly": ("stock", "theme_heat_weekly", None),
     }
     out: dict[str, dict[str, Any]] = {}
@@ -134,18 +141,38 @@ def _source_status(engine: Engine, trade_date: dt.date) -> dict[str, dict[str, A
                 rows = int(conn.execute(text(f"SELECT count(*) FROM {schema}.{table} WHERE valid_week = :w"), {"w": latest_val}).scalar_one() or 0) if latest_val else 0
                 latest = latest_val.isoformat() if latest_val else None
             out[name] = {"available": exists and (rows is None or rows > 0), "table_exists": exists, "rows": rows, "latest": latest}
-    out["stock_edge.outcome_proxy_artifacts"] = {
+    out["recommendation.excluded_cross_family_sources"] = {
         "available": False,
         "table_exists": False,
         "rows": 0,
         "latest": None,
-        "reason": "MVP does not scan parquet/json tuning artifacts for report generation.",
+        "reason": "Recommendation brief is sector-cycle/leader only; TA, Ningbo, and Research diagnostics are separate reports and are not scored here.",
     }
     return out
 
 
-def _load_sector_cycle_rows(engine: Engine, trade_date: dt.date) -> list[dict[str, Any]]:
-    sql = text("""
+def _load_sector_cycle_rows(engine: Engine, trade_date: dt.date, *, include_theme_heat: bool = True) -> list[dict[str, Any]]:
+    theme_cte = """
+        th AS (
+            SELECT DISTINCT ON (l2_code)
+                   l2_code, theme_label, heat_level, heat_delta, heat_acceleration,
+                   persistence_days, main_retail_alignment, crowding_distribution_risk,
+                   quality_flag AS theme_quality_flag
+            FROM stock.theme_heat_daily
+            WHERE trade_date = :d
+              AND l2_code <> '__UNMAPPED__'
+            ORDER BY l2_code, theme_rank
+        ),
+    """ if include_theme_heat else """
+        th AS (
+            SELECT NULL::text AS l2_code, NULL::text AS theme_label, NULL::float AS heat_level,
+                   NULL::float AS heat_delta, NULL::float AS heat_acceleration,
+                   NULL::int AS persistence_days, NULL::text AS main_retail_alignment,
+                   NULL::text AS crowding_distribution_risk, NULL::text AS theme_quality_flag
+            WHERE false
+        ),
+    """
+    sql = text(f"""
         WITH rv AS (
             SELECT ts_code,
                    bool_or(hard_veto) AS hard_veto,
@@ -155,23 +182,7 @@ def _load_sector_cycle_rows(engine: Engine, trade_date: dt.date) -> list[dict[st
             WHERE trade_date = :d
             GROUP BY ts_code
         ),
-        ta AS (
-            SELECT ts_code,
-                   max(final_score::float) AS ta_score,
-                   array_agg(setup_name ORDER BY final_score DESC NULLS LAST, setup_name) AS ta_setups,
-                   bool_or(in_top_watchlist) AS ta_watchlist
-            FROM ta.candidates_daily
-            WHERE trade_date = :d
-            GROUP BY ts_code
-        ),
-        nb AS (
-            SELECT ts_code,
-                   max(confidence_score::float) AS ningbo_score,
-                   array_agg(DISTINCT scoring_mode ORDER BY scoring_mode) AS ningbo_modes
-            FROM ningbo.recommendations_daily
-            WHERE rec_date = :d
-            GROUP BY ts_code
-        ),
+        {theme_cte}
         px AS (
             SELECT DISTINCT ON (ts_code)
                    ts_code, close::float AS close, high::float AS high, low::float AS low, pct_chg::float AS pct_chg
@@ -181,14 +192,14 @@ def _load_sector_cycle_rows(engine: Engine, trade_date: dt.date) -> list[dict[st
         ),
         joined AS (
             SELECT s.*, rv.hard_veto, rv.veto_categories, rv.veto_reasons,
-                   ta.ta_score, ta.ta_setups, ta.ta_watchlist,
-                   nb.ningbo_score, nb.ningbo_modes,
-                   px.close, px.high, px.low, px.pct_chg
+                   px.close, px.high, px.low, px.pct_chg,
+                   th.theme_label, th.heat_level, th.heat_delta, th.heat_acceleration,
+                   th.persistence_days, th.main_retail_alignment,
+                   th.crowding_distribution_risk, th.theme_quality_flag
             FROM stock.sector_cycle_leader_daily s
             LEFT JOIN rv ON rv.ts_code=s.ts_code
-            LEFT JOIN ta ON ta.ts_code=s.ts_code
-            LEFT JOIN nb ON nb.ts_code=s.ts_code
             LEFT JOIN px ON px.ts_code=s.ts_code
+            LEFT JOIN th ON th.l2_code=s.l2_code
             WHERE s.trade_date = :d
         ),
         ranked AS (
@@ -211,40 +222,9 @@ def _load_sector_cycle_rows(engine: Engine, trade_date: dt.date) -> list[dict[st
 
 
 def _load_fallback_rows(engine: Engine, trade_date: dt.date, source_status: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    if source_status.get("ta.candidates_daily", {}).get("available"):
-        sql = text("""
-            SELECT trade_date, ts_code, NULL AS name, NULL AS l1_name, NULL AS l2_name,
-                   NULL::int AS rank_in_sector, NULL::int AS sector_rank_count,
-                   final_score::float AS leader_score, NULL::float AS sector_score, final_score::float AS stock_score,
-                   'ta_fallback' AS quality_flag, '{}'::jsonb AS evidence_json,
-                   false AS hard_veto, NULL AS veto_categories, NULL AS veto_reasons,
-                   final_score::float AS ta_score, ARRAY[setup_name] AS ta_setups, in_top_watchlist AS ta_watchlist,
-                   NULL::float AS ningbo_score, NULL::text[] AS ningbo_modes,
-                   NULL::float AS close, NULL::float AS high, NULL::float AS low, NULL::float AS pct_chg
-            FROM ta.candidates_daily
-            WHERE trade_date = :d
-            ORDER BY in_top_watchlist DESC, final_score DESC NULLS LAST, rank NULLS LAST
-            LIMIT 80
-        """)
-        with engine.connect() as conn:
-            return [dict(row) for row in conn.execute(sql, {"d": trade_date}).mappings().all()]
-    if source_status.get("ningbo.recommendations_daily", {}).get("available"):
-        sql = text("""
-            SELECT rec_date AS trade_date, ts_code, NULL AS name, NULL AS l1_name, NULL AS l2_name,
-                   NULL::int AS rank_in_sector, NULL::int AS sector_rank_count,
-                   confidence_score::float AS leader_score, NULL::float AS sector_score, confidence_score::float AS stock_score,
-                   'ningbo_fallback' AS quality_flag, '{}'::jsonb AS evidence_json,
-                   false AS hard_veto, NULL AS veto_categories, NULL AS veto_reasons,
-                   NULL::float AS ta_score, NULL::text[] AS ta_setups, false AS ta_watchlist,
-                   confidence_score::float AS ningbo_score, ARRAY[scoring_mode] AS ningbo_modes,
-                   NULL::float AS close, NULL::float AS high, NULL::float AS low, NULL::float AS pct_chg
-            FROM ningbo.recommendations_daily
-            WHERE rec_date = :d
-            ORDER BY confidence_score DESC, ts_code
-            LIMIT 80
-        """)
-        with engine.connect() as conn:
-            return [dict(row) for row in conn.execute(sql, {"d": trade_date}).mappings().all()]
+    # Deliberately no TA/Ningbo/Research fallback: this brief is a
+    # sector-cycle/leader product.  If the sector-cycle surface is unavailable,
+    # the report should say so instead of silently changing recommendation logic.
     return []
 
 
@@ -281,8 +261,7 @@ def _candidate_from_row(row: dict[str, Any], trade_date: dt.date) -> Recommendat
         source_flags={
             "hard_veto": hard_veto,
             "risk_flags": risk_flags,
-            "ta_watchlist": bool(row.get("ta_watchlist")),
-            "fallback": quality in {"ta_fallback", "ningbo_fallback"},
+            "fallback": False,
         },
     )
 
@@ -322,13 +301,11 @@ def _horizon_suitability(score: float | None, sector: float | None, stock: float
 def _trigger(row: dict[str, Any]) -> str:
     high = _float(row.get("high"))
     close = _float(row.get("close"))
-    ta_setups = row.get("ta_setups") or []
-    setup_note = f"；TA 触发 {', '.join(ta_setups[:2])}" if ta_setups else ""
     if high:
-        return f"下一交易日放量站稳或回踩不破上一交易日高点附近 {high:.2f}{setup_note}。"
+        return f"下一交易日放量站稳或回踩不破上一交易日高点附近 {high:.2f}，且板块热度与主力资金延续。"
     if close:
-        return f"下一交易日保持在上一交易日收盘价 {close:.2f} 上方并有资金延续{setup_note}。"
-    return f"等待下一交易日价格与主力资金同步确认{setup_note}。"
+        return f"下一交易日保持在上一交易日收盘价 {close:.2f} 上方，并有板块资金与热度延续。"
+    return "等待下一交易日板块周期、热度变化与主力资金同步确认。"
 
 
 def _invalidation(row: dict[str, Any]) -> str:
@@ -351,10 +328,12 @@ def _evidence_points(row: dict[str, Any], evidence_json: dict[str, Any], trade_d
         out.append(RecommendationEvidence("主力净流入", _fmt_yuan(evidence_json.get("main_net_yuan")), "sme.sme_stock_orderflow_daily"))
     if evidence_json.get("diffusion_phase"):
         out.append(RecommendationEvidence("板块扩散阶段", evidence_json.get("diffusion_phase"), "sme.sme_sector_diffusion_daily"))
-    if row.get("ta_score") is not None:
-        out.append(RecommendationEvidence("TA 候选", f"{_round(row.get('ta_score'))} / {', '.join((row.get('ta_setups') or [])[:3])}", "ta.candidates_daily"))
-    if row.get("ningbo_score") is not None:
-        out.append(RecommendationEvidence("Ningbo 推荐", _round(row.get("ningbo_score")), "ningbo.recommendations_daily"))
+    if row.get("theme_label"):
+        out.append(RecommendationEvidence("主题热度", f"{row.get('theme_label')} / {_round(row.get('heat_level'))}", "stock.theme_heat_daily"))
+    if row.get("heat_delta") is not None:
+        out.append(RecommendationEvidence("热度变化", _round(row.get("heat_delta")), "stock.theme_heat_daily"))
+    if row.get("main_retail_alignment"):
+        out.append(RecommendationEvidence("主力/散户阶段", row.get("main_retail_alignment"), "stock.theme_heat_daily"))
     if row.get("veto_categories"):
         out.append(RecommendationEvidence("风险屏蔽", row.get("veto_categories"), "stock.risk_veto_daily", note=row.get("veto_reasons")))
     if not out:
@@ -368,6 +347,8 @@ def _risk_notes(row: dict[str, Any], risk_flags: list[str]) -> list[str]:
         notes.append(str(row.get("veto_reasons") or row.get("veto_categories") or "硬风险屏蔽"))
     if row.get("quality_flag") == "degraded":
         notes.append("底层行情/资金覆盖质量为 degraded，不能按满置信度使用。")
+    if row.get("crowding_distribution_risk"):
+        notes.append(str(row["crowding_distribution_risk"]))
     notes.extend(risk_flags)
     return notes
 
@@ -376,10 +357,10 @@ def _conflicts(row: dict[str, Any], risk_flags: list[str]) -> list[str]:
     conflicts: list[str] = []
     if _float(row.get("leader_score")) and _float(row.get("leader_score")) >= 0.68 and row.get("quality_flag") == "degraded":
         conflicts.append("leader 排名较强，但底层数据质量降级。")
-    if row.get("ta_score") is None:
-        conflicts.append("未命中当日 TA 候选，执行触发需要下一交易日确认。")
     if {"leader_crowded", "retail_chase"} & set(risk_flags):
         conflicts.append("板块/个股热度可能偏拥挤，追高风险高于普通候选。")
+    if row.get("main_retail_alignment") == "crowding_or_distribution_risk":
+        conflicts.append("主题热度与散户追涨/出货风险不匹配，不能按强趋势处理。")
     return conflicts
 
 
@@ -387,15 +368,17 @@ def _risk_flags(evidence_json: dict[str, Any]) -> list[str]:
     raw = evidence_json.get("risk_flags_json")
     if raw is None:
         return []
+    def clean(values: list[Any]) -> list[str]:
+        return [str(x) for x in values if x is not None and str(x).strip().lower() not in {"", "none", "null"}]
     if isinstance(raw, list):
-        return [str(x) for x in raw]
+        return clean(raw)
     if isinstance(raw, str):
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, list):
-                return [str(x) for x in parsed]
+                return clean(parsed)
         except json.JSONDecodeError:
-            return [raw]
+            return clean([raw])
     return []
 
 
