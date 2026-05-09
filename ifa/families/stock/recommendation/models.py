@@ -65,6 +65,7 @@ class RecommendationBriefReport:
     logic_version: str
     groups: dict[BriefGroup, list[RecommendationCandidate]]
     source_status: dict[str, dict[str, Any]]
+    charts: dict[str, Any] = field(default_factory=dict)
     audit: dict[str, Any] = field(default_factory=dict)
     disclaimer: dict[str, Any] = field(default_factory=dict)
 

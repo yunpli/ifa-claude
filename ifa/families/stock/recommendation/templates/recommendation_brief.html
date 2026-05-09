@@ -11,7 +11,7 @@
   <header class="se-hero se-rec-hero">
     <div class="se-hero__top">
       <div>
-        <div class="se-brand">Lindenwood Management LLC · iFA Stock Edge Recommendation Brief</div>
+        <div class="se-brand">Lindenwood Management LLC · iFA Stock Edge Sector-Cycle Brief</div>
         <h1>{{ report.title }}</h1>
       </div>
       <div class="se-run-badge se-run-badge--{{ report.run_mode }}">
@@ -32,7 +32,33 @@
       <div><span>观察池</span><strong>{{ report.groups.watchlist | length }}</strong></div>
       <div><span>规避/风险</span><strong>{{ report.groups.avoid | length }}</strong></div>
     </div>
+    <p class="se-rec-principle">本简报只使用板块周期、资金流、主题热度与板块内龙头证据；TA、Ningbo、Research 诊断不进入推荐池或打分。</p>
   </header>
+
+  <section class="ifa-section se-section">
+    <div class="ifa-section__head">
+      <div class="ifa-section__num">00</div>
+      <h2 class="ifa-section__title">核心证据图</h2>
+    </div>
+    <div class="se-chart-grid">
+      <div class="se-chart-card se-chart-card--wide">
+        <div class="se-chart-card__head"><strong>板块热度曲线</strong><span>stock.theme_heat_daily · 最近约20日</span></div>
+        <canvas id="themeHeatChart" height="260"></canvas>
+      </div>
+      <div class="se-chart-card">
+        <div class="se-chart-card__head"><strong>主力 vs 小中单</strong><span>sme sector orderflow</span></div>
+        <canvas id="flowChart" height="260"></canvas>
+      </div>
+      <div class="se-chart-card">
+        <div class="se-chart-card__head"><strong>板块内龙头排名</strong><span>leader score / rank</span></div>
+        <canvas id="leaderChart" height="260"></canvas>
+      </div>
+      <div class="se-chart-card">
+        <div class="se-chart-card__head"><strong>拥挤/出货风险</strong><span>risk notes + conflicts</span></div>
+        <canvas id="crowdingChart" height="260"></canvas>
+      </div>
+    </div>
+  </section>
 
   {% for group_key in ['strong', 'watchlist', 'avoid'] %}
   <section class="ifa-section se-section">
@@ -121,5 +147,93 @@
     Generated {{ report.generated_at_bjt }} 北京时间 · observation {{ report.as_of_trade_date }}
   </footer>
 </article>
+<script id="seChartData" type="application/json">{{ report.charts | tojson }}</script>
+<script>
+(function(){
+  const payload = JSON.parse(document.getElementById('seChartData').textContent || '{}');
+  const palette = ['#11a579','#3969ac','#f2b701','#e73f74','#80ba5a','#7f3c8d','#e68310','#008695'];
+  const fmt = new Intl.NumberFormat('zh-CN', {maximumFractionDigits: 2});
+  function setup(id){
+    const canvas = document.getElementById(id);
+    if(!canvas) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(320, rect.width) * dpr;
+    canvas.height = (canvas.getAttribute('height') || 260) * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return {canvas, ctx, w: canvas.width / dpr, h: canvas.height / dpr};
+  }
+  function axes(c, title){
+    c.ctx.clearRect(0,0,c.w,c.h);
+    c.ctx.fillStyle = '#0f1720';
+    c.ctx.font = '600 13px -apple-system,BlinkMacSystemFont,Segoe UI,Arial';
+    c.ctx.fillText(title, 16, 22);
+    c.ctx.strokeStyle = '#d8dee8';
+    c.ctx.lineWidth = 1;
+    c.ctx.beginPath(); c.ctx.moveTo(42, 36); c.ctx.lineTo(42, c.h-36); c.ctx.lineTo(c.w-14, c.h-36); c.ctx.stroke();
+  }
+  function lineChart(id, rows){
+    const c = setup(id); if(!c) return;
+    axes(c, rows.length ? 'Heat level by sector' : 'No theme heat curve data');
+    if(!rows.length) return empty(c, 'stock.theme_heat_daily 暂无可画曲线');
+    const by = group(rows, r => r.sector || r.l2_code || 'unknown');
+    const dates = [...new Set(rows.map(r => r.date))].sort();
+    const x = i => 42 + (c.w-70) * (dates.length <= 1 ? 0.5 : i/(dates.length-1));
+    const y = v => c.h-36 - (c.h-82) * clamp(v ?? 0);
+    [...by.entries()].slice(0,6).forEach(([name, series], idx) => {
+      const map = new Map(series.map(r => [r.date, r.heat]));
+      c.ctx.strokeStyle = palette[idx % palette.length]; c.ctx.lineWidth = 2; c.ctx.beginPath();
+      dates.forEach((d,i) => { const yy = y(map.get(d)); if(i===0)c.ctx.moveTo(x(i), yy); else c.ctx.lineTo(x(i), yy); });
+      c.ctx.stroke();
+      c.ctx.fillStyle = palette[idx % palette.length]; c.ctx.fillText(name.slice(0,12), 52 + (idx%3)*150, c.h-12 - Math.floor(idx/3)*15);
+    });
+  }
+  function flowChart(id, rows){
+    const c = setup(id); if(!c) return;
+    axes(c, rows.length ? 'Main money vs retail' : 'No sector flow data');
+    if(!rows.length) return empty(c, 'sme.sme_sector_orderflow_daily 暂无可画曲线');
+    const latestDate = rows.map(r=>r.date).sort().pop();
+    const latest = rows.filter(r=>r.date===latestDate).slice(0,10);
+    const maxAbs = Math.max(1, ...latest.flatMap(r => [Math.abs(r.main_net_yuan || 0), Math.abs(r.retail_net_yuan || 0)]));
+    latest.forEach((r,i) => {
+      const y = 48 + i*18, mid = c.w/2, scale = (c.w/2-70)/maxAbs;
+      c.ctx.fillStyle = '#11a579'; c.ctx.fillRect(mid, y, Math.max(1,(r.main_net_yuan||0)*scale), 7);
+      c.ctx.fillStyle = '#e73f74'; c.ctx.fillRect(mid, y+8, Math.min(-1,(r.retail_net_yuan||0)*scale), 7);
+      c.ctx.fillStyle = '#334155'; c.ctx.fillText((r.sector||'').slice(0,9), 12, y+11);
+    });
+  }
+  function barChart(id, rows){
+    const c = setup(id); if(!c) return;
+    axes(c, rows.length ? 'Leader score' : 'No leader rank data');
+    if(!rows.length) return empty(c, '暂无龙头排名数据');
+    rows.slice(0,12).forEach((r,i) => {
+      const y = 46 + i*16, val = clamp(r.leader_score || 0), width = (c.w-150)*val;
+      c.ctx.fillStyle = r.group === 'strong' ? '#11a579' : '#f2b701';
+      c.ctx.fillRect(118, y, width, 9);
+      c.ctx.fillStyle = '#334155'; c.ctx.fillText((r.label||r.ts_code).slice(0,10), 12, y+8);
+      c.ctx.fillStyle = '#64748b'; c.ctx.fillText(fmt.format(val), 122+width+5, y+8);
+    });
+  }
+  function crowdingChart(id, rows){
+    const c = setup(id); if(!c) return;
+    axes(c, rows.length ? 'Crowding / distribution risk count' : 'No crowding data');
+    if(!rows.length) return empty(c, '暂无拥挤/出货风险数据');
+    rows.slice(0,14).forEach((r,i) => {
+      const y = 46 + i*14, val = Math.min(5, r.risk_count || 0);
+      c.ctx.fillStyle = val >= 2 ? '#e73f74' : (val === 1 ? '#f2b701' : '#11a579');
+      c.ctx.fillRect(120, y, 24 * (val || 0.15), 8);
+      c.ctx.fillStyle = '#334155'; c.ctx.fillText((r.label||r.ts_code).slice(0,10), 12, y+8);
+    });
+  }
+  function empty(c, text){ c.ctx.fillStyle = '#64748b'; c.ctx.fillText(text, 54, 82); }
+  function clamp(v){ return Math.max(0, Math.min(1, Number(v)||0)); }
+  function group(rows, fn){ const m = new Map(); rows.forEach(r => { const k = fn(r); if(!m.has(k)) m.set(k, []); m.get(k).push(r); }); return m; }
+  lineChart('themeHeatChart', payload.theme_heat_curve || []);
+  flowChart('flowChart', payload.main_retail_flow || []);
+  barChart('leaderChart', payload.leader_rank || []);
+  crowdingChart('crowdingChart', payload.crowding_distribution || []);
+})();
+</script>
 </body>
 </html>

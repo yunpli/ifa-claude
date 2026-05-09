@@ -84,7 +84,8 @@ def build_recommendation_brief(request: RecommendationBriefRequest, *, engine: E
             break
 
     generated = bjt_now()
-    title = f"Stock Edge 推荐简报 · {trade_date:%Y年%m月%d日}"
+    charts = _build_chart_payload(engine, trade_date, groups)
+    title = f"Stock Edge 板块周期推荐简报 · {trade_date:%Y年%m月%d日}"
     return RecommendationBriefReport(
         title=title,
         as_of_trade_date=trade_date,
@@ -95,6 +96,7 @@ def build_recommendation_brief(request: RecommendationBriefRequest, *, engine: E
         logic_version=LOGIC_VERSION,
         groups=groups,  # type: ignore[arg-type]
         source_status=source_status,
+        charts=charts,
         audit={
             "candidate_count": sum(len(v) for v in groups.values()),
             "selection_order": [
@@ -262,6 +264,8 @@ def _candidate_from_row(row: dict[str, Any], trade_date: dt.date) -> Recommendat
             "hard_veto": hard_veto,
             "risk_flags": risk_flags,
             "fallback": False,
+            "l2_code": row.get("l2_code"),
+            "l1_code": row.get("l1_code"),
         },
     )
 
@@ -326,6 +330,10 @@ def _evidence_points(row: dict[str, Any], evidence_json: dict[str, Any], trade_d
         out.append(RecommendationEvidence("板块周期分", _round(row.get("sector_score")), "stock.sector_cycle_leader_daily"))
     if evidence_json.get("main_net_yuan") is not None:
         out.append(RecommendationEvidence("主力净流入", _fmt_yuan(evidence_json.get("main_net_yuan")), "sme.sme_stock_orderflow_daily"))
+    if evidence_json.get("retail_net_yuan") is not None:
+        out.append(RecommendationEvidence("小中单净流入", _fmt_yuan(evidence_json.get("retail_net_yuan")), "sme.sme_stock_orderflow_daily"))
+    if evidence_json.get("main_net_ratio") is not None:
+        out.append(RecommendationEvidence("主力净额/成交额", _fmt_pct(evidence_json.get("main_net_ratio")), "sme.sme_stock_orderflow_daily"))
     if evidence_json.get("diffusion_phase"):
         out.append(RecommendationEvidence("板块扩散阶段", evidence_json.get("diffusion_phase"), "sme.sme_sector_diffusion_daily"))
     if row.get("theme_label"):
@@ -339,6 +347,119 @@ def _evidence_points(row: dict[str, Any], evidence_json: dict[str, Any], trade_d
     if not out:
         out.append(RecommendationEvidence("可用证据", f"{trade_date.isoformat()} 无结构化证据", "local"))
     return out
+
+
+def _build_chart_payload(
+    engine: Engine,
+    trade_date: dt.date,
+    groups: dict[str, list[RecommendationCandidate]],
+) -> dict[str, Any]:
+    candidates = [c for key in ("strong", "watchlist", "avoid") for c in groups.get(key, [])]
+    l2_codes = sorted({c.source_flags.get("l2_code") for c in candidates if c.source_flags.get("l2_code")})
+    return {
+        "leader_rank": _leader_rank_chart(candidates),
+        "theme_heat_curve": _theme_heat_curve_chart(engine, trade_date, l2_codes),
+        "main_retail_flow": _main_retail_flow_chart(engine, trade_date, l2_codes),
+        "crowding_distribution": _crowding_chart(candidates),
+    }
+
+
+def _leader_rank_chart(candidates: list[RecommendationCandidate]) -> list[dict[str, Any]]:
+    rows = sorted(
+        [c for c in candidates if c.group != "avoid"],
+        key=lambda c: (-(c.leader_score or -1.0), c.rank_in_sector or 9999, c.ts_code),
+    )
+    return [
+        {
+            "label": f"{c.name or c.ts_code}",
+            "ts_code": c.ts_code,
+            "sector": c.l2_name,
+            "group": c.group,
+            "leader_score": c.leader_score,
+            "sector_score": c.sector_score,
+            "rank": c.rank_in_sector,
+            "rank_count": c.sector_rank_count,
+        }
+        for c in rows[:18]
+    ]
+
+
+def _theme_heat_curve_chart(engine: Engine, trade_date: dt.date, l2_codes: list[str]) -> list[dict[str, Any]]:
+    if not l2_codes:
+        return []
+    sql = text("""
+        SELECT trade_date, l2_code, l2_name, theme_label, heat_level,
+               heat_delta, heat_acceleration, persistence_days
+        FROM stock.theme_heat_daily
+        WHERE trade_date <= :d
+          AND trade_date >= :start
+          AND l2_code = ANY(:l2_codes)
+        ORDER BY trade_date, l2_code, theme_rank
+    """)
+    try:
+        with engine.connect() as conn:
+            rows = [dict(row) for row in conn.execute(sql, {"d": trade_date, "start": trade_date - dt.timedelta(days=20), "l2_codes": l2_codes}).mappings().all()]
+    except Exception:
+        return []
+    return [
+        {
+            "date": str(row.get("trade_date")),
+            "l2_code": row.get("l2_code"),
+            "sector": row.get("l2_name"),
+            "theme": row.get("theme_label"),
+            "heat": _float(row.get("heat_level")),
+            "delta": _float(row.get("heat_delta")),
+            "acceleration": _float(row.get("heat_acceleration")),
+            "persistence_days": _int(row.get("persistence_days")),
+        }
+        for row in rows
+    ]
+
+
+def _main_retail_flow_chart(engine: Engine, trade_date: dt.date, l2_codes: list[str]) -> list[dict[str, Any]]:
+    if not l2_codes:
+        return []
+    sql = text("""
+        SELECT trade_date, l2_code, l2_name, main_net_yuan, retail_net_yuan,
+               main_net_ratio, retail_net_ratio
+        FROM sme.sme_sector_orderflow_daily
+        WHERE trade_date <= :d
+          AND trade_date >= :start
+          AND l2_code = ANY(:l2_codes)
+        ORDER BY trade_date, l2_code
+    """)
+    try:
+        with engine.connect() as conn:
+            rows = [dict(row) for row in conn.execute(sql, {"d": trade_date, "start": trade_date - dt.timedelta(days=20), "l2_codes": l2_codes}).mappings().all()]
+    except Exception:
+        return []
+    return [
+        {
+            "date": str(row.get("trade_date")),
+            "l2_code": row.get("l2_code"),
+            "sector": row.get("l2_name"),
+            "main_net_yuan": _float(row.get("main_net_yuan")),
+            "retail_net_yuan": _float(row.get("retail_net_yuan")),
+            "main_net_ratio": _float(row.get("main_net_ratio")),
+            "retail_net_ratio": _float(row.get("retail_net_ratio")),
+        }
+        for row in rows
+    ]
+
+
+def _crowding_chart(candidates: list[RecommendationCandidate]) -> list[dict[str, Any]]:
+    return [
+        {
+            "label": c.name or c.ts_code,
+            "ts_code": c.ts_code,
+            "sector": c.l2_name,
+            "group": c.group,
+            "leader_score": c.leader_score,
+            "risk_count": len(c.risk_notes) + len(c.conflicts),
+            "risks": [*c.risk_notes, *c.conflicts][:4],
+        }
+        for c in candidates[:40]
+    ]
 
 
 def _risk_notes(row: dict[str, Any], risk_flags: list[str]) -> list[str]:
@@ -411,6 +532,13 @@ def _fmt_yuan(value: Any) -> str:
     if abs(v) >= 1e4:
         return f"{v / 1e4:.2f} 万"
     return f"{v:.0f} 元"
+
+
+def _fmt_pct(value: Any) -> str:
+    v = _float(value)
+    if v is None:
+        return "—"
+    return f"{v * 100:.2f}%"
 
 
 def _round(value: Any) -> str:

@@ -16,7 +16,7 @@ from ifa.families.stock.data.availability import LoadResult
 from ifa.families.stock.data.gateway import LocalDataGateway
 from ifa.families.stock.data.snapshot import StockEdgeSnapshot
 
-from .adapters import ningbo, research_news, risk, stock_edge_sector_cycle, ta
+from .adapters import ningbo, stock_edge_sector_cycle, ta
 from .models import (
     DiagnosticReport,
     DiagnosticRequest,
@@ -62,8 +62,6 @@ def build_diagnostic_report(request: DiagnosticRequest, *, engine: Engine) -> Di
         ),
         ta.collect(snapshot=snapshot),
         ningbo.collect(engine=engine, ts_code=ctx.request.ts_code, as_of=ctx.as_of.as_of_trade_date),
-        research_news.collect(engine=engine, snapshot=snapshot),
-        risk.collect(engine=engine, snapshot=snapshot),
     ]
     perspectives = [_with_quality(p, ctx.as_of.as_of_trade_date) for p in perspectives]
     synthesis = synthesize_diagnostic(perspectives)
@@ -83,6 +81,8 @@ def build_diagnostic_report(request: DiagnosticRequest, *, engine: Engine) -> Di
             "freshness": snapshot.freshness,
             "degraded_reasons": snapshot.degraded_reasons,
             "db_schema": "stock.diagnostic_runs + stock.diagnostic_perspective_evidence",
+            "customer_contract": "three_independent_methods_no_blended_recommendation",
+            "method_order": ["sector_cycle_fund_flow_heat", "ta", "ningbo"],
         },
     )
 
@@ -358,24 +358,23 @@ def render_markdown(report: DiagnosticReport) -> str:
         f"- 观察交易日: {report.as_of_trade_date.isoformat()}",
         f"- 数据截止: {report.data_cutoff_bjt}",
         "",
-        "## Top Summary",
-        f"- Conclusion: {report.synthesis.conclusion}",
-        f"- Confidence: {report.synthesis.confidence}",
-        f"- Horizon suitability: {json.dumps(report.synthesis.horizon_suitability, ensure_ascii=False)}",
-        f"- Trigger: {report.synthesis.trigger}",
-        f"- Invalidation: {report.synthesis.invalidation}",
-        f"- Key conflict: {_key_conflict(report)}",
+        "## 使用方式",
+        "- 本报告只展示三个独立方法块：板块周期/资金流/主题热度、TA、Ningbo。",
+        "- 不把三个方法强行合成为一个最终推荐；客户按自身流程决定是否继续研究或交易。",
         f"- Evidence freshness: {json.dumps(_perspective_quality_summary(report), ensure_ascii=False)}",
         "",
-        "## Advisor Synthesis",
-        f"- Time window: {report.synthesis.time_window}",
-        f"- Position/Risk: {report.synthesis.position_risk}",
     ]
-    if report.synthesis.conflicts:
-        lines.append(f"- Conflicts: {'; '.join(report.synthesis.conflicts)}")
-    for p in report.perspectives:
+    for idx, p in enumerate(_ordered_method_perspectives(report.perspectives), start=1):
         sources = sorted({point.source for point in p.points if point.source})
-        lines.extend(["", f"## {p.title}", f"- Status/View: {p.status} / {p.view}", f"- Freshness status: {p.freshness_status}", f"- Sources: {', '.join(sources) if sources else '-'}", f"- Summary: {p.summary}"])
+        lines.extend([
+            "",
+            f"## Method {idx}: {_method_title(p)}",
+            f"- Method conclusion: {_method_conclusion(p)}",
+            f"- Status/View: {p.status} / {p.view}",
+            f"- Freshness status: {p.freshness_status}",
+            f"- Sources: {', '.join(sources) if sources else '-'}",
+            f"- Summary: {p.summary}",
+        ])
         if p.freshness:
             lines.append(f"- Freshness: {json.dumps(p.freshness, ensure_ascii=False, default=str)}")
         if p.missing:
@@ -392,14 +391,18 @@ def render_markdown(report: DiagnosticReport) -> str:
 def render_html(report: DiagnosticReport) -> str:
     """Render a standalone diagnostic HTML artifact without touching report crons."""
     css = """
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;margin:0;background:#f4f5f7;color:#171717}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;margin:0;background:#f4f6f8;color:#151923}
 main{max-width:1120px;margin:0 auto;padding:28px 18px 48px}
-header,.summary,.perspective{background:#fff;border:1px solid #d9dee5;border-radius:8px;padding:18px;margin-bottom:14px}
-h1{font-size:26px;margin:0 0 10px} h2{font-size:18px;margin:0 0 12px} h3{font-size:16px;margin:16px 0 8px}
-.meta,.muted{color:#626b77;font-size:13px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+header,.method,.notice{background:#fff;border:1px solid #d9dee5;border-radius:8px;padding:18px;margin-bottom:14px}
+header{background:linear-gradient(135deg,#111827 0%,#243447 62%,#31515a 100%);color:#fff}
+h1{font-size:26px;margin:0 0 10px;letter-spacing:0} h2{font-size:18px;margin:0 0 12px} h3{font-size:16px;margin:16px 0 8px}
+.meta,.muted{color:#626b77;font-size:13px} header .meta{color:rgba(255,255,255,.76)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
 .cell{border:1px solid #e5e8ec;border-radius:6px;padding:10px;background:#fbfcfd}.label{font-size:12px;color:#626b77}.value{font-weight:650;margin-top:4px}
 .badge{display:inline-block;border-radius:999px;padding:3px 9px;font-size:12px;background:#eef2f6;margin-right:6px}.positive{background:#e6f4ea}.negative,.risk{background:#fdecea}.neutral,.unknown{background:#eef2f6}.fresh{background:#e6f4ea}.stale{background:#fff4d6}.unavailable,.error{background:#f1f3f5}
-.conclusion{border-left:5px solid #253858}.chiprow{margin:10px 0 0}.trigger{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:12px}
+.method{border-top:4px solid #3969ac}.method[data-view=positive]{border-top-color:#11a579}.method[data-view=risk],.method[data-view=negative]{border-top-color:#e73f74}
+.method-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.method-conclusion{font-size:22px;font-weight:750;color:#111827}
+.chart{width:100%;height:190px;border:1px solid #edf0f4;border-radius:6px;background:linear-gradient(180deg,#fff,#fbfcfd);margin:12px 0}
 ul{padding-left:19px} li{margin:5px 0} code{white-space:pre-wrap}
 """
     parts = [
@@ -407,23 +410,15 @@ ul{padding-left:19px} li{margin:5px 0} code{white-space:pre-wrap}
         f"<title>{html.escape(report.name or report.ts_code)} Stock Edge Diagnostic</title><style>{css}</style></head><body><main>",
         f"<header><h1>Stock Edge 单股诊断 · {html.escape(report.name or report.ts_code)} ({html.escape(report.ts_code)})</h1>",
         f"<div class='meta'>观察交易日 {report.as_of_trade_date.isoformat()} · 数据截止 {html.escape(report.data_cutoff_bjt)} · 生成 {html.escape(report.generated_at_bjt)}</div></header>",
-        "<section class='summary conclusion'><h2>Top Conclusion</h2><div class='grid'>",
-        _html_cell("Conclusion", report.synthesis.conclusion),
-        _html_cell("Confidence", report.synthesis.confidence),
-        _html_cell("Horizon", json.dumps(report.synthesis.horizon_suitability, ensure_ascii=False)),
-        _html_cell("Key Conflict", _key_conflict(report)),
-        "</div>",
-        f"<div class='chiprow'>{_quality_chips(report)}{_conflict_chips(report)}</div>",
-        "<div class='trigger'>",
-        f"<div class='cell'><div class='label'>Trigger</div><div class='value'>{html.escape(report.synthesis.trigger)}</div></div>",
-        f"<div class='cell'><div class='label'>Invalidation</div><div class='value'>{html.escape(report.synthesis.invalidation)}</div></div>",
-        "</div>",
-        f"<p class='muted'>{html.escape(report.synthesis.position_risk)}</p></section>",
+        "<section class='notice'><h2>使用方式</h2>",
+        "<p>本报告按三个独立方法块呈现：板块周期/资金流/主题热度、TA、Ningbo。系统不把三者强行合成为一个最终推荐，客户按自身流程决定是否继续研究或交易。</p>",
+        f"<div>{_quality_chips(report)}</div></section>",
     ]
-    for p in report.perspectives:
-        parts.append(f"<section class='perspective'><h2>{html.escape(p.title)}</h2>")
+    for idx, p in enumerate(_ordered_method_perspectives(report.perspectives), start=1):
+        parts.append(f"<section class='method' data-view='{html.escape(p.view)}'><div class='method-head'><h2>Method {idx}: {html.escape(_method_title(p))}</h2><div class='method-conclusion'>{html.escape(_method_conclusion(p))}</div></div>")
         parts.append(f"<span class='badge'>{html.escape(p.status)}</span><span class='badge {html.escape(p.view)}'>{html.escape(p.view)}</span><span class='badge {html.escape(p.freshness_status)}'>{html.escape(p.freshness_status)}</span>")
         parts.append(f"<p>{html.escape(p.summary)}</p>")
+        parts.append(f"<canvas class='chart' data-chart='{html.escape(p.key)}'></canvas>")
         sources = sorted({point.source for point in p.points if point.source})
         parts.append(f"<p class='muted'>Sources: {html.escape(', '.join(sources) if sources else '-')}</p>")
         if p.freshness:
@@ -440,6 +435,24 @@ ul{padding-left:19px} li{margin:5px 0} code{white-space:pre-wrap}
                 parts.append(f"<li><strong>{html.escape(str(point.label))}</strong>: {html.escape(str(point.value))} <span class='muted'>({html.escape(point.source)}{html.escape(as_of)})</span>{note}</li>")
             parts.append("</ul>")
         parts.append("</section>")
+    chart_data = _diagnostic_chart_payload(report)
+    parts.append(f"<script type='application/json' id='diagChartData'>{html.escape(json.dumps(chart_data, ensure_ascii=False, default=str))}</script>")
+    parts.append("""
+<script>
+(function(){
+ const data = JSON.parse(document.getElementById('diagChartData').textContent || '{}');
+ document.querySelectorAll('canvas[data-chart]').forEach(canvas => {
+   const key = canvas.dataset.chart, rows = data[key] || [], dpr = window.devicePixelRatio || 1, rect = canvas.getBoundingClientRect();
+   canvas.width = Math.max(320, rect.width) * dpr; canvas.height = 190 * dpr;
+   const ctx = canvas.getContext('2d'); ctx.scale(dpr,dpr); const w=canvas.width/dpr,h=190;
+   ctx.fillStyle='#0f1720'; ctx.font='600 13px -apple-system,BlinkMacSystemFont,Segoe UI,Arial'; ctx.fillText(key + ' evidence', 14, 22);
+   if(!rows.length){ctx.fillStyle='#64748b';ctx.fillText('暂无可画数值证据，见文字证据与缺失项。', 18, 72); return;}
+   const max = Math.max(1, ...rows.map(r => Math.abs(Number(r.value)||0)));
+   rows.slice(0,8).forEach((r,i)=>{const y=44+i*17, val=Number(r.value)||0, width=(w-170)*Math.abs(val)/max; ctx.fillStyle=val<0?'#e73f74':'#11a579'; ctx.fillRect(140,y,width,9); ctx.fillStyle='#334155'; ctx.fillText(String(r.label).slice(0,15),14,y+8); ctx.fillStyle='#64748b'; ctx.fillText(String(r.display).slice(0,18),146+width,y+8);});
+ });
+})();
+</script>
+""")
     parts.append("</main></body></html>")
     return "".join(parts)
 
@@ -666,3 +679,62 @@ def _key_conflict(report: DiagnosticReport) -> str:
 def _html_cell(label: str, value: Any) -> str:
     return f"<div class='cell'><div class='label'>{html.escape(label)}</div><div class='value'>{html.escape(str(value))}</div></div>"
 
+
+def _ordered_method_perspectives(perspectives: list[PerspectiveEvidence]) -> list[PerspectiveEvidence]:
+    order = ["stock_edge_sector_cycle", "ta", "ningbo"]
+    by_key = {p.key: p for p in perspectives}
+    ordered = [by_key[key] for key in order if key in by_key]
+    return ordered or perspectives
+
+
+def _method_title(p: PerspectiveEvidence) -> str:
+    return {
+        "stock_edge_sector_cycle": "板块周期 / 资金流 / 主题热度",
+        "ta": "TA 技术形态",
+        "ningbo": "Ningbo 短线策略",
+    }.get(p.key, p.title)
+
+
+def _method_conclusion(p: PerspectiveEvidence) -> str:
+    if p.status in {"unavailable", "error"}:
+        return "NO"
+    if p.view == "positive":
+        return "YES"
+    if p.view in {"negative", "risk"}:
+        return "NO"
+    return "WATCH"
+
+
+def _diagnostic_chart_payload(report: DiagnosticReport) -> dict[str, list[dict[str, Any]]]:
+    return {p.key: _numeric_points_for_chart(p) for p in _ordered_method_perspectives(report.perspectives)}
+
+
+def _numeric_points_for_chart(p: PerspectiveEvidence) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for point in p.points:
+        numeric = _coerce_chart_number(point.value)
+        if numeric is None:
+            continue
+        rows.append({
+            "label": point.label,
+            "value": numeric,
+            "display": point.value,
+            "source": point.source,
+            "as_of": point.as_of,
+        })
+    return rows
+
+
+def _coerce_chart_number(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, dict):
+        for key in ("leader_score", "final_score", "confidence_score", "rank_in_strategy", "candidate_count", "warning_count"):
+            if key in value:
+                return _coerce_chart_number(value.get(key))
+    try:
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None

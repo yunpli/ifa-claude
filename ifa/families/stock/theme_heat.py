@@ -21,7 +21,7 @@ PROMPT_VERSION = "stock_theme_heat_v1"
 SOURCE_POLICY_VERSION = "stock_theme_heat_local_sources_v1"
 TUSHARE_CACHE_SOURCE_POLICY_VERSION = "stock_theme_heat_tushare_cache_v1"
 LLM_WEEKLY_PROMPT_VERSION = "stock_theme_heat_llm_weekly_v1"
-LLM_DAILY_PROMPT_VERSION = "stock_theme_heat_llm_daily_v1"
+LLM_DAILY_PROMPT_VERSION = "stock_theme_heat_llm_daily_v2"
 ThemeHeatSource = Literal["local-cache", "tushare-cache", "all-cache"]
 
 _THEME_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -679,7 +679,7 @@ def daily_theme_heat_llm_messages(
     start = as_of - dt.timedelta(days=window_days - 1)
     facts = [_compact_fact_row(row, idx) for idx, row in enumerate(source_rows, start=1)]
     user_payload = {
-        "task": "Daily A-share theme scan for capital-behavior impact.",
+        "task": "Daily A-share hotspot/theme heat scan for sector-cycle and leader selection.",
         "market": "China A-share",
         "as_of": as_of.isoformat(),
         "window_start": start.isoformat(),
@@ -701,12 +701,15 @@ def daily_theme_heat_llm_messages(
             "Make exactly one batch-level judgement; do not make per-news or per-stock LLM calls or row tags.",
             "Use local_cached_facts as evidence when available. If evidence is thin, mark the whole scan and affected themes as llm_prior_only or needs_local_evidence.",
             "Do not invent exact money-flow numbers, returns, or holdings. Use qualitative flow judgement only unless facts explicitly contain numbers.",
+            "Do not use Grok/X/social-media chatter as primary evidence. The cache is built for repo LLMClient plus local facts; unsupported live-market priors must be clearly downgraded.",
+            "For each theme, provide sector-cycle impact, leader candidates, sustainability, one-day-wonder risk, validation signals, and invalidation signals.",
+            "Prefer fewer high-conviction themes over a promotional list. If a theme lacks validation evidence, say so in quality_flag and risks.",
             "Return JSON only. Keep all arrays bounded and auditable.",
         ],
     }
     system = (
         "You are an institutional China A-share thematic strategist. "
-        "Identify themes that changed capital behavior and produce structured JSON for local caching. "
+        "Identify A-share hotspots that changed capital behavior and produce structured JSON for local daily query/cache. "
         "LLM prior is allowed only when explicitly flagged as weak evidence."
     )
     return [
@@ -719,12 +722,23 @@ def daily_theme_heat_response_schema(*, max_themes: int = 8) -> dict[str, Any]:
     theme_schema = weekly_theme_heat_response_schema(max_themes=max_themes)["properties"]["themes"]
     return {
         "type": "object",
-        "required": ["scan_date", "window_days", "source_quality", "themes"],
+        "required": ["scan_date", "window_days", "source_quality", "market_summary", "themes"],
         "properties": {
             "scan_date": {"type": "string"},
             "window_days": {"type": "integer"},
             "source_quality": {"type": "string"},
             "market_summary": {"type": "string"},
+            "data_cutoff": {"type": "string"},
+            "hotspot_query": {"type": "string"},
+            "validation_dashboard": {
+                "type": "object",
+                "properties": {
+                    "market_hotspots": {"type": "array", "items": {"type": "string"}},
+                    "sector_validation_signals": {"type": "array", "items": {"type": "string"}},
+                    "leader_validation_signals": {"type": "array", "items": {"type": "string"}},
+                    "one_day_wonder_warning_signals": {"type": "array", "items": {"type": "string"}},
+                },
+            },
             "themes": theme_schema,
         },
     }
@@ -793,6 +807,9 @@ def daily_theme_heat_artifact_from_llm_response(
         "model_name": model_name,
         "endpoint": endpoint,
         "market_summary": str(parsed.get("market_summary") or "") if isinstance(parsed, dict) else "",
+        "data_cutoff": str(parsed.get("data_cutoff") or as_of.isoformat()) if isinstance(parsed, dict) else as_of.isoformat(),
+        "hotspot_query": str(parsed.get("hotspot_query") or "recent A-share hotspots, sectors, leaders, sustainability, one-day-wonder risk, validation signals") if isinstance(parsed, dict) else "",
+        "validation_dashboard": dict(parsed.get("validation_dashboard") or {}) if isinstance(parsed, dict) else {},
         "themes": themes,
     }
 

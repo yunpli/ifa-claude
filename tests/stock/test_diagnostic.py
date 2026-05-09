@@ -99,11 +99,12 @@ def test_markdown_marks_unavailable_perspective_explicitly():
 
     md = render_markdown(report)
 
-    assert "## Top Summary" in md
-    assert "Key conflict" in md
+    assert "## 使用方式" in md
+    assert "Method 1: Ningbo 短线策略" in md
+    assert "Method conclusion: NO" in md
     assert "Status/View: unavailable / unknown" in md
     assert "ningbo.recommendations_daily" in md
-    assert "avg amount 7d yuan" in md
+    assert "avg amount 7d yuan" not in md
 
 
 def test_report_dict_exposes_customer_contract_aliases():
@@ -163,7 +164,8 @@ def test_html_renderer_includes_summary_and_missing_evidence():
 
     html = render_html(report)
 
-    assert "<h2>Top Conclusion</h2>" in html
+    assert "本报告按三个独立方法块呈现" in html
+    assert "Method 1:" in html
     assert "Missing Evidence" in html
     assert "stock.sector_cycle_leader_daily" in html
 
