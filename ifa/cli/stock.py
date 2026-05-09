@@ -104,7 +104,61 @@ def _resolve_ts_code(query: str, engine) -> str:
 
         return resolve(q, engine).ts_code
     except Exception as exc:
-        raise typer.BadParameter(f"Could not resolve stock {query!r}: {exc}") from exc
+        fallback = _resolve_ts_code_from_stock_sources(q, engine)
+        if fallback:
+            return fallback
+        raise typer.BadParameter(
+            f"Could not resolve stock {query!r}: {exc}. "
+            "Fallback resolver checked research.company_identity plus available stock/name columns in smartmoney.sw_member_monthly and ta tables; partial names can still be ambiguous."
+        ) from exc
+
+
+def _resolve_ts_code_from_stock_sources(query: str, engine) -> str | None:
+    """Best-effort local resolver for diagnostic UX.
+
+    `research.company_identity` remains canonical.  This fallback exists because
+    ad hoc diagnostic requests often arrive before identity refresh has covered
+    every stock; it only uses local tables and refuses ambiguous partial names.
+    """
+    like = f"%{query}%"
+    sql = text("""
+        WITH candidates AS (
+            SELECT ts_code, name, 1 AS priority
+            FROM smartmoney.sw_member_monthly
+            WHERE name = :q
+            UNION ALL
+            SELECT ts_code, name, 2 AS priority
+            FROM smartmoney.sw_member_monthly
+            WHERE name ILIKE :like
+            UNION ALL
+            SELECT ts_code, name, 3 AS priority
+            FROM ta.stk_limit_daily
+            WHERE name = :q
+            UNION ALL
+            SELECT ts_code, name, 4 AS priority
+            FROM ta.stk_limit_daily
+            WHERE name ILIKE :like
+        )
+        SELECT ts_code, name, min(priority) AS priority, count(*) AS hits
+        FROM candidates
+        WHERE ts_code IS NOT NULL
+        GROUP BY ts_code, name
+        ORDER BY priority, hits DESC, ts_code
+        LIMIT 5
+    """)
+    try:
+        with engine.connect() as conn:
+            rows = [dict(row) for row in conn.execute(sql, {"q": query, "like": like}).mappings().all()]
+    except Exception:
+        return None
+    if not rows:
+        return None
+    exact = [row for row in rows if row.get("name") == query]
+    if len(exact) == 1:
+        return str(exact[0]["ts_code"])
+    if len(rows) == 1:
+        return str(rows[0]["ts_code"])
+    return None
 
 
 @app.command("quick")
@@ -148,21 +202,27 @@ def diagnose_cmd(
     settings = get_settings()
     engine = get_engine(settings)
     from ifa.families.stock.diagnostic import DiagnosticRequest, build_diagnostic_report
-    from ifa.families.stock.diagnostic.service import render_html, render_markdown
+    from ifa.families.stock.diagnostic.service import (
+        render_html,
+        render_markdown,
+        write_diagnostic_artifact,
+    )
 
     if output_format not in {"markdown", "json", "html"}:
         raise typer.BadParameter("--format must be markdown, json, or html")
     if len(queries) > 1 and output is not None and output.suffix:
         raise typer.BadParameter("--output must be a directory when diagnosing multiple stocks")
 
+    req_at = _parse_requested_at(requested_at)
     written: list[Path] = []
+    index_rows: list[dict[str, object]] = []
     rendered_payloads: list[str] = []
     for query in queries:
         ts_code = _resolve_ts_code(query, engine)
         report = build_diagnostic_report(
             DiagnosticRequest(
                 ts_code=ts_code,
-                requested_at=_parse_requested_at(requested_at),
+                requested_at=req_at,
                 run_mode=run_mode or settings.run_mode.value,
                 include_full_stock_edge=full_stock_edge,
             ),
@@ -173,11 +233,22 @@ def diagnose_cmd(
             path = _diagnostic_output_path(output, report, output_format, default_dir=_default_diagnostic_output_dir(settings, report, run_mode))
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(payload, encoding="utf-8")
+            manifest_path = write_diagnostic_artifact(
+                report,
+                artifact_dir=path.parent,
+                output_paths={output_format: str(path)},
+                requested_at=req_at,
+            )
             written.append(path)
+            written.append(manifest_path)
+            index_rows.append(_diagnostic_index_row(report, path, manifest_path))
         else:
             rendered_payloads.append(payload)
 
     if written:
+        if output and len(index_rows) > 1:
+            index_path = _write_diagnostic_index(output, index_rows, output_format)
+            written.append(index_path)
         for path in written:
             console.print(f"[green]{output_format.upper()}[/green] → {path}")
     else:
@@ -208,7 +279,45 @@ def _diagnostic_output_path(output: Path, report, output_format: str, *, default
         f"{bjt_now().strftime('%H%M%S')}"
     )
     directory = output if str(output) not in {"", "."} else default_dir
-    return directory / f"{stem}{suffix}"
+    return _dedupe_path(directory / f"{stem}{suffix}")
+
+
+def _diagnostic_index_row(report, output_path: Path, manifest_path: Path) -> dict[str, object]:
+    return {
+        "ts_code": report.ts_code,
+        "name": report.name,
+        "as_of_trade_date": report.as_of_trade_date.isoformat(),
+        "conclusion": report.synthesis.conclusion,
+        "confidence": report.synthesis.confidence,
+        "freshness": {p.key: p.freshness_status for p in report.perspectives},
+        "output_path": str(output_path),
+        "manifest_path": str(manifest_path),
+    }
+
+
+def _write_diagnostic_index(output: Path, rows: list[dict[str, object]], output_format: str) -> Path:
+    directory = output if not output.suffix else output.parent
+    path = _dedupe_path(directory / f"CN_stock_edge_diagnostic_index_{bjt_now().strftime('%Y%m%d_%H%M%S')}.json")
+    payload = {
+        "artifact_type": "stock_edge_diagnostic_index",
+        "schema_version": 1,
+        "generated_at": bjt_now().isoformat(),
+        "format": output_format,
+        "count": len(rows),
+        "reports": rows,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, default=str, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def _dedupe_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for idx in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}_{idx}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"Could not find unused output path for {path}")
 
 
 @app.command("data-check")

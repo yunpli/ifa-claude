@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import html
 import json
+from pathlib import Path
 from typing import Any, Callable
 
 import pandas as pd
@@ -57,6 +58,7 @@ def build_diagnostic_report(request: DiagnosticRequest, *, engine: Engine) -> Di
         _safe("research_news", lambda: _research_perspective(engine, snapshot)),
         _safe("risk", lambda: _risk_perspective(engine, snapshot)),
     ]
+    perspectives = [_with_quality(p, ctx.as_of.as_of_trade_date) for p in perspectives]
     synthesis = synthesize_diagnostic(perspectives)
     return DiagnosticReport(
         ts_code=ctx.request.ts_code,
@@ -71,6 +73,7 @@ def build_diagnostic_report(request: DiagnosticRequest, *, engine: Engine) -> Di
             "param_hash": ctx.param_hash,
             "freshness": snapshot.freshness,
             "degraded_reasons": snapshot.degraded_reasons,
+            "db_schema_plan": "If JSON artifacts become insufficient, add stock.diagnostic_runs(run_id, ts_code, name, requested_at, generated_at, as_of_trade_date, conclusion, confidence, output_paths_json, perspective_status_json, evidence_freshness_json) and stock.diagnostic_evidence(run_id, perspective_key, source_table, as_of, freshness_status, payload_json).",
         },
     )
 
@@ -269,6 +272,13 @@ def synthesize_diagnostic(perspectives: list[PerspectiveEvidence]) -> Diagnostic
     positive_count = sum(1 for p in (stock, ta, ningbo, research) if p and p.view == "positive")
     negative_count = sum(1 for p in (stock, ta, ningbo, research) if p and p.view in {"negative", "risk"})
     conflict_notes = _collect_conflicts([p for p in perspectives if p is not None])
+    key_perspectives = [p for p in (stock, ta, research, risk) if p is not None]
+    weak_quality = [
+        p.title
+        for p in key_perspectives
+        if p.status in {"unavailable", "error"}
+        or (bool(p.freshness) and p.freshness_status in {"stale", "unavailable"})
+    ]
 
     if hard_risk:
         conclusion = "avoid"
@@ -284,6 +294,8 @@ def synthesize_diagnostic(perspectives: list[PerspectiveEvidence]) -> Diagnostic
     confidence = "medium" if positive_count + negative_count >= 2 and not conflict_notes else "low"
     if hard_risk:
         confidence = "high"
+    elif weak_quality and confidence == "medium":
+        confidence = "low"
 
     horizon = {"5d": "neutral", "10d": "neutral", "20d": "neutral"}
     if stock and stock.raw.get("horizon_decisions"):
@@ -296,6 +308,8 @@ def synthesize_diagnostic(perspectives: list[PerspectiveEvidence]) -> Diagnostic
         horizon = {k: "avoid" for k in horizon}
 
     rationale = [p.summary for p in perspectives if p.status != "unavailable" and p.summary][:5]
+    if weak_quality:
+        rationale.append(f"置信度已因关键视角证据 stale/unavailable 下调: {', '.join(weak_quality)}.")
     return DiagnosticSynthesis(
         conclusion=conclusion,  # type: ignore[arg-type]
         confidence=confidence,
@@ -478,6 +492,8 @@ def _research_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
     events = (snapshot.event_context.data or {}).get("company_events") or []
     catalysts = (snapshot.event_context.data or {}).get("catalyst_events") or []
     theme_heat = _load_theme_heat(engine, snapshot.ctx.as_of.as_of_trade_date)
+    sector = snapshot.sector_membership.data or {}
+    ts_code = snapshot.ctx.request.ts_code
     points: list[EvidencePoint] = []
     for key, label in [("annual_factors", "annual fundamentals"), ("quarterly_factors", "quarterly fundamentals"), ("recent_research_reports", "recent sell-side reports")]:
         values = lineup.get(key) or []
@@ -485,8 +501,17 @@ def _research_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
             points.append(EvidencePoint(label, len(values), "research.period_factor_decomposition/pdf_extract_cache"))
     for row in [*events[:3], *catalysts[:3]]:
         points.append(EvidencePoint(row.get("event_type") or "event", row.get("polarity"), "research/ta event memory", str(row.get("capture_date")), note=row.get("title") or row.get("summary")))
+    theme_hits = []
     for row in theme_heat[:5]:
-        points.append(EvidencePoint(f"weekly theme #{row.get('theme_rank')}", row.get("theme_label"), "stock.theme_heat_weekly", str(row.get("valid_week")), note=f"quality={row.get('quality_flag')} heat={row.get('heat_score')}"))
+        hit = _theme_hit(row, ts_code, sector)
+        if hit:
+            theme_hits.append(row)
+        label = f"weekly theme #{row.get('theme_rank')}"
+        value = row.get("theme_label")
+        note = f"quality={row.get('quality_flag')} heat={row.get('heat_score')}"
+        if hit:
+            note += f" theme_hit={hit}"
+        points.append(EvidencePoint(label, value, "stock.theme_heat_weekly", str(row.get("valid_week")), note=note))
     if not points:
         return PerspectiveEvidence("research_news", "Research / Fundamentals / News", "unavailable", "unknown", "未找到可复用的基本面、公告/新闻或主题热度证据。", missing=["research memory", "event memory", "stock.theme_heat_weekly"])
     view = "neutral"
@@ -495,7 +520,10 @@ def _research_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
         view = "positive"
     if any(p in {"negative", "bearish"} for p in polarities):
         view = "negative"
-    return PerspectiveEvidence("research_news", "Research / Fundamentals / News", "partial", view, "已收集基本面/事件/主题热度证据；stub 主题热度不作为 alpha 证据。", points=points, freshness=_freshness_from_points(points), raw={"theme_heat": theme_heat})  # type: ignore[arg-type]
+    summary = "已收集基本面/事件/主题热度证据；stub 主题热度不作为 alpha 证据。"
+    if theme_hits:
+        summary = f"命中 {len(theme_hits)} 个周度主题缓存；仍需区分人工/LLM缓存质量。"
+    return PerspectiveEvidence("research_news", "Research / Fundamentals / News / Theme", "partial", view, summary, points=points, freshness=_freshness_from_points(points), raw={"theme_heat": theme_heat, "theme_hits": theme_hits})  # type: ignore[arg-type]
 
 
 def _risk_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
@@ -551,6 +579,7 @@ def render_markdown(report: DiagnosticReport) -> str:
         f"- Trigger: {report.synthesis.trigger}",
         f"- Invalidation: {report.synthesis.invalidation}",
         f"- Key conflict: {_key_conflict(report)}",
+        f"- Evidence freshness: {json.dumps(_perspective_quality_summary(report), ensure_ascii=False)}",
         "",
         "## Advisor Synthesis",
         f"- Time window: {report.synthesis.time_window}",
@@ -559,7 +588,8 @@ def render_markdown(report: DiagnosticReport) -> str:
     if report.synthesis.conflicts:
         lines.append(f"- Conflicts: {'; '.join(report.synthesis.conflicts)}")
     for p in report.perspectives:
-        lines.extend(["", f"## {p.title}", f"- Status/View: {p.status} / {p.view}", f"- Summary: {p.summary}"])
+        sources = sorted({point.source for point in p.points if point.source})
+        lines.extend(["", f"## {p.title}", f"- Status/View: {p.status} / {p.view}", f"- Freshness status: {p.freshness_status}", f"- Sources: {', '.join(sources) if sources else '-'}", f"- Summary: {p.summary}"])
         if p.freshness:
             lines.append(f"- Freshness: {json.dumps(p.freshness, ensure_ascii=False, default=str)}")
         if p.missing:
@@ -576,13 +606,14 @@ def render_markdown(report: DiagnosticReport) -> str:
 def render_html(report: DiagnosticReport) -> str:
     """Render a standalone diagnostic HTML artifact without touching report crons."""
     css = """
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;margin:0;background:#f6f7f9;color:#171717}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;margin:0;background:#f4f5f7;color:#171717}
 main{max-width:1120px;margin:0 auto;padding:28px 18px 48px}
-header,.summary,.perspective{background:#fff;border:1px solid #dde1e6;border-radius:8px;padding:18px;margin-bottom:14px}
+header,.summary,.perspective{background:#fff;border:1px solid #d9dee5;border-radius:8px;padding:18px;margin-bottom:14px}
 h1{font-size:26px;margin:0 0 10px} h2{font-size:18px;margin:0 0 12px} h3{font-size:16px;margin:16px 0 8px}
 .meta,.muted{color:#626b77;font-size:13px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
 .cell{border:1px solid #e5e8ec;border-radius:6px;padding:10px;background:#fbfcfd}.label{font-size:12px;color:#626b77}.value{font-weight:650;margin-top:4px}
-.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-size:12px;background:#eef2f6;margin-right:6px}.positive{background:#e6f4ea}.negative,.risk{background:#fdecea}.neutral,.unknown{background:#eef2f6}
+.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-size:12px;background:#eef2f6;margin-right:6px}.positive{background:#e6f4ea}.negative,.risk{background:#fdecea}.neutral,.unknown{background:#eef2f6}.fresh{background:#e6f4ea}.stale{background:#fff4d6}.unavailable,.error{background:#f1f3f5}
+.conclusion{border-left:5px solid #253858}.chiprow{margin:10px 0 0}.trigger{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin-top:12px}
 ul{padding-left:19px} li{margin:5px 0} code{white-space:pre-wrap}
 """
     parts = [
@@ -590,20 +621,25 @@ ul{padding-left:19px} li{margin:5px 0} code{white-space:pre-wrap}
         f"<title>{html.escape(report.name or report.ts_code)} Stock Edge Diagnostic</title><style>{css}</style></head><body><main>",
         f"<header><h1>Stock Edge 单股诊断 · {html.escape(report.name or report.ts_code)} ({html.escape(report.ts_code)})</h1>",
         f"<div class='meta'>观察交易日 {report.as_of_trade_date.isoformat()} · 数据截止 {html.escape(report.data_cutoff_bjt)} · 生成 {html.escape(report.generated_at_bjt)}</div></header>",
-        "<section class='summary'><h2>Top Summary</h2><div class='grid'>",
+        "<section class='summary conclusion'><h2>Top Conclusion</h2><div class='grid'>",
         _html_cell("Conclusion", report.synthesis.conclusion),
         _html_cell("Confidence", report.synthesis.confidence),
         _html_cell("Horizon", json.dumps(report.synthesis.horizon_suitability, ensure_ascii=False)),
         _html_cell("Key Conflict", _key_conflict(report)),
         "</div>",
-        f"<h3>Trigger</h3><p>{html.escape(report.synthesis.trigger)}</p>",
-        f"<h3>Invalidation</h3><p>{html.escape(report.synthesis.invalidation)}</p>",
+        f"<div class='chiprow'>{_quality_chips(report)}{_conflict_chips(report)}</div>",
+        "<div class='trigger'>",
+        f"<div class='cell'><div class='label'>Trigger</div><div class='value'>{html.escape(report.synthesis.trigger)}</div></div>",
+        f"<div class='cell'><div class='label'>Invalidation</div><div class='value'>{html.escape(report.synthesis.invalidation)}</div></div>",
+        "</div>",
         f"<p class='muted'>{html.escape(report.synthesis.position_risk)}</p></section>",
     ]
     for p in report.perspectives:
         parts.append(f"<section class='perspective'><h2>{html.escape(p.title)}</h2>")
-        parts.append(f"<span class='badge'>{html.escape(p.status)}</span><span class='badge {html.escape(p.view)}'>{html.escape(p.view)}</span>")
+        parts.append(f"<span class='badge'>{html.escape(p.status)}</span><span class='badge {html.escape(p.view)}'>{html.escape(p.view)}</span><span class='badge {html.escape(p.freshness_status)}'>{html.escape(p.freshness_status)}</span>")
         parts.append(f"<p>{html.escape(p.summary)}</p>")
+        sources = sorted({point.source for point in p.points if point.source})
+        parts.append(f"<p class='muted'>Sources: {html.escape(', '.join(sources) if sources else '-')}</p>")
         if p.freshness:
             parts.append(f"<p class='muted'>Freshness: {html.escape(json.dumps(p.freshness, ensure_ascii=False, default=str))}</p>")
         if p.missing:
@@ -620,6 +656,66 @@ ul{padding-left:19px} li{margin:5px 0} code{white-space:pre-wrap}
         parts.append("</section>")
     parts.append("</main></body></html>")
     return "".join(parts)
+
+
+def write_diagnostic_artifact(
+    report: DiagnosticReport,
+    *,
+    artifact_dir: Path,
+    output_paths: dict[str, str],
+    requested_at: dt.datetime | None = None,
+) -> Path:
+    """Persist a lightweight structured run/evidence artifact.
+
+    The diagnostic product is still evolving, so JSON is the least invasive
+    durable format.  The payload is intentionally shaped like the future DB
+    schema: run metadata, perspective statuses, conclusion/confidence, output
+    paths, and evidence freshness.
+    """
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    stem = (
+        f"CN_stock_edge_diagnostic_{report.ts_code.replace('.', '_')}_"
+        f"{report.as_of_trade_date.strftime('%Y%m%d')}_manifest"
+    )
+    path = artifact_dir / f"{stem}.json"
+    path = _dedupe_path(path)
+    payload = diagnostic_manifest_payload(report, output_paths=output_paths, requested_at=requested_at)
+    path.write_text(json.dumps(payload, ensure_ascii=False, default=str, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def diagnostic_manifest_payload(
+    report: DiagnosticReport,
+    *,
+    output_paths: dict[str, str],
+    requested_at: dt.datetime | None = None,
+) -> dict[str, Any]:
+    perspectives = {}
+    for p in report.perspectives:
+        perspectives[p.key] = {
+            "title": p.title,
+            "status": p.status,
+            "view": p.view,
+            "freshness_status": p.freshness_status,
+            "freshness": p.freshness,
+            "sources": sorted({point.source for point in p.points if point.source}),
+            "missing_evidence": p.missing,
+        }
+    return {
+        "artifact_type": "stock_edge_diagnostic_run",
+        "schema_version": 1,
+        "ts_code": report.ts_code,
+        "name": report.name,
+        "requested_at": requested_at.isoformat() if requested_at else None,
+        "generated_at": report.generated_at_bjt,
+        "as_of_trade_date": report.as_of_trade_date.isoformat(),
+        "perspective_statuses": perspectives,
+        "conclusion": report.synthesis.conclusion,
+        "confidence": report.synthesis.confidence,
+        "output_paths": output_paths,
+        "evidence_freshness": _perspective_quality_summary(report),
+        "db_schema_plan": report.audit.get("db_schema_plan"),
+    }
 
 
 def _safe(key: str, fn: Callable[[], PerspectiveEvidence]) -> PerspectiveEvidence:
@@ -694,7 +790,8 @@ def _load_theme_heat(engine: Engine, as_of: dt.date) -> list[dict[str, Any]]:
 
     return _query_dicts(engine, """
         SELECT valid_week, theme_rank, theme_label, category, heat_score,
-               confidence, quality_flag
+               confidence, affected_sectors_json, representative_stocks_json,
+               quality_flag
         FROM stock.theme_heat_weekly
         WHERE valid_week <= :week
         ORDER BY valid_week DESC, theme_rank
@@ -745,6 +842,95 @@ def _freshness_from_points(points: list[EvidencePoint]) -> dict[str, Any]:
         "source_count": len({point.source for point in points if point.source}),
         "evidence_count": len(points),
     }
+
+
+def _with_quality(p: PerspectiveEvidence, as_of: dt.date) -> PerspectiveEvidence:
+    freshness = dict(p.freshness or _freshness_from_points(p.points))
+    latest = _parse_dateish(freshness.get("latest_as_of"))
+    if p.status in {"unavailable", "error"}:
+        status = "unavailable"
+    elif latest is None:
+        status = "fresh" if p.points else "unavailable"
+    else:
+        max_age = 10 if p.key == "research_news" else 3
+        status = "fresh" if (as_of - latest).days <= max_age else "stale"
+    freshness.update({
+        "status": status,
+        "source_tables": sorted({point.source for point in p.points if point.source}),
+        "missing_evidence": list(p.missing),
+    })
+    return PerspectiveEvidence(
+        p.key,
+        p.title,
+        p.status,
+        p.view,
+        p.summary,
+        points=p.points,
+        conflicts=p.conflicts,
+        missing=p.missing,
+        freshness=freshness,
+        raw=p.raw,
+    )
+
+
+def _parse_dateish(value: Any) -> dt.date | None:
+    if isinstance(value, dt.date) and not isinstance(value, dt.datetime):
+        return value
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if value is None:
+        return None
+    text_value = str(value)
+    if not text_value or text_value == "None":
+        return None
+    try:
+        return dt.date.fromisoformat(text_value[:10])
+    except ValueError:
+        return None
+
+
+def _perspective_quality_summary(report: DiagnosticReport) -> dict[str, str]:
+    return {p.key: p.freshness_status for p in report.perspectives}
+
+
+def _quality_chips(report: DiagnosticReport) -> str:
+    return "".join(
+        f"<span class='badge {html.escape(status)}'>{html.escape(key)}: {html.escape(status)}</span>"
+        for key, status in _perspective_quality_summary(report).items()
+    )
+
+
+def _conflict_chips(report: DiagnosticReport) -> str:
+    if not report.synthesis.conflicts:
+        return "<span class='badge neutral'>no major conflict</span>"
+    return "".join(f"<span class='badge risk'>{html.escape(item)}</span>" for item in report.synthesis.conflicts[:3])
+
+
+def _theme_hit(row: dict[str, Any], ts_code: str, sector: dict[str, Any]) -> str | None:
+    sectors = row.get("affected_sectors_json") or []
+    stocks = row.get("representative_stocks_json") or []
+    l1 = str(sector.get("l1_code") or sector.get("l1_name") or "")
+    l2 = str(sector.get("l2_code") or sector.get("l2_name") or "")
+    for stock in stocks if isinstance(stocks, list) else []:
+        if isinstance(stock, dict) and ts_code in {str(stock.get("ts_code")), str(stock.get("code"))}:
+            return "stock"
+    for item in sectors if isinstance(sectors, list) else []:
+        if not isinstance(item, dict):
+            continue
+        values = {str(item.get(k) or "") for k in ("l1_code", "l1_name", "l2_code", "l2_name", "sector_code", "sector_name")}
+        if l1 in values or l2 in values:
+            return "sector"
+    return None
+
+
+def _dedupe_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    for idx in range(2, 1000):
+        candidate = path.with_name(f"{path.stem}_{idx}{path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise FileExistsError(f"Could not find unused artifact path for {path}")
 
 
 def _key_conflict(report: DiagnosticReport) -> str:

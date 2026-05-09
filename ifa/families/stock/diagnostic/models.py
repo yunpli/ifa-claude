@@ -14,6 +14,7 @@ from typing import Any, Literal
 
 PerspectiveStatus = Literal["available", "partial", "unavailable", "error"]
 PerspectiveView = Literal["positive", "neutral", "negative", "risk", "unknown"]
+FreshnessStatus = Literal["fresh", "stale", "unavailable"]
 AdvisorConclusion = Literal[
     "short-term tradable",
     "watch only",
@@ -53,6 +54,15 @@ class PerspectiveEvidence:
     freshness: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def freshness_status(self) -> FreshnessStatus:
+        status = self.freshness.get("status")
+        if status in {"fresh", "stale", "unavailable"}:
+            return status  # type: ignore[return-value]
+        if self.status in {"unavailable", "error"}:
+            return "unavailable"
+        return "fresh" if self.points else "unavailable"
+
 
 @dataclass(frozen=True)
 class DiagnosticSynthesis:
@@ -81,8 +91,9 @@ class DiagnosticReport:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["as_of_trade_date"] = self.as_of_trade_date.isoformat()
-        for perspective in data.get("perspectives", []):
+        for idx, perspective in enumerate(data.get("perspectives", [])):
             perspective["stance"] = perspective.get("view")
             perspective["evidence"] = perspective.get("points", [])
             perspective["missing_evidence"] = perspective.get("missing", [])
+            perspective["freshness_status"] = self.perspectives[idx].freshness_status
         return data
