@@ -4,7 +4,9 @@
 This is a cache/backfill interface, not an online LLM extractor.  It lets the
 sector-cycle strategy join a stable weekly feature table while avoiding per-row
 LLM calls during proxy/replay validation.  Approved JSON ingestion remains the
-fallback when local structured sources are insufficient.
+fallback when local structured sources are insufficient.  Weekly rows are the
+current compatibility surface; rolling theme heat should later be computed from
+raw event ingestion, intraday/hourly snapshots, and daily heat-curve tables.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ from pathlib import Path
 
 from ifa.families.stock.theme_heat import (
     WeeklyThemeHeat,
+    build_weekly_theme_heat_with_llm,
     build_weekly_theme_heat_from_local_sources,
     default_stub_themes,
     load_weekly_theme_heat,
@@ -32,6 +35,9 @@ def main() -> int:
     parser.add_argument("--write", action="store_true", help="Upsert five explicit stub rows into stock.theme_heat_weekly.")
     parser.add_argument("--from-json", "--input-json", dest="input_json", type=Path, help="Upsert operator/LLM-batch theme rows from one JSON file; no per-row LLM calls.")
     parser.add_argument("--build-local", action="store_true", help="Build non-stub rows from existing local event/report memory tables only.")
+    parser.add_argument("--build-llm", action="store_true", help="Use one repo LLMClient batch call to synthesize weekly theme heat from cached facts.")
+    parser.add_argument("--llm-dry-run", action="store_true", help="For --build-llm, emit prompt/schema/fact pack only; no external LLM call and no DB write.")
+    parser.add_argument("--allow-llm-prior", action="store_true", help="Allow --build-llm to emit clearly flagged llm_prior_only/needs_local_evidence rows when local facts are thin.")
     parser.add_argument("--source", choices=["local-cache", "tushare-cache", "all-cache"], default="local-cache", help="Cached source bundle for --build-local. Never makes online Tushare calls.")
     parser.add_argument("--dry-run", action="store_true", help="For --build-local/--from-json, validate and print rows without DB writes.")
     parser.add_argument("--min-source-rows", type=int, default=3, help="Minimum local source rows required for --build-local.")
@@ -47,6 +53,36 @@ def main() -> int:
         rows = _load_theme_rows(args.input_json, week, args.run_mode)
         n = 0 if args.dry_run else upsert_weekly_theme_heat(engine, rows)
         payload = {"status": "dry_run" if args.dry_run else "written", "valid_week": week.isoformat(), "rows": len(rows) if args.dry_run else n, "quality_flag": "cache", "themes": rows}
+    elif args.build_llm:
+        built = build_weekly_theme_heat_with_llm(
+            engine,
+            week,
+            source=args.source,
+            min_source_rows=args.min_source_rows,
+            max_themes=args.max_themes,
+            source_row_limit=args.source_row_limit,
+            run_mode=args.run_mode,
+            allow_llm_prior=args.allow_llm_prior,
+            no_external=args.llm_dry_run,
+        )
+        if built["status"] == "ready":
+            rows = built["rows"]
+            n = 0 if args.dry_run else upsert_weekly_theme_heat(engine, rows)
+            payload = {
+                "status": "dry_run" if args.dry_run else "written",
+                "valid_week": week.isoformat(),
+                "rows": len(rows) if args.dry_run else n,
+                "quality_flag": rows[0].quality_flag if rows else "batch_llm_cache",
+                "source": built["source"],
+                "source_rows": built["source_rows"],
+                "evidence_quality": built["evidence_quality"],
+                "prompt_version": built["prompt_version"],
+                "model_name": built.get("model_name"),
+                "endpoint": built.get("endpoint"),
+                "themes": rows,
+            }
+        else:
+            payload = built
     elif args.build_local:
         built = build_weekly_theme_heat_from_local_sources(
             engine,

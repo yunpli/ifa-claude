@@ -21,7 +21,8 @@ Available local PIT inputs:
 
 Gap:
 
-- There was no normalized historical weekly theme/news heat feature table.  Added `stock.theme_heat_weekly` as the cache target; initial script writes explicit `quality_flag='stub'` rows only.
+- There was no normalized historical theme/news heat feature surface.  Added `stock.theme_heat_weekly` as the first compatibility cache target; initial script writes explicit `quality_flag='stub'` rows only.
+- Weekly top-5 rows are not the final product shape.  Theme heat needs to become a multi-resolution rolling curve: raw events are incrementally ingested by source/endpoint watermark, intraday snapshots are computed every 1h/2h/4h when source frequency supports it, daily rows persist level/change/acceleration/persistence, and weekly rows summarize top themes plus cached LLM narrative for reports and historical features.
 
 ## Feature Model
 
@@ -41,9 +42,50 @@ Leader features:
 
 Theme/news feature:
 
-- Weekly top-5 themes with category, affected sectors, representative stocks, confidence, URLs, generated_at, valid_week.
-- Backtests must use cached weekly rows only.  No per-row LLM calls.
-- Current proxy sets `theme_heat_score` missing until real historical theme rows are mapped to SW sectors.
+- Raw event layer: one row per news/announcement/research/event item with `source`, `endpoint`, source event id or fingerprint, event timestamp, observed timestamp, related stocks/sectors when available, source URL, raw payload hash, and ingestion watermark metadata.  Ingestion is incremental per source/endpoint; reprocessing must be idempotent and PIT-safe.
+- Intraday/hourly layer: `stock.theme_heat_snapshots`-style rows keyed by `snapshot_ts`, `window_hours`, `theme_id/theme_label`, and optional SW sector mapping.  Windows such as 1h, 2h, and 4h should emit `heat_level`, `heat_delta`, `heat_acceleration`, breadth, source-count quality, and source-lag quality when source frequency supports sub-day updates.
+- Daily layer: `stock.theme_heat_daily`-style rows keyed by trade date and theme.  Required features include `heat_level`, `heat_delta`, `heat_acceleration`, `persistence_days`, sector/theme breadth, representative stocks, and evidence counts.  Daily rows are the preferred feature input for 5/10/20 trading-day stock selection.
+- Weekly layer: `stock.theme_heat_weekly` remains a report/cache summary: top themes, representative sectors/stocks, evidence URLs, and cached batch LLM analysis.  It should be derived from raw/daily evidence, not maintained as a standalone static top-5 opinion table.
+- Flow alignment layer: theme curves must join SME sector/stock main-money and retail-chase curves.  Core features are main-money lead vs retail chase alignment, crowding/distribution risk, sector breadth, leader breadth, and whether heat is expanding, peaking, exhausting, or fading.
+- LLM policy: repo `ifa.core.llm.LLMClient` is the high-level weekly/daily theme strategist, not a conservative stub and not a per-row tagger.  It asks which A-share themes actually changed capital behavior, which are one-day hype versus persistent, and maps them to sectors, representative stocks/leaders, risks, and validation signals.  Inputs should be cached Tushare/local news, announcements, events, existing Research rows, and TA catalyst rows.  If cached facts are thin, LLM-prior rows are allowed only with `quality_flag='llm_prior_only'` or `needs_local_evidence`; those rows are preliminary context, not strong alpha evidence.  Backtests and reports consume persisted rows only.
+- Current proxy sets `theme_heat_score` missing until real historical theme rows are mapped to SW sectors.  The next implementation should prefer daily rolling features; weekly rows are enough only for report narrative and coarse historical diagnostics.
+
+Current daily/weekly LLM interface:
+
+```bash
+uv run python scripts/stock_edge_theme_heat_llm.py \
+  --date 2026-05-08 \
+  --window 7d \
+  --cadence daily \
+  --dry-run \
+  --allow-llm-prior \
+  --json
+
+uv run python scripts/stock_edge_theme_heat_llm.py \
+  --date 2026-05-04 \
+  --cadence weekly \
+  --persist \
+  --allow-llm-prior \
+  --source all-cache \
+  --json
+
+uv run python scripts/stock_edge_theme_heat_stub.py \
+  --week 2026-05-04 \
+  --build-llm \
+  --llm-dry-run \
+  --allow-llm-prior \
+  --source all-cache \
+  --json
+```
+
+`scripts/stock_edge_theme_heat_llm.py` is the preferred MVP entrypoint.  `--dry-run` emits the prompt, response schema, and compact fact pack with no external LLM call or DB/artifact write.  Daily `--persist` writes a local JSON artifact under `/Users/neoclaw/claude/ifaenv/data/stock/theme_heat/llm/`; weekly `--persist` writes into the existing `stock.theme_heat_weekly` columns.  `--from-json` ingests reviewed model output without a live LLM call.  The legacy `stock_edge_theme_heat_stub.py --build-llm` path remains weekly-compatible.  Parsed weekly rows store `persistence_score`, `freshness`, `leader_candidates`, `one_day_wonder_risk`, flow/crowding judgements, `validation_signals`, horizon validation signals, and evidence refs in `evidence_json`.
+
+Proposed table progression:
+
+1. `stock.theme_raw_events`: raw normalized event rows plus source/endpoint watermark audit.
+2. `stock.theme_heat_snapshots`: intraday/hourly rolling snapshots, optional when source frequency is good enough.
+3. `stock.theme_heat_daily`: daily theme curve and flow-alignment features for stock selection.
+4. `stock.theme_heat_weekly`: weekly top themes and cached LLM summary for reporting/history.
 
 ## Objective and Gates
 

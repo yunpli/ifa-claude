@@ -1,9 +1,11 @@
-"""Weekly theme heat cache for Stock Edge sector-cycle research.
+"""Theme heat cache helpers for Stock Edge sector-cycle research.
 
 The table is intentionally separate from generic report/model output audit rows:
-backtests need one PIT-safe, queryable weekly feature surface instead of parsing
-HTML reports or LLM logs.  Backfill can start with operator-curated stubs and
-later replace them with cached LLM extraction from news/report inputs.
+backtests need PIT-safe, queryable feature surfaces instead of parsing HTML
+reports or LLM logs.  The current implementation only writes the weekly
+compatibility table.  The intended design is multi-resolution: raw events by
+source/endpoint watermark, optional 1h/2h/4h snapshots, daily heat curves, and
+weekly report summaries derived from the lower-level evidence.
 """
 from __future__ import annotations
 
@@ -18,6 +20,8 @@ from typing import Any, Literal, Sequence
 PROMPT_VERSION = "stock_theme_heat_v1"
 SOURCE_POLICY_VERSION = "stock_theme_heat_local_sources_v1"
 TUSHARE_CACHE_SOURCE_POLICY_VERSION = "stock_theme_heat_tushare_cache_v1"
+LLM_WEEKLY_PROMPT_VERSION = "stock_theme_heat_llm_weekly_v1"
+LLM_DAILY_PROMPT_VERSION = "stock_theme_heat_llm_daily_v1"
 ThemeHeatSource = Literal["local-cache", "tushare-cache", "all-cache"]
 
 _THEME_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -206,6 +210,454 @@ def build_weekly_theme_heat_from_local_sources(
         "source_policy": source_policy,
         "source_rows": len(rows),
         "rows": themes,
+    }
+
+
+def build_weekly_theme_heat_with_llm(
+    engine: Engine,
+    valid_week: dt.date,
+    *,
+    source: ThemeHeatSource = "all-cache",
+    min_source_rows: int = 3,
+    max_themes: int = 5,
+    source_row_limit: int | None = 300,
+    run_mode: str = "manual",
+    allow_llm_prior: bool = False,
+    llm_client: Any | None = None,
+    no_external: bool = False,
+) -> dict[str, Any]:
+    """Build weekly theme heat via one cached batch LLM call.
+
+    The LLM is used at the weekly/theme level only: it receives a compact pack
+    of already-cached local facts and returns a bounded JSON object.  When local
+    evidence is thin, callers may set `allow_llm_prior=True`; those outputs must
+    carry `quality_flag='llm_prior_only'` or `needs_local_evidence` and are not
+    strong alpha evidence until source rows catch up.
+    """
+    week = week_start(valid_week)
+    end = week + dt.timedelta(days=7)
+    source_rows = _load_theme_source_rows(engine, week, end, source=source, limit=source_row_limit)
+    evidence_quality = "local_evidence" if len(source_rows) >= min_source_rows else "needs_local_evidence"
+    if len(source_rows) < min_source_rows and not allow_llm_prior:
+        return {
+            "status": "blocked",
+            "valid_week": week.isoformat(),
+            "source": source,
+            "source_rows": len(source_rows),
+            "required_source_rows": min_source_rows,
+            "reason": "insufficient_cached_local_sources",
+            "message": "Use --allow-llm-prior to produce clearly flagged LLM-prior rows, or backfill local facts first.",
+        }
+
+    messages = weekly_theme_heat_llm_messages(
+        week,
+        source_rows,
+        max_themes=max_themes,
+        evidence_quality=evidence_quality,
+    )
+    schema = weekly_theme_heat_response_schema(max_themes=max_themes)
+    if no_external:
+        return {
+            "status": "llm_dry_run",
+            "valid_week": week.isoformat(),
+            "source": source,
+            "source_rows": len(source_rows),
+            "evidence_quality": evidence_quality,
+            "prompt_version": LLM_WEEKLY_PROMPT_VERSION,
+            "messages": messages,
+            "response_schema": schema,
+        }
+
+    if llm_client is None:
+        from ifa.core.llm import LLMClient
+
+        llm_client = LLMClient(request_timeout=90.0)
+    response = llm_client.chat(
+        messages=messages,
+        max_tokens=2600,
+        temperature=0.15,
+        response_format={"type": "json_object"},
+    )
+    parsed = response.parse_json()
+    rows = weekly_theme_heat_rows_from_llm_response(
+        parsed,
+        week=week,
+        run_mode=run_mode,
+        model_name=getattr(response, "model", None),
+        source_rows=source_rows,
+        evidence_quality=evidence_quality,
+        max_themes=max_themes,
+    )
+    return {
+        "status": "ready",
+        "valid_week": week.isoformat(),
+        "source": source,
+        "source_rows": len(source_rows),
+        "evidence_quality": evidence_quality,
+        "prompt_version": LLM_WEEKLY_PROMPT_VERSION,
+        "model_name": getattr(response, "model", None),
+        "endpoint": getattr(response, "endpoint", None),
+        "rows": rows,
+    }
+
+
+def weekly_theme_heat_llm_messages(
+    week: dt.date,
+    source_rows: Sequence[dict[str, Any]],
+    *,
+    max_themes: int = 5,
+    evidence_quality: str,
+) -> list[dict[str, str]]:
+    week_end = week + dt.timedelta(days=6)
+    facts = [_compact_fact_row(row, idx) for idx, row in enumerate(source_rows, start=1)]
+    user_payload = {
+        "task": "Identify weekly A-share themes that truly changed capital behavior.",
+        "market": "China A-share",
+        "week_start": week.isoformat(),
+        "week_end": week_end.isoformat(),
+        "max_themes": max_themes,
+        "evidence_quality": evidence_quality,
+        "local_cached_facts": facts,
+        "instructions": [
+            "Use local cached facts as primary evidence. Do not invent numeric market data.",
+            "If facts are insufficient, you may use model prior knowledge only for preliminary theme selection, and every affected theme must set evidence_quality to llm_prior_only or needs_local_evidence.",
+            "Answer which themes in the past week truly affected capital behavior, which may persist, and which are likely one-day hype.",
+            "Separate one-day hype from themes likely to persist for multiple trading days or weeks.",
+            "Map themes to A-share sectors and representative stocks when supported by facts or well-known market structure; mark unsupported mappings as needs_local_evidence.",
+            "For each theme, describe 主力资金/main-money behavior, 散户追涨/retail chase risk, crowding/distribution risk, and 1/3/5/10/20 trading-day validation signals.",
+            "Return JSON only and keep arrays concise.",
+        ],
+    }
+    system = (
+        "You are an institutional China A-share thematic strategist. "
+        "Your job is high-level theme selection, not per-news tagging. "
+        "Produce auditable JSON for a cached weekly theme heat table. "
+        "LLM reasoning can rank and connect themes, but weak evidence must be explicitly downgraded."
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, default=str)},
+    ]
+
+
+def weekly_theme_heat_response_schema(*, max_themes: int = 5) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "required": ["themes"],
+        "properties": {
+            "themes": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": max_themes,
+                "items": {
+                    "type": "object",
+                    "required": [
+                        "theme_label",
+                        "category",
+                        "heat_score",
+                        "persistence_score",
+                        "freshness",
+                        "one_day_wonder_risk",
+                        "quality_flag",
+                    ],
+                    "properties": {
+                        "theme_label": {"type": "string"},
+                        "category": {"type": "string"},
+                        "heat_score": {"type": "number", "minimum": 0, "maximum": 1},
+                        "persistence_score": {"type": "number", "minimum": 0, "maximum": 1},
+                        "freshness": {"type": "string"},
+                        "affected_sectors": {"type": "array", "items": {"type": "object"}},
+                        "representative_stocks": {"type": "array", "items": {"type": "object"}},
+                        "leader_candidates": {"type": "array", "items": {"type": "object"}},
+                        "main_logic": {"type": "string"},
+                        "risks": {"type": "array", "items": {"type": "string"}},
+                        "one_day_wonder_risk": {"type": "number", "minimum": 0, "maximum": 1},
+                        "validation_signals": {"type": "array", "items": {"type": "string"}},
+                        "validation_signals_by_horizon": {"type": "object"},
+                        "main_money_judgement": {"type": "string"},
+                        "retail_chase_judgement": {"type": "string"},
+                        "crowding_distribution_risk": {"type": "string"},
+                        "evidence_refs": {"type": "array", "items": {"type": "object"}},
+                        "evidence_quality": {"type": "string"},
+                        "quality_flag": {"type": "string"},
+                    },
+                },
+            }
+        },
+    }
+
+
+def weekly_theme_heat_rows_from_llm_response(
+    parsed: dict[str, Any],
+    *,
+    week: dt.date,
+    run_mode: str,
+    model_name: str | None,
+    source_rows: Sequence[dict[str, Any]],
+    evidence_quality: str,
+    max_themes: int,
+) -> list[WeeklyThemeHeat]:
+    raw_themes = parsed.get("themes") if isinstance(parsed, dict) else None
+    if not isinstance(raw_themes, list):
+        raise ValueError("LLM theme heat response must contain a themes list")
+    fact_lookup = {int(item["fact_id"]): item for item in (_compact_fact_row(row, idx) for idx, row in enumerate(source_rows, start=1))}
+    rows: list[WeeklyThemeHeat] = []
+    for rank, raw in enumerate(raw_themes[:max_themes], start=1):
+        if not isinstance(raw, dict):
+            continue
+        refs = raw.get("evidence_refs") or []
+        source_urls = _urls_from_evidence_refs(refs, fact_lookup)
+        quality_flag = _llm_quality_flag(raw, evidence_quality)
+        evidence = {
+            "prompt_version": LLM_WEEKLY_PROMPT_VERSION,
+            "evidence_quality": raw.get("evidence_quality") or evidence_quality,
+            "source_rows": len(source_rows),
+            "evidence_refs": refs[:20] if isinstance(refs, list) else [],
+            "main_logic": raw.get("main_logic") or "",
+            "risks": list(raw.get("risks") or [])[:10],
+            "leader_candidates": list(raw.get("leader_candidates") or [])[:20],
+            "validation_signals": list(raw.get("validation_signals") or [])[:20],
+            "validation_signals_by_horizon": dict(raw.get("validation_signals_by_horizon") or {}),
+            "main_money_judgement": str(raw.get("main_money_judgement") or ""),
+            "retail_chase_judgement": str(raw.get("retail_chase_judgement") or ""),
+            "crowding_distribution_risk": str(raw.get("crowding_distribution_risk") or ""),
+            "one_day_wonder_risk": _clip_float(raw.get("one_day_wonder_risk"), default=0.5),
+            "persistence_score": _clip_float(raw.get("persistence_score"), default=0.0),
+            "freshness": str(raw.get("freshness") or "unknown"),
+            "builder": "weekly_llm_theme_heat_batch",
+        }
+        rows.append(
+            WeeklyThemeHeat(
+                valid_week=week,
+                theme_rank=rank,
+                theme_label=str(raw.get("theme_label") or f"theme_{rank}"),
+                category=str(raw.get("category") or raw.get("theme_label") or f"theme_{rank}"),
+                heat_score=round(_clip_float(raw.get("heat_score"), default=0.0), 4),
+                confidence=round(max(0.05, min(0.95, 1.0 - float(evidence["one_day_wonder_risk"]) * 0.35)), 4),
+                affected_sectors=list(raw.get("affected_sectors") or [])[:20],
+                representative_stocks=list(raw.get("representative_stocks") or [])[:20],
+                source_urls=source_urls[:20],
+                evidence=evidence,
+                model_name=model_name,
+                prompt_version=LLM_WEEKLY_PROMPT_VERSION,
+                run_mode=run_mode,
+                quality_flag=quality_flag,
+            )
+        )
+    return rows
+
+
+def build_daily_theme_heat_with_llm(
+    engine: Engine,
+    as_of: dt.date,
+    *,
+    window_days: int = 7,
+    source: ThemeHeatSource = "all-cache",
+    min_source_rows: int = 3,
+    max_themes: int = 8,
+    source_row_limit: int | None = 300,
+    run_mode: str = "manual",
+    allow_llm_prior: bool = False,
+    llm_client: Any | None = None,
+    no_external: bool = False,
+) -> dict[str, Any]:
+    """Build one daily/window theme scan via a single repo LLMClient call.
+
+    Daily rows are intentionally returned as a JSON artifact first.  They are
+    not written into a feature table until the rolling heat-curve schema is
+    designed, because downstream backtests need stable PIT semantics instead of
+    ad hoc daily table churn.
+    """
+    if window_days <= 0:
+        raise ValueError("window_days must be positive")
+    start = as_of - dt.timedelta(days=window_days - 1)
+    end = as_of + dt.timedelta(days=1)
+    source_rows = _load_theme_source_rows(engine, start, end, source=source, limit=source_row_limit)
+    evidence_quality = "local_evidence" if len(source_rows) >= min_source_rows else "needs_local_evidence"
+    if len(source_rows) < min_source_rows and not allow_llm_prior:
+        return {
+            "status": "blocked",
+            "as_of": as_of.isoformat(),
+            "window_days": window_days,
+            "source": source,
+            "source_rows": len(source_rows),
+            "required_source_rows": min_source_rows,
+            "reason": "insufficient_cached_local_sources",
+            "message": "Use --allow-llm-prior for clearly flagged prior-only rows, or provide --from-json after review.",
+        }
+
+    messages = daily_theme_heat_llm_messages(
+        as_of,
+        source_rows,
+        window_days=window_days,
+        max_themes=max_themes,
+        evidence_quality=evidence_quality,
+    )
+    schema = daily_theme_heat_response_schema(max_themes=max_themes)
+    if no_external:
+        return {
+            "status": "llm_dry_run",
+            "as_of": as_of.isoformat(),
+            "window_days": window_days,
+            "source": source,
+            "source_rows": len(source_rows),
+            "evidence_quality": evidence_quality,
+            "prompt_version": LLM_DAILY_PROMPT_VERSION,
+            "messages": messages,
+            "response_schema": schema,
+        }
+
+    if llm_client is None:
+        from ifa.core.llm import LLMClient
+
+        llm_client = LLMClient(request_timeout=90.0)
+    response = llm_client.chat(
+        messages=messages,
+        max_tokens=3200,
+        temperature=0.15,
+        response_format={"type": "json_object"},
+    )
+    parsed = response.parse_json()
+    return daily_theme_heat_artifact_from_llm_response(
+        parsed,
+        as_of=as_of,
+        window_days=window_days,
+        run_mode=run_mode,
+        model_name=getattr(response, "model", None),
+        endpoint=getattr(response, "endpoint", None),
+        source=source,
+        source_rows=source_rows,
+        evidence_quality=evidence_quality,
+        max_themes=max_themes,
+    )
+
+
+def daily_theme_heat_llm_messages(
+    as_of: dt.date,
+    source_rows: Sequence[dict[str, Any]],
+    *,
+    window_days: int,
+    max_themes: int = 8,
+    evidence_quality: str,
+) -> list[dict[str, str]]:
+    start = as_of - dt.timedelta(days=window_days - 1)
+    facts = [_compact_fact_row(row, idx) for idx, row in enumerate(source_rows, start=1)]
+    user_payload = {
+        "task": "Daily A-share theme scan for capital-behavior impact.",
+        "market": "China A-share",
+        "as_of": as_of.isoformat(),
+        "window_start": start.isoformat(),
+        "window_end": as_of.isoformat(),
+        "window_days": window_days,
+        "max_themes": max_themes,
+        "source_marker": "llm_daily_theme_scan",
+        "evidence_quality": evidence_quality,
+        "local_cached_facts": facts,
+        "questions": [
+            "过去一周/近几日中国A股真正影响资金行为的核心热点是什么？",
+            "哪些热点可能持续，哪些只是一日游？",
+            "对应哪些申万/概念板块？",
+            "代表股票/潜在龙头是谁，为什么？",
+            "主力资金、散户追涨、拥挤和出货风险如何判断？",
+            "未来1/3/5/10/20个交易日应该观察什么验证信号？",
+        ],
+        "instructions": [
+            "Make exactly one batch-level judgement; do not make per-news or per-stock LLM calls or row tags.",
+            "Use local_cached_facts as evidence when available. If evidence is thin, mark the whole scan and affected themes as llm_prior_only or needs_local_evidence.",
+            "Do not invent exact money-flow numbers, returns, or holdings. Use qualitative flow judgement only unless facts explicitly contain numbers.",
+            "Return JSON only. Keep all arrays bounded and auditable.",
+        ],
+    }
+    system = (
+        "You are an institutional China A-share thematic strategist. "
+        "Identify themes that changed capital behavior and produce structured JSON for local caching. "
+        "LLM prior is allowed only when explicitly flagged as weak evidence."
+    )
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False, default=str)},
+    ]
+
+
+def daily_theme_heat_response_schema(*, max_themes: int = 8) -> dict[str, Any]:
+    theme_schema = weekly_theme_heat_response_schema(max_themes=max_themes)["properties"]["themes"]
+    return {
+        "type": "object",
+        "required": ["scan_date", "window_days", "source_quality", "themes"],
+        "properties": {
+            "scan_date": {"type": "string"},
+            "window_days": {"type": "integer"},
+            "source_quality": {"type": "string"},
+            "market_summary": {"type": "string"},
+            "themes": theme_schema,
+        },
+    }
+
+
+def daily_theme_heat_artifact_from_llm_response(
+    parsed: dict[str, Any],
+    *,
+    as_of: dt.date,
+    window_days: int,
+    run_mode: str,
+    model_name: str | None,
+    endpoint: str | None,
+    source: ThemeHeatSource,
+    source_rows: Sequence[dict[str, Any]],
+    evidence_quality: str,
+    max_themes: int,
+) -> dict[str, Any]:
+    raw_themes = parsed.get("themes") if isinstance(parsed, dict) else None
+    if not isinstance(raw_themes, list):
+        raise ValueError("LLM daily theme scan response must contain a themes list")
+    fact_lookup = {int(item["fact_id"]): item for item in (_compact_fact_row(row, idx) for idx, row in enumerate(source_rows, start=1))}
+    themes: list[dict[str, Any]] = []
+    for rank, raw in enumerate(raw_themes[:max_themes], start=1):
+        if not isinstance(raw, dict):
+            continue
+        refs = raw.get("evidence_refs") or []
+        one_day_risk = _clip_float(raw.get("one_day_wonder_risk"), default=0.5)
+        themes.append(
+            {
+                "theme_rank": rank,
+                "theme_label": str(raw.get("theme_label") or f"theme_{rank}"),
+                "category": str(raw.get("category") or raw.get("theme_label") or f"theme_{rank}"),
+                "heat_score": round(_clip_float(raw.get("heat_score"), default=0.0), 4),
+                "confidence": round(max(0.05, min(0.95, 1.0 - one_day_risk * 0.35)), 4),
+                "persistence_score": round(_clip_float(raw.get("persistence_score"), default=0.0), 4),
+                "freshness": str(raw.get("freshness") or "unknown"),
+                "affected_sectors": list(raw.get("affected_sectors") or [])[:20],
+                "representative_stocks": list(raw.get("representative_stocks") or [])[:20],
+                "leader_candidates": list(raw.get("leader_candidates") or [])[:20],
+                "main_logic": str(raw.get("main_logic") or ""),
+                "main_money_judgement": str(raw.get("main_money_judgement") or ""),
+                "retail_chase_judgement": str(raw.get("retail_chase_judgement") or ""),
+                "crowding_distribution_risk": str(raw.get("crowding_distribution_risk") or ""),
+                "risks": list(raw.get("risks") or [])[:10],
+                "one_day_wonder_risk": round(one_day_risk, 4),
+                "validation_signals": list(raw.get("validation_signals") or [])[:20],
+                "validation_signals_by_horizon": dict(raw.get("validation_signals_by_horizon") or {}),
+                "evidence_refs": refs[:20] if isinstance(refs, list) else [],
+                "source_urls": _urls_from_evidence_refs(refs, fact_lookup)[:20],
+                "quality_flag": _llm_quality_flag(raw, evidence_quality),
+            }
+        )
+    return {
+        "status": "ready",
+        "scan_type": "daily",
+        "source_marker": "llm_daily_theme_scan",
+        "as_of": as_of.isoformat(),
+        "window_days": window_days,
+        "run_mode": run_mode,
+        "source": source,
+        "source_rows": len(source_rows),
+        "evidence_quality": evidence_quality,
+        "quality_flag": "llm_prior_only" if evidence_quality == "needs_local_evidence" else "batch_llm_cache",
+        "prompt_version": LLM_DAILY_PROMPT_VERSION,
+        "model_name": model_name,
+        "endpoint": endpoint,
+        "market_summary": str(parsed.get("market_summary") or "") if isinstance(parsed, dict) else "",
+        "themes": themes,
     }
 
 
@@ -509,3 +961,67 @@ def _quality_flag_for_sources(sources: set[Any]) -> str:
     if has_tushare_cache:
         return "tushare_cached"
     return "local_source_cache"
+
+
+def _compact_fact_row(row: dict[str, Any], fact_id: int) -> dict[str, Any]:
+    return {
+        "fact_id": fact_id,
+        "source_table": row.get("source_table"),
+        "date": str(row.get("capture_date") or row.get("raw_date") or ""),
+        "event_type": row.get("event_type"),
+        "title": _truncate_text(row.get("title"), 160),
+        "summary": _truncate_text(row.get("summary"), 260),
+        "polarity": row.get("polarity"),
+        "importance": row.get("importance"),
+        "source_url": row.get("source_url"),
+        "ts_code": row.get("ts_code"),
+        "target_ts_codes": list(row.get("target_ts_codes") or [])[:12] if isinstance(row.get("target_ts_codes") or [], list) else [],
+        "target_sectors": list(row.get("target_sectors") or [])[:12] if isinstance(row.get("target_sectors") or [], list) else [],
+    }
+
+
+def _truncate_text(value: Any, limit: int) -> str:
+    text_value = " ".join(str(value or "").split())
+    if len(text_value) <= limit:
+        return text_value
+    return text_value[: limit - 1] + "..."
+
+
+def _urls_from_evidence_refs(refs: Any, fact_lookup: dict[int, dict[str, Any]]) -> list[str]:
+    urls: list[str] = []
+    if not isinstance(refs, list):
+        return urls
+    for ref in refs:
+        if not isinstance(ref, dict):
+            continue
+        if ref.get("source_url"):
+            urls.append(str(ref["source_url"]))
+            continue
+        try:
+            fact_id = int(ref.get("fact_id"))
+        except (TypeError, ValueError):
+            continue
+        fact = fact_lookup.get(fact_id) or {}
+        if fact.get("source_url"):
+            urls.append(str(fact["source_url"]))
+    return sorted(set(urls))
+
+
+def _llm_quality_flag(raw: dict[str, Any], evidence_quality: str) -> str:
+    explicit = str(raw.get("quality_flag") or "").strip()
+    if explicit in {"llm_prior_only", "needs_local_evidence", "batch_llm_cache", "local_llm_evidence_cache"}:
+        return explicit
+    row_quality = str(raw.get("evidence_quality") or evidence_quality)
+    if row_quality == "llm_prior_only":
+        return "llm_prior_only"
+    if row_quality == "needs_local_evidence":
+        return "needs_local_evidence"
+    return "batch_llm_cache"
+
+
+def _clip_float(value: Any, *, default: float) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        numeric = default
+    return max(0.0, min(1.0, numeric))
