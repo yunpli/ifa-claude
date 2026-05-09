@@ -40,6 +40,7 @@ class OutcomeProxyManifest:
     feature_version: str = "outcome_proxy_v1"
     universe_selection: dict[str, Any] = field(default_factory=dict)
     failure_details: list[dict[str, Any]] = field(default_factory=list)
+    timing: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,14 +80,7 @@ def build_outcome_proxy_cache(
         return df, manifest
 
     started = time.monotonic()
-    rows: list[dict[str, Any]] = []
-    failures: list[dict[str, Any]] = []
-    for as_of, codes in chunks:
-        if not codes:
-            continue
-        date_rows, date_failures = _build_proxy_rows_for_date(engine, as_of, codes)
-        rows.extend(date_rows)
-        failures.extend(date_failures)
+    rows, failures, timing = _build_proxy_rows_batch(engine, chunks)
 
     df = pd.DataFrame(rows)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -104,9 +98,70 @@ def build_outcome_proxy_cache(
         runtime_sec=round(time.monotonic() - started, 3),
         universe_selection=dict(universe_selection or {}),
         failure_details=failures[:200],
+        timing=timing,
     )
     manifest_path.write_text(json.dumps(manifest.to_dict(), ensure_ascii=False, default=str, indent=2), encoding="utf-8")
     return df, manifest
+
+
+def benchmark_outcome_proxy_builders(
+    engine: Engine,
+    *,
+    as_of_dates: Sequence[dt.date],
+    ts_codes: Sequence[str],
+    ts_codes_by_date: Mapping[dt.date, Sequence[str]] | None = None,
+    max_dates: int = 3,
+) -> dict[str, Any]:
+    """Compare legacy per-date proxy build against the batch builder.
+
+    This is a diagnostic helper only. It does not write cache files and it caps
+    the sampled PIT dates so a production run can produce a before/after timing
+    without paying the full old-path cost.
+    """
+    sample_dates = list(as_of_dates)[: max(1, int(max_dates))]
+    chunks = [
+        (as_of, list(ts_codes_by_date.get(as_of, [])) if ts_codes_by_date else list(ts_codes))
+        for as_of in sample_dates
+    ]
+    requested = sum(len(codes) for _, codes in chunks)
+
+    t0 = time.monotonic()
+    legacy_rows: list[dict[str, Any]] = []
+    legacy_failures: list[dict[str, Any]] = []
+    for as_of, codes in chunks:
+        if not codes:
+            continue
+        rows, failures = _build_proxy_rows_for_date(engine, as_of, codes)
+        legacy_rows.extend(rows)
+        legacy_failures.extend(failures)
+    legacy_sec = time.monotonic() - t0
+
+    t0 = time.monotonic()
+    batch_rows, batch_failures, batch_timing = _build_proxy_rows_batch(engine, chunks)
+    batch_sec = time.monotonic() - t0
+
+    return {
+        "sample_dates": [d.isoformat() for d in sample_dates],
+        "requested_rows": requested,
+        "legacy": {
+            "runtime_sec": round(legacy_sec, 3),
+            "rows": len(legacy_rows),
+            "failures": len(legacy_failures),
+            "rows_per_min": round(len(legacy_rows) * 60 / max(legacy_sec, 1e-9), 1),
+            "method": "per-PIT-date SQL loop",
+        },
+        "batch": {
+            "runtime_sec": round(batch_sec, 3),
+            "rows": len(batch_rows),
+            "failures": len(batch_failures),
+            "rows_per_min": round(len(batch_rows) * 60 / max(batch_sec, 1e-9), 1),
+            "method": "one window query per source table plus in-memory PIT lookup",
+            "timing": batch_timing,
+        },
+        "speedup": round(legacy_sec / max(batch_sec, 1e-9), 3),
+        "row_count_match": len(legacy_rows) == len(batch_rows),
+        "failure_count_match": len(legacy_failures) == len(batch_failures),
+    }
 
 
 def summarize_outcome_proxy(df: pd.DataFrame) -> dict[str, Any]:
@@ -167,8 +222,40 @@ def compare_proxy_candidate_families(df: pd.DataFrame) -> dict[str, Any]:
     if df.empty:
         return {"rows": 0, "families": {}, "ranking": []}
 
+    families = score_proxy_candidate_families(df)
+
+    out: dict[str, Any] = {
+        "rows": int(len(df)),
+        "date_count": int(df["as_of_date"].nunique()) if "as_of_date" in df else 0,
+        "stock_count": int(df["ts_code"].nunique()) if "ts_code" in df else 0,
+        "families": {},
+    }
+    for name, score in families.items():
+        out["families"][name] = _score_proxy_family(df, score)
+
+    def ranking_key(item: tuple[str, dict[str, Any]]) -> tuple[float, float, float]:
+        metrics = item[1].get("horizons", {})
+        h10 = float(metrics.get("10d", {}).get("rank_ic", 0.0) or 0.0)
+        h20 = float(metrics.get("20d", {}).get("rank_ic", 0.0) or 0.0)
+        mar = float(item[1].get("month_stability", {}).get("2026-03", {}).get("10d", {}).get("rank_ic", -1.0) or -1.0)
+        return (h10 + h20, min(h10, h20), mar)
+
+    out["ranking"] = [
+        {"family": name, "score": round(ranking_key((name, payload))[0], 6)}
+        for name, payload in sorted(out["families"].items(), key=ranking_key, reverse=True)
+    ]
+    return out
+
+
+def score_proxy_candidate_families(df: pd.DataFrame) -> dict[str, pd.Series]:
+    """Return cheap proxy family scores for PIT-safe row selection.
+
+    These scores are research candidates only. They are deliberately kept outside
+    production Stock Edge YAML until a later full-replay/OOS gate proves that the
+    family direction survives the expensive strategy-matrix path.
+    """
     features = _proxy_candidate_features(df)
-    families: dict[str, pd.Series] = {
+    return {
         "baseline_cheap_composite_v1": _cheap_composite_score(df),
         "mid_liquidity_large_cap_quality_flow": (
             0.30 * features["moneyflow_quality"]
@@ -203,28 +290,6 @@ def compare_proxy_candidate_families(df: pd.DataFrame) -> dict[str, Any]:
             + 0.06 * features["industry_relative_flow"]
         ),
     }
-
-    out: dict[str, Any] = {
-        "rows": int(len(df)),
-        "date_count": int(df["as_of_date"].nunique()) if "as_of_date" in df else 0,
-        "stock_count": int(df["ts_code"].nunique()) if "ts_code" in df else 0,
-        "families": {},
-    }
-    for name, score in families.items():
-        out["families"][name] = _score_proxy_family(df, score)
-
-    def ranking_key(item: tuple[str, dict[str, Any]]) -> tuple[float, float, float]:
-        metrics = item[1].get("horizons", {})
-        h10 = float(metrics.get("10d", {}).get("rank_ic", 0.0) or 0.0)
-        h20 = float(metrics.get("20d", {}).get("rank_ic", 0.0) or 0.0)
-        mar = float(item[1].get("month_stability", {}).get("2026-03", {}).get("10d", {}).get("rank_ic", -1.0) or -1.0)
-        return (h10 + h20, min(h10, h20), mar)
-
-    out["ranking"] = [
-        {"family": name, "score": round(ranking_key((name, payload))[0], 6)}
-        for name, payload in sorted(out["families"].items(), key=ranking_key, reverse=True)
-    ]
-    return out
 
 
 def _proxy_candidate_features(df: pd.DataFrame) -> dict[str, pd.Series]:
@@ -361,7 +426,223 @@ def _load_proxy_manifest(path: Path) -> OutcomeProxyManifest:
         feature_version=str(raw.get("feature_version") or "outcome_proxy_v1"),
         universe_selection=dict(raw.get("universe_selection") or {}),
         failure_details=list(raw.get("failure_details") or []),
+        timing=dict(raw.get("timing") or {}),
     )
+
+
+def _build_proxy_rows_batch(
+    engine: Engine,
+    chunks: Sequence[tuple[dt.date, list[str]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, float]]:
+    """Batch-build proxy rows for all PIT dates with one query per source table.
+
+    The old path queried daily/basic/member/regime once per PIT date. A 60-date
+    proxy panel therefore did hundreds of DB round-trips before any feature work.
+    This path pulls the full PIT-safe window once, then performs date/code lookup
+    in memory. It preserves the previous semantics: labels use future trading
+    rows from `raw_daily`, `daily_basic` and SW membership use latest rows visible
+    at each PIT date, and missing anchors remain explicit failures.
+    """
+    requested = [(as_of, list(dict.fromkeys(codes))) for as_of, codes in chunks if codes]
+    if not requested:
+        return [], [], {"batch_total_sec": 0.0}
+
+    t_all = time.monotonic()
+    as_of_dates = sorted({as_of for as_of, _ in requested})
+    union_codes = sorted({code for _, codes in requested for code in codes})
+    min_as_of = min(as_of_dates)
+    max_as_of = max(as_of_dates)
+    daily_start = min_as_of - dt.timedelta(days=100)
+    daily_end = max_as_of + dt.timedelta(days=45)
+    basic_start = min_as_of - dt.timedelta(days=45)
+    min_snapshot = min_as_of.replace(day=1)
+    max_snapshot = max_as_of.replace(day=1)
+
+    t0 = time.monotonic()
+    with engine.connect() as conn:
+        daily = pd.read_sql_query(
+            text("""
+                SELECT ts_code, trade_date, open, high, low, close, pct_chg, amount
+                FROM smartmoney.raw_daily
+                WHERE ts_code = ANY(:codes)
+                  AND trade_date >= :start AND trade_date <= :end
+                ORDER BY ts_code, trade_date
+            """),
+            conn,
+            params={"codes": union_codes, "start": daily_start, "end": daily_end},
+        )
+        flow = pd.read_sql_query(
+            text("""
+                SELECT ts_code, trade_date, net_mf_amount
+                FROM smartmoney.raw_moneyflow
+                WHERE ts_code = ANY(:codes)
+                  AND trade_date >= :start AND trade_date <= :end
+                ORDER BY ts_code, trade_date
+            """),
+            conn,
+            params={"codes": union_codes, "start": daily_start, "end": max_as_of},
+        )
+        basic = pd.read_sql_query(
+            text("""
+                SELECT ts_code, trade_date, total_mv, circ_mv, turnover_rate
+                FROM smartmoney.raw_daily_basic
+                WHERE ts_code = ANY(:codes)
+                  AND trade_date >= :start AND trade_date <= :end
+                ORDER BY ts_code, trade_date
+            """),
+            conn,
+            params={"codes": union_codes, "start": basic_start, "end": max_as_of},
+        )
+        members = pd.read_sql_query(
+            text("""
+                SELECT ts_code, snapshot_month, l1_code, l1_name, l2_code, l2_name, name
+                FROM smartmoney.sw_member_monthly
+                WHERE ts_code = ANY(:codes)
+                  AND snapshot_month <= :max_snapshot
+                ORDER BY ts_code, snapshot_month
+            """),
+            conn,
+            params={"codes": union_codes, "max_snapshot": max_snapshot},
+        )
+        regimes = pd.read_sql_query(
+            text("""
+                SELECT trade_date, regime
+                FROM ta.regime_daily
+                WHERE trade_date = ANY(:dates)
+            """),
+            conn,
+            params={"dates": as_of_dates},
+        )
+    query_sec = time.monotonic() - t0
+
+    t0 = time.monotonic()
+    for df in (daily, flow, basic):
+        if not df.empty:
+            df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
+    if not members.empty:
+        members["snapshot_month"] = pd.to_datetime(members["snapshot_month"]).dt.date
+    if not regimes.empty:
+        regimes["trade_date"] = pd.to_datetime(regimes["trade_date"]).dt.date
+
+    daily_by_code = _group_sorted_frames(daily, "ts_code", "trade_date")
+    flow_by_code = _group_sorted_frames(flow, "ts_code", "trade_date")
+    basic_by_code = _group_sorted_frames(basic, "ts_code", "trade_date")
+    member_by_code = _group_sorted_frames(members, "ts_code", "snapshot_month")
+    regime_by_date = {
+        row["trade_date"]: str(row["regime"])
+        for row in regimes.to_dict(orient="records")
+        if row.get("regime")
+    } if not regimes.empty else {}
+    index_sec = time.monotonic() - t0
+
+    t0 = time.monotonic()
+    rows: list[dict[str, Any]] = []
+    failures: list[dict[str, Any]] = []
+    for as_of, codes in requested:
+        snapshot_month = as_of.replace(day=1)
+        regime = regime_by_date.get(as_of)
+        for code in codes:
+            sub = daily_by_code.get(str(code))
+            if sub is None or sub.empty:
+                failures.append({"ts_code": str(code), "as_of_date": as_of.isoformat(), "reason": "missing_daily_rows"})
+                continue
+            row = _build_proxy_row_from_frames(
+                code=str(code),
+                as_of=as_of,
+                snapshot_month=snapshot_month,
+                regime=regime,
+                daily=sub,
+                flow=flow_by_code.get(str(code)),
+                basic=basic_by_code.get(str(code)),
+                members=member_by_code.get(str(code)),
+            )
+            if row is None:
+                failures.append({"ts_code": str(code), "as_of_date": as_of.isoformat(), "reason": "missing_forward_anchor"})
+            else:
+                rows.append(row)
+    assemble_sec = time.monotonic() - t0
+    return rows, failures, {
+        "batch_total_sec": round(time.monotonic() - t_all, 3),
+        "query_sec": round(query_sec, 3),
+        "index_sec": round(index_sec, 3),
+        "assemble_sec": round(assemble_sec, 3),
+        "query_daily_rows": float(len(daily)),
+        "query_flow_rows": float(len(flow)),
+        "query_basic_rows": float(len(basic)),
+        "query_member_rows": float(len(members)),
+    }
+
+
+def _group_sorted_frames(df: pd.DataFrame, key: str, sort_col: str) -> dict[str, pd.DataFrame]:
+    if df.empty:
+        return {}
+    return {
+        str(code): sub.sort_values(sort_col).reset_index(drop=True)
+        for code, sub in df.groupby(key, sort=False)
+    }
+
+
+def _build_proxy_row_from_frames(
+    *,
+    code: str,
+    as_of: dt.date,
+    snapshot_month: dt.date,
+    regime: str | None,
+    daily: pd.DataFrame,
+    flow: pd.DataFrame | None,
+    basic: pd.DataFrame | None,
+    members: pd.DataFrame | None,
+) -> dict[str, Any] | None:
+    label = _forward_labels_from_daily_frame(daily, as_of)
+    if label is None:
+        return None
+    hist = daily[daily["trade_date"] <= as_of].tail(20)
+    if hist.empty:
+        return None
+    close = float(hist["close"].iloc[-1] or 0.0)
+    ret_5 = _window_return_pct(hist["close"], 5)
+    ret_20 = _window_return_pct(hist["close"], 20)
+
+    net5 = math.nan
+    if flow is not None and not flow.empty:
+        flow_hist = flow[flow["trade_date"] <= as_of].tail(5)
+        if not flow_hist.empty:
+            net5 = float(flow_hist["net_mf_amount"].sum())
+    amount5 = float(hist.tail(5)["amount"].sum()) if not hist.empty else math.nan
+
+    b: Mapping[str, Any] = {}
+    if basic is not None and not basic.empty:
+        b_hist = basic[basic["trade_date"] <= as_of].tail(1)
+        if not b_hist.empty:
+            b = b_hist.iloc[0].to_dict()
+
+    m: Mapping[str, Any] = {}
+    if members is not None and not members.empty:
+        m_hist = members[members["snapshot_month"] <= snapshot_month].tail(1)
+        if not m_hist.empty:
+            m = m_hist.iloc[0].to_dict()
+
+    return {
+        "ts_code": code,
+        "as_of_date": as_of,
+        "name": m.get("name"),
+        "l1_code": m.get("l1_code"),
+        "l1_name": m.get("l1_name"),
+        "l2_code": m.get("l2_code"),
+        "l2_name": m.get("l2_name"),
+        "regime": regime,
+        "entry_close": close,
+        "ret_5d_pct": ret_5,
+        "ret_20d_pct": ret_20,
+        "volatility_20d_pct": float(hist["pct_chg"].std()) if len(hist) >= 5 else math.nan,
+        "avg_amount_20d": float(hist["amount"].mean()) if len(hist) else math.nan,
+        "moneyflow_net_5d": net5,
+        "moneyflow_net_5d_pct_amount": float(net5 / amount5) if amount5 and not math.isnan(net5) else math.nan,
+        "total_mv": _float_or_nan(b.get("total_mv")),
+        "circ_mv": _float_or_nan(b.get("circ_mv")),
+        "turnover_rate": _float_or_nan(b.get("turnover_rate")),
+        **label,
+    }
 
 
 def _build_proxy_rows_for_date(engine: Engine, as_of: dt.date, codes: Sequence[str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

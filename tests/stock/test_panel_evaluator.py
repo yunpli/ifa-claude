@@ -21,7 +21,7 @@ from ifa.families.stock.backtest.replay_panel import (
     _panel_chunks,
     _save_chunk_checkpoint,
 )
-from ifa.families.stock.backtest.outcome_proxy import compare_proxy_candidate_families, summarize_outcome_proxy
+from ifa.families.stock.backtest.outcome_proxy import compare_proxy_candidate_families, score_proxy_candidate_families, summarize_outcome_proxy
 from scripts.stock_edge_panel_tune import _cheap_proxy_rows, _strata_counts
 
 
@@ -326,6 +326,31 @@ def test_proxy_candidate_family_comparison_reports_month_stability():
     assert "2026-03" in comparison["families"]["weak_industry_avoid_quality_flow"]["month_stability"]
     assert comparison["families"]["weak_industry_avoid_quality_flow"]["horizons"]["10d"]["rank_ic"] > 0
     assert comparison["ranking"][0]["family"] != "baseline_cheap_composite_v1"
+
+
+def test_proxy_candidate_family_scores_are_reusable_for_gate_selection():
+    import pandas as pd
+
+    df = pd.DataFrame({
+        "ts_code": [f"000{i:03d}.SZ" for i in range(40)],
+        "as_of_date": [dt.date(2026, 3, 10)] * 40,
+        "l1_name": ["有色金属" if i % 2 == 0 else "房地产" for i in range(40)],
+        "regime": ["range_bound"] * 40,
+        "ret_5d_pct": [float(i % 8) for i in range(40)],
+        "ret_20d_pct": [float(40 - i) for i in range(40)],
+        "volatility_20d_pct": [float(10 + i % 4) for i in range(40)],
+        "avg_amount_20d": [float(1000 + i * 10) for i in range(40)],
+        "moneyflow_net_5d_pct_amount": [float(i / 1000.0) for i in range(40)],
+        "total_mv": [float(5000 + i * 20) for i in range(40)],
+        "turnover_rate": [float(2 + i % 3) for i in range(40)],
+    })
+
+    scores = score_proxy_candidate_families(df)
+
+    assert "weak_industry_avoid_quality_flow" in scores
+    assert "industry_relative_momentum_flow" in scores
+    assert len(scores["weak_industry_avoid_quality_flow"]) == len(df)
+    assert scores["weak_industry_avoid_quality_flow"].notna().all()
 
 
 def test_panel_metrics_include_top_bucket_payoff_and_spread():

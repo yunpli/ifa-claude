@@ -28,6 +28,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 from sqlalchemy import text
 
 from ifa.core.db import get_engine
@@ -45,7 +46,10 @@ from ifa.families.stock.backtest.panel_evaluator import (
     walk_forward_split,
 )
 from ifa.families.stock.backtest.outcome_proxy import (
+    benchmark_outcome_proxy_builders,
     build_outcome_proxy_cache,
+    compare_proxy_candidate_families,
+    score_proxy_candidate_families,
     summarize_outcome_proxy,
 )
 from ifa.families.stock.backtest.promotion import auto_promote_if_passing, evaluate_promotion_gates
@@ -203,6 +207,192 @@ def _select_stratified_pit_universe(
     return codes, meta
 
 
+def _select_stratified_pit_universes_batch(
+    engine,
+    *,
+    top_n: int,
+    as_of_dates: list[dt.date],
+    lookback_days: int = 60,
+    pool_multiple: int = 8,
+) -> tuple[dict[dt.date, list[str]], dict[str, dict[str, Any]], dict[str, float]]:
+    """Batch PIT-safe stratified universe selection for many dates.
+
+    The single-date selector is correct but expensive for 60-date validation
+    because each PIT date repeats the same daily/basic/member scans. This helper
+    pulls the full date window once and reproduces the same stratification in
+    pandas using only rows visible at each PIT date.
+    """
+    if not as_of_dates:
+        return {}, {}, {"batch_total_sec": 0.0}
+    t_all = time.monotonic()
+    sorted_dates = sorted(as_of_dates)
+    min_as_of = sorted_dates[0]
+    max_as_of = sorted_dates[-1]
+    daily_start = min_as_of - dt.timedelta(days=lookback_days * 2)
+    min_days = int(lookback_days * 0.55)
+    pool_n = max(top_n, top_n * max(2, pool_multiple))
+    max_snapshot = max_as_of.replace(day=1)
+
+    t0 = time.monotonic()
+    with engine.connect() as c:
+        daily = pd.read_sql_query(
+            text("""
+                SELECT ts_code, trade_date, amount, pct_chg
+                FROM smartmoney.raw_daily
+                WHERE trade_date <= :max_as_of AND trade_date >= :daily_start
+            """),
+            c,
+            params={"max_as_of": max_as_of, "daily_start": daily_start},
+        )
+        basic = pd.read_sql_query(
+            text("""
+                SELECT ts_code, trade_date, total_mv, circ_mv
+                FROM smartmoney.raw_daily_basic
+                WHERE trade_date <= :max_as_of AND trade_date >= :daily_start
+            """),
+            c,
+            params={"max_as_of": max_as_of, "daily_start": daily_start},
+        )
+        members = pd.read_sql_query(
+            text("""
+                SELECT ts_code, snapshot_month, l1_code, l1_name, l2_code, l2_name
+                FROM smartmoney.sw_member_monthly
+                WHERE snapshot_month <= :max_snapshot
+            """),
+            c,
+            params={"max_snapshot": max_snapshot},
+        )
+    query_sec = time.monotonic() - t0
+
+    t0 = time.monotonic()
+    for df in (daily, basic):
+        if not df.empty:
+            df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
+    if not members.empty:
+        members["snapshot_month"] = pd.to_datetime(members["snapshot_month"]).dt.date
+    daily = daily.sort_values(["trade_date", "ts_code"]).reset_index(drop=True)
+    basic = basic.sort_values(["trade_date", "ts_code"]).reset_index(drop=True)
+    members = members.sort_values(["snapshot_month", "ts_code"]).reset_index(drop=True)
+    index_sec = time.monotonic() - t0
+
+    by_date: dict[dt.date, list[str]] = {}
+    by_date_meta: dict[str, dict[str, Any]] = {}
+    t0 = time.monotonic()
+    for as_of in sorted_dates:
+        start = as_of - dt.timedelta(days=lookback_days * 2)
+        dw = daily[(daily["trade_date"] <= as_of) & (daily["trade_date"] >= start)]
+        if dw.empty:
+            by_date[as_of] = []
+            by_date_meta[as_of.isoformat()] = {
+                "selection_as_of": as_of.isoformat(),
+                "lookback_start": start.isoformat(),
+                "lookback_days": lookback_days,
+                "candidate_pool_rows": 0,
+                "pool_multiple": pool_multiple,
+                "selected_count": 0,
+                "membership_hash": _digest_codes([]),
+                "dimensions": ["sw_l1_industry", "liquidity_bucket", "size_bucket", "volatility_bucket_diagnostic"],
+                "sample_head": [],
+                "strata_counts": {},
+                "selection_backend": "batch_pandas",
+            }
+            continue
+        grouped = (
+            dw.groupby("ts_code", sort=False)
+            .agg(avg_amount=("amount", "mean"), vol_pct=("pct_chg", "std"), n_days=("trade_date", "count"))
+            .reset_index()
+        )
+        ranked_pool = grouped[grouped["n_days"] >= min_days].sort_values("avg_amount", ascending=False).head(pool_n)
+
+        basic_latest = _latest_rows_for_as_of(basic, "trade_date", as_of)
+        if not basic_latest.empty:
+            ranked_pool = ranked_pool.merge(basic_latest[["ts_code", "total_mv", "circ_mv"]], on="ts_code", how="left")
+        else:
+            ranked_pool["total_mv"] = pd.NA
+            ranked_pool["circ_mv"] = pd.NA
+        snapshot_month = as_of.replace(day=1)
+        member_latest = _latest_rows_for_as_of(members, "snapshot_month", snapshot_month)
+        if not member_latest.empty:
+            ranked_pool = ranked_pool.merge(member_latest[["ts_code", "l1_code", "l1_name", "l2_code", "l2_name"]], on="ts_code", how="left")
+        else:
+            ranked_pool["l1_code"] = "UNKNOWN"
+            ranked_pool["l1_name"] = "UNKNOWN"
+            ranked_pool["l2_code"] = None
+            ranked_pool["l2_name"] = None
+
+        ranked_pool["mv"] = ranked_pool["total_mv"].fillna(ranked_pool["circ_mv"]).fillna(0)
+        ranked_pool["l1_code"] = ranked_pool["l1_code"].fillna("UNKNOWN")
+        ranked_pool["l1_name"] = ranked_pool["l1_name"].fillna("UNKNOWN")
+        ranked_pool["liquidity_bucket"] = _ntile(ranked_pool["avg_amount"], 3)
+        ranked_pool["size_bucket"] = _ntile(ranked_pool["mv"], 3)
+        ranked_pool["volatility_bucket"] = _ntile(ranked_pool["vol_pct"].fillna(0), 3)
+        seed = as_of.isoformat()
+        ranked_pool["_stable_order"] = ranked_pool["ts_code"].astype(str).map(lambda code: _stable_md5(f"{code}{seed}"))
+        ranked_pool = ranked_pool.sort_values(["l1_code", "liquidity_bucket", "size_bucket", "_stable_order"])
+
+        buckets: dict[tuple[str, int, int], list[dict[str, Any]]] = defaultdict(list)
+        for row in ranked_pool.to_dict(orient="records"):
+            key = (str(row.get("l1_code") or "UNKNOWN"), int(row.get("liquidity_bucket") or 0), int(row.get("size_bucket") or 0))
+            buckets[key].append(row)
+        selected: list[dict[str, Any]] = []
+        for level in range(max((len(v) for v in buckets.values()), default=0)):
+            for key in sorted(buckets):
+                items = buckets[key]
+                if level < len(items):
+                    selected.append(items[level])
+                    if len(selected) >= top_n:
+                        break
+            if len(selected) >= top_n:
+                break
+        codes = [str(row["ts_code"]) for row in selected]
+        by_date[as_of] = codes
+        by_date_meta[as_of.isoformat()] = {
+            "selection_as_of": as_of.isoformat(),
+            "lookback_start": start.isoformat(),
+            "lookback_days": lookback_days,
+            "candidate_pool_rows": int(len(ranked_pool)),
+            "pool_multiple": pool_multiple,
+            "selected_count": len(codes),
+            "membership_hash": _digest_codes(codes),
+            "dimensions": ["sw_l1_industry", "liquidity_bucket", "size_bucket", "volatility_bucket_diagnostic"],
+            "sample_head": codes[:10],
+            "strata_counts": _strata_counts(selected),
+            "selection_backend": "batch_pandas",
+        }
+    assemble_sec = time.monotonic() - t0
+    return by_date, by_date_meta, {
+        "batch_total_sec": round(time.monotonic() - t_all, 3),
+        "query_sec": round(query_sec, 3),
+        "index_sec": round(index_sec, 3),
+        "assemble_sec": round(assemble_sec, 3),
+        "query_daily_rows": float(len(daily)),
+        "query_basic_rows": float(len(basic)),
+        "query_member_rows": float(len(members)),
+    }
+
+
+def _latest_rows_for_as_of(df: pd.DataFrame, date_col: str, as_of: dt.date) -> pd.DataFrame:
+    if df.empty:
+        return df
+    sub = df[df[date_col] <= as_of]
+    if sub.empty:
+        return sub
+    return sub.sort_values(["ts_code", date_col]).groupby("ts_code", sort=False).tail(1)
+
+
+def _ntile(values: pd.Series, n: int) -> pd.Series:
+    if values.empty:
+        return pd.Series(dtype=int)
+    ranks = values.fillna(0).rank(method="first", ascending=True)
+    return ((ranks - 1) * n / len(values)).astype(int) + 1
+
+
+def _stable_md5(value: str) -> str:
+    import hashlib
+
+    return hashlib.md5(value.encode()).hexdigest()
+
+
 def _strata_counts(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "l1_code": dict(Counter(str(r.get("l1_code") or "UNKNOWN") for r in rows).most_common()),
@@ -278,6 +468,140 @@ def _cheap_proxy_rows(rows: list, *, max_rows: int, seed: str) -> list:
     return out
 
 
+def _proxy_family_full_replay_gate_report(
+    rows: list,
+    *,
+    family_names: list[str],
+    selected_pairs_by_family: dict[str, set[tuple[dt.date, str]]],
+    score_by_pair: dict[tuple[dt.date, str], dict[str, float]],
+    base_params: dict[str, Any],
+    manifest: dict[str, Any],
+    universe_selection: dict[str, Any],
+) -> dict[str, Any]:
+    """Evaluate proxy-family scores on rows that survived full replay.
+
+    The expensive replay path is still the source of truth for forward labels and
+    Stock Edge baseline scores here. Proxy family scores are used only as
+    candidate ranking inputs for this gate, not as production parameters.
+    """
+    replay_pairs = {(row.as_of_date, row.ts_code) for row in rows}
+    families: dict[str, Any] = {}
+    for family in family_names:
+        selected_pairs = selected_pairs_by_family.get(family, set())
+        family_records = []
+        for row in rows:
+            pair = (row.as_of_date, row.ts_code)
+            if pair not in selected_pairs:
+                continue
+            scores = score_by_pair.get(pair, {})
+            if family not in scores:
+                continue
+            family_records.append({
+                "as_of_date": row.as_of_date,
+                "ts_code": row.ts_code,
+                "score": float(scores[family]),
+                "forward_5d_return": row.forward_5d_return,
+                "forward_10d_return": row.forward_10d_return,
+                "forward_20d_return": row.forward_20d_return,
+            })
+        families[family] = {
+            "selected_pairs": len(selected_pairs),
+            "replay_rows": len(family_records),
+            "replay_success_rate": round(len(family_records) / max(len(selected_pairs), 1), 6),
+            "horizons": _proxy_score_horizon_metrics(family_records),
+            "month_stability": _proxy_score_month_stability(family_records),
+        }
+
+    baseline_metrics = evaluate_overlay_on_panel(panel_matrix_from_rows(rows), {}, base_params)
+    return {
+        "usage": {
+            "purpose": "small full replay gate for named proxy family directions",
+            "yaml_policy": "production YAML untouched; no auto-promote/apply-to-baseline",
+            "interpretation": "family metrics use proxy scores joined to rows that successfully completed full Stock Edge replay",
+        },
+        "manifest": manifest,
+        "universe_selection": universe_selection,
+        "rows": {
+            "replay_rows": len(rows),
+            "unique_replay_pairs": len(replay_pairs),
+            "unique_stocks": len({row.ts_code for row in rows}),
+            "date_count": len({row.as_of_date for row in rows}),
+            "dates": [d.isoformat() for d in sorted({row.as_of_date for row in rows})],
+        },
+        "families": families,
+        "baseline_stock_edge_on_union": baseline_metrics,
+    }
+
+
+def _proxy_score_month_stability(records: list[dict[str, Any]]) -> dict[str, Any]:
+    months = sorted({str(rec["as_of_date"])[:7] for rec in records})
+    return {
+        month: _proxy_score_horizon_metrics([rec for rec in records if str(rec["as_of_date"])[:7] == month])
+        for month in months
+    }
+
+
+def _proxy_score_horizon_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        f"{h}d": _proxy_score_one_horizon(records, f"forward_{h}d_return")
+        for h in (5, 10, 20)
+    }
+
+
+def _proxy_score_one_horizon(records: list[dict[str, Any]], label_key: str) -> dict[str, Any]:
+    pairs = [
+        (float(rec["score"]), float(rec[label_key]))
+        for rec in records
+        if rec.get(label_key) is not None
+    ]
+    pairs = [(s, r) for s, r in pairs if not (s != s or r != r)]
+    n = len(pairs)
+    if n < 10:
+        return {
+            "n": n,
+            "rank_ic": 0.0,
+            "top_bucket_return": 0.0,
+            "top_bucket_win_rate": 0.0,
+            "top_vs_bottom_spread": 0.0,
+        }
+    pairs.sort(key=lambda item: item[0])
+    scores = [p[0] for p in pairs]
+    returns = [p[1] for p in pairs]
+    bucket_n = max(1, int(round(n * 0.20)))
+    bottom = returns[:bucket_n]
+    top = returns[-bucket_n:]
+    return {
+        "n": n,
+        "rank_ic": round(_spearman_rank_ic(scores, returns), 6),
+        "top_bucket_return": round((sum(top) / len(top)) / 100.0, 6) if top else 0.0,
+        "top_bucket_win_rate": round(sum(1 for value in top if value > 0) / len(top), 6) if top else 0.0,
+        "top_vs_bottom_spread": round(((sum(top) / len(top)) - (sum(bottom) / len(bottom))) / 100.0, 6) if top and bottom else 0.0,
+    }
+
+
+def _spearman_rank_ic(x: list[float], y: list[float]) -> float:
+    if len(x) < 2 or len(y) < 2:
+        return 0.0
+    xr = _ordinal_ranks(x)
+    yr = _ordinal_ranks(y)
+    x_mean = sum(xr) / len(xr)
+    y_mean = sum(yr) / len(yr)
+    cov = sum((a - x_mean) * (b - y_mean) for a, b in zip(xr, yr))
+    x_var = sum((a - x_mean) ** 2 for a in xr)
+    y_var = sum((b - y_mean) ** 2 for b in yr)
+    if x_var <= 1e-12 or y_var <= 1e-12:
+        return 0.0
+    return cov / ((x_var * y_var) ** 0.5)
+
+
+def _ordinal_ranks(values: list[float]) -> list[float]:
+    order = sorted(range(len(values)), key=lambda idx: values[idx])
+    ranks = [0.0] * len(values)
+    for rank, idx in enumerate(order):
+        ranks[idx] = float(rank)
+    return ranks
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Stock Edge panel-based coarse tuning")
     parser.add_argument("--as-of", default=None, help="Latest as_of trade date (default: auto)")
@@ -300,9 +624,13 @@ def main() -> int:
     parser.add_argument("--diagnosis-output-dir", default="/Users/neoclaw/claude/ifaenv/manifests/stock_edge_panel_diagnostics", help="Directory for panel diagnosis JSON artifacts")
     parser.add_argument("--proxy-only", action="store_true", help="Build fast forward-label/cheap-feature proxy cache and diagnostics, then exit before full replay")
     parser.add_argument("--force-proxy-cache", action="store_true", help="Rebuild the fast outcome proxy cache even if it already exists")
+    parser.add_argument("--proxy-benchmark-legacy-dates", type=int, default=0, help="Benchmark old per-date proxy builder on the first N PIT dates before the batch build (default 0)")
     parser.add_argument("--two-stage", action="store_true", help="Use cheap proxy prefilter before expensive replay search")
     parser.add_argument("--proxy-candidates", type=int, default=128, help="Cheap proxy candidate budget in --two-stage mode")
     parser.add_argument("--proxy-max-rows", type=int, default=600, help="Max rows for cheap proxy subset in --two-stage mode")
+    parser.add_argument("--proxy-family-gate", action="store_true", help="Use named proxy family scores to select a PIT top subset, run full replay only for that subset, then emit gate metrics and exit")
+    parser.add_argument("--proxy-family-names", default="weak_industry_avoid_quality_flow,industry_relative_momentum_flow", help="Comma-separated proxy family names for --proxy-family-gate")
+    parser.add_argument("--proxy-family-top-per-date", type=int, default=12, help="Top rows per PIT date per proxy family for --proxy-family-gate")
     parser.add_argument("--include-llm", action="store_true", help="Include LLM signals (slower)")
     parser.add_argument("--dry-run", action="store_true", help="Build panel + tune but don't write artifact")
     parser.add_argument("--n-iterations", type=int, default=3, help="Search iterations (default 3)")
@@ -428,19 +756,13 @@ def main() -> int:
             f"(per-date {min_n}..{max_n}, {time.monotonic()-t0:.1f}s)"
         )
     else:
-        ts_codes_by_date = {}
-        by_date_meta = {}
-        union_codes = set()
-        for pit_date in pit_dates:
-            codes, meta = _select_stratified_pit_universe(
-                engine,
-                top_n=args.top,
-                as_of=pit_date,
-                pool_multiple=args.stratified_pool_multiple,
-            )
-            ts_codes_by_date[pit_date] = codes
-            union_codes.update(codes)
-            by_date_meta[pit_date.isoformat()] = meta
+        ts_codes_by_date, by_date_meta, selection_timing = _select_stratified_pit_universes_batch(
+            engine,
+            top_n=args.top,
+            as_of_dates=pit_dates,
+            pool_multiple=args.stratified_pool_multiple,
+        )
+        union_codes = {code for codes in ts_codes_by_date.values() for code in codes}
         ts_codes = sorted(union_codes)
         universe_selection.update({
             "unique_stock_count": len(ts_codes),
@@ -452,6 +774,8 @@ def main() -> int:
             "stratified_pool_multiple": args.stratified_pool_multiple,
             "stratification_dimensions": ["liquidity", "market_cap", "sw_l1_industry", "volatility_diagnostic"],
             "by_date": by_date_meta,
+            "selection_backend": "batch_pandas",
+            "selection_timing": selection_timing,
         })
         min_n = min((len(v) for v in ts_codes_by_date.values()), default=0)
         max_n = max((len(v) for v in ts_codes_by_date.values()), default=0)
@@ -459,11 +783,32 @@ def main() -> int:
             f"      {len(ts_codes)} unique stocks across {len(pit_dates)} stratified PIT cohorts "
             f"(per-date {min_n}..{max_n}, {time.monotonic()-t0:.1f}s)"
         )
+        print(f"      selection timing: {selection_timing}")
 
     requested_rows = sum(len(ts_codes_by_date.get(d, [])) for d in pit_dates) if ts_codes_by_date else len(ts_codes) * len(pit_dates)
 
-    if args.proxy_only:
+    proxy_gate_scores: dict[tuple[dt.date, str], dict[str, float]] = {}
+    proxy_gate_selected: dict[str, set[tuple[dt.date, str]]] = {}
+    if args.proxy_only or args.proxy_family_gate:
         print(f"\n[3/4] Building fast outcome proxy ({requested_rows} requested rows)...")
+        benchmark_report = None
+        if args.proxy_benchmark_legacy_dates > 0:
+            print(f"      benchmarking legacy proxy builder on first {args.proxy_benchmark_legacy_dates} PIT date(s)...")
+            t_bench = time.monotonic()
+            benchmark_report = benchmark_outcome_proxy_builders(
+                engine,
+                as_of_dates=pit_dates,
+                ts_codes=ts_codes,
+                ts_codes_by_date=ts_codes_by_date,
+                max_dates=args.proxy_benchmark_legacy_dates,
+            )
+            print(
+                "      legacy benchmark: "
+                f"old={benchmark_report['legacy']['runtime_sec']:.2f}s "
+                f"new={benchmark_report['batch']['runtime_sec']:.2f}s "
+                f"speedup={benchmark_report['speedup']:.2f}x "
+                f"({time.monotonic() - t_bench:.1f}s wall)"
+            )
         t0 = time.monotonic()
         proxy_df, proxy_manifest = build_outcome_proxy_cache(
             engine,
@@ -476,6 +821,7 @@ def main() -> int:
         )
         proxy_elapsed = time.monotonic() - t0
         summary = summarize_outcome_proxy(proxy_df)
+        family_comparison = compare_proxy_candidate_families(proxy_df)
         output_dir = Path(args.diagnosis_output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -483,6 +829,8 @@ def main() -> int:
         proxy_report = {
             "manifest": proxy_manifest.to_dict(),
             "diagnostics": summary,
+            "candidate_family_comparison": family_comparison,
+            "benchmark": benchmark_report,
             "usage": {
                 "purpose": "fast PIT forward-label and cheap-feature diagnostics; no production strategy replay scores",
                 "next_step": "run full replay only after proxy diagnostics show label/cohort coverage is acceptable",
@@ -504,8 +852,68 @@ def main() -> int:
                 f"      {h}d labels: n={hdiag.get('n', 0)} avg={float(hdiag.get('avg_return', 0.0))*100:+.2f}% "
                 f"positive={float(hdiag.get('positive_rate', 0.0)):.2f} cheap_rank_ic={cheap_ic:+.3f}"
             )
-        print("\n  [proxy-only] full strategy replay/search skipped; YAML untouched")
-        return 0
+        print("      candidate families:")
+        for family in ("weak_industry_avoid_quality_flow", "industry_relative_momentum_flow"):
+            payload = family_comparison.get("families", {}).get(family, {})
+            horizons = payload.get("horizons", {})
+            mar = payload.get("month_stability", {}).get("2026-03", {})
+            print(f"        {family}")
+            for h in (5, 10, 20):
+                m = horizons.get(f"{h}d", {})
+                mm = mar.get(f"{h}d", {})
+                print(
+                    f"          {h}d rank_ic={float(m.get('rank_ic', 0.0)):+.3f} "
+                    f"top_avg={float(m.get('top_bucket_return', 0.0))*100:+.2f}% "
+                    f"top_win={float(m.get('top_bucket_win_rate', 0.0)):.2f} "
+                    f"spread={float(m.get('top_vs_bottom_spread', 0.0))*100:+.2f}% "
+                    f"Mar_ic={float(mm.get('rank_ic', 0.0)):+.3f}"
+                )
+        if args.proxy_family_gate:
+            family_names = [name.strip() for name in str(args.proxy_family_names).split(",") if name.strip()]
+            family_scores = score_proxy_candidate_families(proxy_df)
+            missing = sorted(set(family_names) - set(family_scores))
+            if missing:
+                print(f"ERROR: unknown proxy family name(s): {missing}", file=sys.stderr)
+                return 2
+            proxy_df = proxy_df.copy()
+            proxy_df["as_of_date"] = proxy_df["as_of_date"].apply(
+                lambda d: d if isinstance(d, dt.date) else dt.date.fromisoformat(str(d)[:10])
+            )
+            selected_by_date: dict[dt.date, set[str]] = defaultdict(set)
+            top_n = max(1, int(args.proxy_family_top_per_date))
+            for family in family_names:
+                score = family_scores[family]
+                proxy_gate_selected[family] = set()
+                ranked = proxy_df.assign(_proxy_score=score)
+                for pit_date, sub in ranked.groupby("as_of_date", sort=True):
+                    top = sub.dropna(subset=["_proxy_score"]).sort_values("_proxy_score", ascending=False).head(top_n)
+                    for rec in top[["as_of_date", "ts_code", "_proxy_score"]].to_dict(orient="records"):
+                        key = (rec["as_of_date"], str(rec["ts_code"]))
+                        selected_by_date[rec["as_of_date"]].add(str(rec["ts_code"]))
+                        proxy_gate_selected[family].add(key)
+                        proxy_gate_scores.setdefault(key, {})[family] = float(rec["_proxy_score"])
+            ts_codes_by_date = {d: sorted(codes) for d, codes in selected_by_date.items()}
+            ts_codes = sorted({code for codes in ts_codes_by_date.values() for code in codes})
+            requested_rows = sum(len(codes) for codes in ts_codes_by_date.values())
+            universe_label = f"{universe_label}_proxyfam_top{top_n}_{_digest_codes(family_names)[:8]}"
+            universe_selection["proxy_family_gate"] = {
+                "enabled": True,
+                "families": family_names,
+                "top_per_date_per_family": top_n,
+                "source_proxy_cache": proxy_manifest.cache_path,
+                "requested_replay_rows": requested_rows,
+                "selected_unique_stocks": len(ts_codes),
+                "by_date_counts": {d.isoformat(): len(codes) for d, codes in ts_codes_by_date.items()},
+                "purpose": "small full replay gate for proxy family directions; production YAML untouched",
+            }
+            print(
+                f"      proxy family gate: families={family_names} top_per_date={top_n} "
+                f"-> replay rows={requested_rows}, unique_stocks={len(ts_codes)}"
+            )
+            print(f"      by-date rows: {universe_selection['proxy_family_gate']['by_date_counts']}")
+        if args.proxy_only:
+            print("\n  [proxy-only] full strategy replay/search skipped; YAML untouched")
+            return 0
 
     print(f"\n[3/4] Building replay panel ({requested_rows} requested rows)...")
     t0 = time.monotonic()
@@ -579,6 +987,52 @@ def main() -> int:
     if not rows:
         print("ERROR: panel is empty; cannot tune", file=sys.stderr)
         return 3
+
+    if args.proxy_family_gate:
+        family_names = [name.strip() for name in str(args.proxy_family_names).split(",") if name.strip()]
+        gate_report = _proxy_family_full_replay_gate_report(
+            rows,
+            family_names=family_names,
+            selected_pairs_by_family=proxy_gate_selected,
+            score_by_pair=proxy_gate_scores,
+            base_params=base,
+            manifest=manifest.to_dict(),
+            universe_selection=universe_selection,
+        )
+        output_dir = Path(args.diagnosis_output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        gate_path = output_dir / f"{universe_label}__proxy_family_full_replay_gate_{stamp}.json"
+        gate_path.write_text(json.dumps(gate_report, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
+        print(f"\n=== Proxy Family Full Replay Gate ===")
+        print(f"  artifact: {gate_path}")
+        print(f"  replay rows: requested={expected_rows} ok={len(rows)} fail={failed_rows} failure_rate={failure_rate:.2%}")
+        for family in family_names:
+            payload = gate_report["families"].get(family, {})
+            print(f"  {family}: selected={payload.get('selected_pairs', 0)} replay_ok={payload.get('replay_rows', 0)}")
+            for h in (5, 10, 20):
+                m = payload.get("horizons", {}).get(f"{h}d", {})
+                mar = payload.get("month_stability", {}).get("2026-03", {}).get(f"{h}d", {})
+                print(
+                    f"    {h}d rank_ic={float(m.get('rank_ic', 0.0)):+.3f} "
+                    f"top_ret={float(m.get('top_bucket_return', 0.0))*100:+.2f}% "
+                    f"top_win={float(m.get('top_bucket_win_rate', 0.0)):.2f} "
+                    f"spread={float(m.get('top_vs_bottom_spread', 0.0))*100:+.2f}% "
+                    f"Mar_ic={float(mar.get('rank_ic', 0.0)):+.3f}"
+                )
+        base_payload = gate_report.get("baseline_stock_edge_on_union", {})
+        print("  baseline Stock Edge on union subset:")
+        for h in (5, 10, 20):
+            m = base_payload.get(f"objective_{h}d", {})
+            print(
+                f"    {h}d rank_ic={float(m.get('rank_ic', 0.0)):+.3f} "
+                f"top_ret={float(m.get('top_bucket_avg_return', 0.0))*100:+.2f}% "
+                f"top_win={float(m.get('top_bucket_win_rate', 0.0)):.2f} "
+                f"spread={float(m.get('top_bottom_spread', 0.0))*100:+.2f}%"
+            )
+        print("\n  [proxy-family-gate] search skipped; auto-promote disabled; YAML untouched")
+        print(f"\n  total wall time: {panel_elapsed:.1f}s")
+        return 0
 
     if args.diagnose_panel:
         try:
