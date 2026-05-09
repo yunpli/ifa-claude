@@ -513,6 +513,8 @@ def _proxy_family_full_replay_gate_report(
         }
 
     baseline_metrics = evaluate_overlay_on_panel(panel_matrix_from_rows(rows), {}, base_params)
+    baseline_month_stability = _baseline_month_stability(rows, base_params)
+    random_control_records = _random_score_control_records(rows)
     return {
         "usage": {
             "purpose": "small full replay gate for named proxy family directions",
@@ -530,6 +532,12 @@ def _proxy_family_full_replay_gate_report(
         },
         "families": families,
         "baseline_stock_edge_on_union": baseline_metrics,
+        "baseline_stock_edge_month_stability": baseline_month_stability,
+        "random_score_control_on_union": {
+            "purpose": "deterministic random score on the same replay union; does not add replay pairs",
+            "horizons": _proxy_score_horizon_metrics(random_control_records),
+            "month_stability": _proxy_score_month_stability(random_control_records),
+        },
     }
 
 
@@ -539,6 +547,32 @@ def _proxy_score_month_stability(records: list[dict[str, Any]]) -> dict[str, Any
         month: _proxy_score_horizon_metrics([rec for rec in records if str(rec["as_of_date"])[:7] == month])
         for month in months
     }
+
+
+def _baseline_month_stability(rows: list, base_params: dict[str, Any]) -> dict[str, Any]:
+    months = sorted({str(row.as_of_date)[:7] for row in rows})
+    out: dict[str, Any] = {}
+    for month in months:
+        month_rows = [row for row in rows if str(row.as_of_date).startswith(month)]
+        if not month_rows:
+            continue
+        out[month] = evaluate_overlay_on_panel(panel_matrix_from_rows(month_rows), {}, base_params)
+    return out
+
+
+def _random_score_control_records(rows: list) -> list[dict[str, Any]]:
+    records = []
+    for row in rows:
+        rng = random.Random(f"stock_edge_proxy_family_gate_v1|{row.as_of_date}|{row.ts_code}")
+        records.append({
+            "as_of_date": row.as_of_date,
+            "ts_code": row.ts_code,
+            "score": rng.random(),
+            "forward_5d_return": row.forward_5d_return,
+            "forward_10d_return": row.forward_10d_return,
+            "forward_20d_return": row.forward_20d_return,
+        })
+    return records
 
 
 def _proxy_score_horizon_metrics(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1021,14 +1055,31 @@ def main() -> int:
                     f"Mar_ic={float(mar.get('rank_ic', 0.0)):+.3f}"
                 )
         base_payload = gate_report.get("baseline_stock_edge_on_union", {})
+        base_month = gate_report.get("baseline_stock_edge_month_stability", {}).get("2026-03", {})
         print("  baseline Stock Edge on union subset:")
         for h in (5, 10, 20):
             m = base_payload.get(f"objective_{h}d", {})
+            mar = base_month.get(f"objective_{h}d", {})
             print(
                 f"    {h}d rank_ic={float(m.get('rank_ic', 0.0)):+.3f} "
                 f"top_ret={float(m.get('top_bucket_avg_return', 0.0))*100:+.2f}% "
                 f"top_win={float(m.get('top_bucket_win_rate', 0.0)):.2f} "
-                f"spread={float(m.get('top_bottom_spread', 0.0))*100:+.2f}%"
+                f"spread={float(m.get('top_bottom_spread', 0.0))*100:+.2f}% "
+                f"Mar_ic={float(mar.get('rank_ic', 0.0)):+.3f} "
+                f"Mar_top={float(mar.get('top_bucket_avg_return', 0.0))*100:+.2f}%"
+            )
+        control_payload = gate_report.get("random_score_control_on_union", {})
+        print("  random score control on union subset:")
+        for h in (5, 10, 20):
+            m = control_payload.get("horizons", {}).get(f"{h}d", {})
+            mar = control_payload.get("month_stability", {}).get("2026-03", {}).get(f"{h}d", {})
+            print(
+                f"    {h}d rank_ic={float(m.get('rank_ic', 0.0)):+.3f} "
+                f"top_ret={float(m.get('top_bucket_return', 0.0))*100:+.2f}% "
+                f"top_win={float(m.get('top_bucket_win_rate', 0.0)):.2f} "
+                f"spread={float(m.get('top_vs_bottom_spread', 0.0))*100:+.2f}% "
+                f"Mar_ic={float(mar.get('rank_ic', 0.0)):+.3f} "
+                f"Mar_top={float(mar.get('top_bucket_return', 0.0))*100:+.2f}%"
             )
         print("\n  [proxy-family-gate] search skipped; auto-promote disabled; YAML untouched")
         print(f"\n  total wall time: {panel_elapsed:.1f}s")
