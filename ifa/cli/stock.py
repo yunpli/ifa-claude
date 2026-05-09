@@ -277,6 +277,50 @@ def diagnose_cmd(
         console.print("\n\n".join(rendered_payloads))
 
 
+@app.command("recommendation-brief")
+def recommendation_brief_cmd(
+    as_of: str | None = typer.Option(
+        None,
+        "--as-of",
+        help="Desired observation date YYYY-MM-DD. Omitted/current incomplete dates resolve to the last fully closed trading day.",
+    ),
+    output_format: str = typer.Option("html", "--format", help="html | markdown | json"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write artifact to a file or directory."),
+    run_mode: str | None = typer.Option(None, "--run-mode", help="manual | production | test; defaults to settings.run_mode"),
+    limit_per_group: int = typer.Option(12, "--limit-per-group", min=1, max=50, help="Maximum candidates in each group."),
+) -> None:
+    """Generate a Stock Edge system recommendation brief from persisted local data."""
+    if output_format not in {"html", "markdown", "json"}:
+        raise typer.BadParameter("--format must be html, markdown, or json")
+    settings = get_settings()
+    engine = get_engine(settings)
+    from ifa.families.stock.recommendation import RecommendationBriefRequest, build_recommendation_brief
+    from ifa.families.stock.recommendation.render import render_html, render_markdown
+
+    report = build_recommendation_brief(
+        RecommendationBriefRequest(
+            as_of=dt.date.fromisoformat(as_of) if as_of else None,
+            run_mode=run_mode or settings.run_mode.value,
+            limit_per_group=limit_per_group,
+        ),
+        engine=engine,
+    )
+    if output_format == "json":
+        payload = json.dumps(report.to_dict(), ensure_ascii=False, default=str, indent=2) + "\n"
+    elif output_format == "markdown":
+        payload = render_markdown(report)
+    else:
+        payload = render_html(report)
+
+    path = _recommendation_output_path(output, report, output_format, settings, run_mode or settings.run_mode.value)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(payload, encoding="utf-8")
+    console.print(
+        f"[green]{output_format.upper()}[/green] → {path} "
+        f"(observation={report.as_of_trade_date.isoformat()}, rule={report.as_of_rule})"
+    )
+
+
 @app.command("sector-cycle-leader-backfill")
 def sector_cycle_leader_backfill_cmd(
     start: str = typer.Option(..., "--start", help="Start trade date YYYY-MM-DD"),
@@ -380,6 +424,21 @@ def _write_diagnostic_index(output: Path, rows: list[dict[str, object]], output_
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, default=str, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def _recommendation_output_path(output: Path | None, report, output_format: str, settings, run_mode: str) -> Path:
+    from ifa.families.stock.output import output_dir_for_stock_edge
+
+    suffix = {"markdown": ".md", "json": ".json", "html": ".html"}[output_format]
+    if output and output.suffix:
+        return output
+    directory = output or output_dir_for_stock_edge(settings, report.as_of_trade_date, run_mode=run_mode) / "recommendation"
+    stem = (
+        f"CN_stock_edge_recommendation_brief_"
+        f"{report.as_of_trade_date.strftime('%Y%m%d')}_"
+        f"{bjt_now().strftime('%H%M%S')}"
+    )
+    return _dedupe_path(directory / f"{stem}{suffix}")
 
 
 def _dedupe_path(path: Path) -> Path:

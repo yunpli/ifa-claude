@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{{ report.title }}</title>
+<style>{{ inline_css }}</style>
+</head>
+<body>
+<article class="stock-edge-page ifa-page se-rec-page">
+  <header class="se-hero se-rec-hero">
+    <div class="se-hero__top">
+      <div>
+        <div class="se-brand">Lindenwood Management LLC · iFA Stock Edge Recommendation Brief</div>
+        <h1>{{ report.title }}</h1>
+      </div>
+      <div class="se-run-badge se-run-badge--{{ report.run_mode }}">
+        {% if report.run_mode == 'test' %}测试{% elif report.run_mode == 'manual' %}手动{% else %}生产{% endif %}
+      </div>
+    </div>
+    <div class="se-hero__meta">
+      <span>观察交易日 {{ report.as_of_trade_date }}</span>
+      <span>数据截止 {{ report.data_cutoff_bjt }}</span>
+      <span>{{ report.logic_version }}</span>
+    </div>
+    <div class="ifa-banner__short-disclaimer se-short-disclaimer">
+      {{ report.disclaimer.short_header_zh }}<br>
+      {{ report.disclaimer.short_header_en }}
+    </div>
+    <div class="se-rec-summary">
+      <div><span>强候选</span><strong>{{ report.groups.strong | length }}</strong></div>
+      <div><span>观察池</span><strong>{{ report.groups.watchlist | length }}</strong></div>
+      <div><span>规避/风险</span><strong>{{ report.groups.avoid | length }}</strong></div>
+    </div>
+  </header>
+
+  {% for group_key in ['strong', 'watchlist', 'avoid'] %}
+  <section class="ifa-section se-section">
+    <div class="ifa-section__head">
+      <div class="ifa-section__num">0{{ loop.index }}</div>
+      <h2 class="ifa-section__title">{{ group_key | group_label }}</h2>
+    </div>
+    {% set rows = report.groups[group_key] %}
+    {% if rows %}
+    <div class="se-rec-grid">
+      {% for c in rows %}
+      <div class="se-rec-card se-rec-card--{{ group_key }}">
+        <div class="se-rec-card__head">
+          <div>
+            <strong>{% if c.name %}{{ c.name }} · {% endif %}{{ c.ts_code }}</strong>
+            <span>{{ c.l2_name or '板块未知' }}{% if c.rank_in_sector %} · Rank {{ c.rank_in_sector }}/{{ c.sector_rank_count }}{% endif %}</span>
+          </div>
+          <div class="se-rec-score">{{ c.leader_score | fmt_score }}</div>
+        </div>
+        <div class="se-rec-horizons">
+          <span>5d {{ c.horizon_suitability['5d'] }}</span>
+          <span>10d {{ c.horizon_suitability['10d'] }}</span>
+          <span>20d {{ c.horizon_suitability['20d'] }}</span>
+        </div>
+        <div class="se-rec-plan">
+          <div><span>触发</span><p>{{ c.trigger }}</p></div>
+          <div><span>失效</span><p>{{ c.invalidation }}</p></div>
+        </div>
+        <div class="se-rec-evidence">
+          {% for e in c.evidence[:6] %}
+          <div><span>{{ e.label }}</span><strong>{{ e.value }}</strong>{% if e.note %}<em>{{ e.note }}</em>{% endif %}</div>
+          {% endfor %}
+        </div>
+        {% if c.conflicts %}
+        <div class="se-rec-notes"><span>冲突</span>{{ c.conflicts | join('；') }}</div>
+        {% endif %}
+        {% if c.risk_notes %}
+        <div class="se-rec-notes se-rec-notes--risk"><span>风险</span>{{ c.risk_notes | join('；') }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="narrative">本组暂无候选。缺失数据会在数据源状态中明确列出。</div>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  <section class="ifa-section se-section">
+    <div class="ifa-section__head"><div class="ifa-section__num">04</div><h2 class="ifa-section__title">数据源状态</h2></div>
+    <div class="table-scroll">
+      <table class="factor-table factor-table--compact">
+        <thead><tr><th>数据源</th><th>状态</th><th class="num">行数</th><th>最新日期</th><th>备注</th></tr></thead>
+        <tbody>
+        {% for name, s in report.source_status.items() %}
+        <tr>
+          <td>{{ name }}</td>
+          <td>{% if s.available %}<span class="delta-up">available</span>{% else %}<span class="delta-down">unavailable</span>{% endif %}</td>
+          <td class="num">{{ s.rows if s.rows is not none else '-' }}</td>
+          <td>{{ s.latest or '-' }}</td>
+          <td>{{ s.reason or '' }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="ifa-section se-section se-disclaimer">
+    <div class="ifa-section__head"><div class="ifa-section__num">05</div><h2 class="ifa-section__title">完整免责声明 / Full Disclaimer</h2></div>
+    <section class="ifa-disclaimer">
+      <h3 class="ifa-disclaimer__h">免责声明</h3>
+      {% for p in report.disclaimer.paragraphs_zh %}
+      <p>{{ p }}</p>
+      {% endfor %}
+      <h3 class="ifa-disclaimer__h">Disclaimer</h3>
+      {% for p in report.disclaimer.paragraphs_en %}
+      <p>{{ p }}</p>
+      {% endfor %}
+    </section>
+  </section>
+
+  <footer class="ifa-footer">
+    <strong>Lindenwood Management LLC</strong> ｜ {{ report.disclaimer.footer_short_en }}<br>
+    {{ report.disclaimer.footer_short_zh }}<br>
+    Generated {{ report.generated_at_bjt }} 北京时间 · observation {{ report.as_of_trade_date }}
+  </footer>
+</article>
+</body>
+</html>
