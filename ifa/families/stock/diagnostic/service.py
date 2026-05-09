@@ -4,11 +4,9 @@ from __future__ import annotations
 import datetime as dt
 import html
 import json
-import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-import pandas as pd
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -17,8 +15,8 @@ from ifa.families.stock.context import StockEdgeRequest, build_context
 from ifa.families.stock.data.availability import LoadResult
 from ifa.families.stock.data.gateway import LocalDataGateway
 from ifa.families.stock.data.snapshot import StockEdgeSnapshot
-from ifa.families.stock.features import compute_technical_summary
 
+from .adapters import ningbo, research_news, risk, stock_edge_sector_cycle, ta
 from .models import (
     DiagnosticReport,
     DiagnosticRequest,
@@ -54,11 +52,18 @@ def build_diagnostic_report(request: DiagnosticRequest, *, engine: Engine) -> Di
             matrix_error = f"{type(exc).__name__}: {exc}"
 
     perspectives = [
-        _safe("stock_edge_sector_cycle", lambda: _stock_edge_perspective(engine, snapshot, matrix, decision_layer, matrix_error, include_full=request.include_full_stock_edge)),
-        _safe("ta", lambda: _ta_perspective(snapshot)),
-        _safe("ningbo", lambda: _ningbo_perspective(engine, ctx.request.ts_code, ctx.as_of.as_of_trade_date)),
-        _safe("research_news", lambda: _research_perspective(engine, snapshot)),
-        _safe("risk", lambda: _risk_perspective(engine, snapshot)),
+        stock_edge_sector_cycle.collect(
+            engine=engine,
+            snapshot=snapshot,
+            matrix=matrix,
+            decision_layer=decision_layer,
+            matrix_error=matrix_error,
+            include_full=request.include_full_stock_edge,
+        ),
+        ta.collect(snapshot=snapshot),
+        ningbo.collect(engine=engine, ts_code=ctx.request.ts_code, as_of=ctx.as_of.as_of_trade_date),
+        research_news.collect(engine=engine, snapshot=snapshot),
+        risk.collect(engine=engine, snapshot=snapshot),
     ]
     perspectives = [_with_quality(p, ctx.as_of.as_of_trade_date) for p in perspectives]
     synthesis = synthesize_diagnostic(perspectives)
@@ -346,314 +351,6 @@ def synthesize_diagnostic(perspectives: list[PerspectiveEvidence]) -> Diagnostic
     )
 
 
-def _stock_edge_perspective(
-    engine: Engine,
-    snapshot,
-    matrix: dict[str, Any] | None,
-    decision_layer: dict[str, Any] | None,
-    matrix_error: str | None,
-    *,
-    include_full: bool,
-) -> PerspectiveEvidence:
-    sector = snapshot.sector_membership.data or {}
-    sme = _load_sme_sector_cycle(engine, snapshot.ctx.request.ts_code, snapshot.ctx.as_of.as_of_trade_date, sector)
-    points: list[EvidencePoint] = []
-    missing: list[str] = []
-    if sector:
-        points.append(EvidencePoint("SW L2", sector.get("l2_name"), "smartmoney.sw_member_monthly", str(sector.get("snapshot_month"))))
-    else:
-        missing.append("SW L2 membership")
-    if sme:
-        for key, label in [
-            ("current_state", "sector cycle stage"),
-            ("diffusion_phase", "sector diffusion"),
-            ("main_net_ratio", "sector main-money ratio"),
-            ("retail_net_ratio", "sector retail ratio"),
-            ("leader_ts_code", "sector leader"),
-            ("leader_score", "target leader score"),
-            ("risk_flags_json", "sector heat/crowding flags"),
-        ]:
-            if sme.get(key) is not None:
-                points.append(EvidencePoint(label, sme.get(key), sme.get("_source", "sme"), sme.get("trade_date")))
-        if sme.get("is_sector_leader") is False:
-            missing.append("target is not current SME sector leader; use stock.sector_cycle_leader_daily for stock-specific rank context when populated")
-    else:
-        missing.append("SME sector-cycle/orderflow rows")
-
-    leader_rank = _load_sector_cycle_leader_rank(engine, snapshot.ctx.request.ts_code, snapshot.ctx.as_of.as_of_trade_date)
-    if leader_rank:
-        for key, label in [
-            ("rank_in_sector", "sector-cycle leader rank"),
-            ("leader_score", "sector-cycle leader score"),
-            ("sector_rank_count", "sector rank universe count"),
-            ("quality_flag", "sector-cycle leader quality"),
-        ]:
-            if leader_rank.get(key) is not None:
-                points.append(EvidencePoint(label, leader_rank.get(key), "stock.sector_cycle_leader_daily", leader_rank.get("trade_date")))
-    else:
-        missing.append("stock.sector_cycle_leader_daily")
-
-    target_flow = _load_target_orderflow(engine, snapshot.ctx.request.ts_code, snapshot.ctx.as_of.as_of_trade_date)
-    if target_flow:
-        points.extend([
-            EvidencePoint("stock main net yuan", target_flow.get("main_net_yuan"), "sme.sme_stock_orderflow_daily", target_flow.get("trade_date")),
-            EvidencePoint("stock retail net yuan", target_flow.get("retail_net_yuan"), "sme.sme_stock_orderflow_daily", target_flow.get("trade_date")),
-        ])
-    else:
-        missing.append("SME stock orderflow")
-
-    if matrix:
-        points.append(EvidencePoint("strategy aggregate score", matrix.get("aggregate_score"), "Stock Edge strategy_matrix"))
-        for sig in _pick_signals(matrix, ["same_sector_leadership", "sector_diffusion_breadth", "smartmoney_sw_l2", "moneyflow_7d", "orderflow_mix"]):
-            points.append(EvidencePoint(sig.get("name") or sig.get("key"), sig.get("score"), sig.get("data_source") or "strategy_matrix", note=sig.get("evidence")))
-    elif matrix_error:
-        missing.append(f"Stock Edge strategy matrix failed: {matrix_error}")
-    elif not include_full:
-        points.append(EvidencePoint(
-            "full strategy matrix",
-            "skipped",
-            "Stock Edge diagnostic MVP",
-            note="Use --full-stock-edge to run the expensive full strategy matrix/decision layer.",
-        ))
-
-    latest_record = _load_latest_stock_record(engine, snapshot.ctx.request.ts_code, snapshot.ctx.as_of.as_of_trade_date)
-    if latest_record:
-        points.append(EvidencePoint(
-            "latest Stock Edge report",
-            latest_record.get("conclusion_label") or latest_record.get("status"),
-            "stock.analysis_record",
-            str(latest_record.get("data_cutoff")),
-            note=latest_record.get("conclusion_text") or latest_record.get("output_html_path"),
-        ))
-
-    horizon_decisions = {}
-    if decision_layer:
-        for h in ("5d", "10d", "20d"):
-            horizon_decisions[h] = decision_layer.get(f"decision_{h}") or {}
-            points.append(EvidencePoint(f"{h} decision", horizon_decisions[h].get("user_facing_label"), "Stock Edge decision_layer", note=horizon_decisions[h].get("decision_summary")))
-
-    view = "neutral"
-    if target_flow and (target_flow.get("main_net_yuan") or 0) > 0 and matrix and float(matrix.get("aggregate_score") or 0) >= 0.55:
-        view = "positive"
-    if sme and str(sme.get("current_state") or "").lower() in {"distribution", "crowded", "overheat"}:
-        view = "negative"
-    summary = "Stock Edge sector-cycle evidence collected."
-    if sme:
-        summary = f"板块处于 {sme.get('current_state') or 'unknown'}，扩散 {sme.get('diffusion_phase') or 'unknown'}；个股主力/散户资金见证据。"
-    if missing and not points:
-        return PerspectiveEvidence("stock_edge_sector_cycle", "Stock Edge / Sector-Cycle-Leader", "unavailable", "unknown", "缺少可用板块周期与策略矩阵证据。", missing=missing)
-    return PerspectiveEvidence(
-        "stock_edge_sector_cycle",
-        "Stock Edge / Sector-Cycle-Leader",
-        "partial" if missing else "available",
-        view,  # type: ignore[arg-type]
-        summary,
-        points=points,
-        missing=missing,
-        freshness=_freshness_from_points(points),
-        raw={"sme": sme, "leader_rank": leader_rank, "target_flow": target_flow, "horizon_decisions": horizon_decisions, "latest_record": latest_record},
-    )
-
-
-def _ta_perspective(snapshot) -> PerspectiveEvidence:
-    data = snapshot.ta_context.data or {}
-    candidates = data.get("candidates") or []
-    warnings = data.get("warnings") or []
-    regime = data.get("regime") or {}
-    metrics = data.get("setup_metrics") or []
-    points: list[EvidencePoint] = []
-    setup_names = sorted({str(row.get("setup_label") or row.get("setup_name")) for row in candidates if row.get("setup_label") or row.get("setup_name")})
-    warning_names = sorted({str(row.get("setup_label") or row.get("setup_name")) for row in warnings if row.get("setup_label") or row.get("setup_name")})
-    if candidates or warnings:
-        latest_signal_date = max(
-            [str(row.get("trade_date")) for row in [*candidates, *warnings] if row.get("trade_date")],
-            default=None,
-        )
-        points.append(EvidencePoint(
-            "TA rollup",
-            {"candidate_count": len(candidates), "warning_count": len(warnings), "metric_count": len(metrics)},
-            "ta.candidates_daily/ta.warnings_daily/ta.setup_metrics_daily",
-            latest_signal_date,
-            note=f"setups={', '.join(setup_names[:5]) or '-'} warnings={', '.join(warning_names[:5]) or '-'}",
-        ))
-    for row in candidates[:5]:
-        points.append(EvidencePoint(
-            row.get("setup_label") or row.get("setup_name"),
-            row.get("final_score"),
-            "ta.candidates_daily",
-            str(row.get("trade_date")),
-            note=f"rank={row.get('rank')} stars={row.get('star_rating')} entry={row.get('entry_price')} stop={row.get('stop_loss')}",
-        ))
-    for row in warnings[:3]:
-        points.append(EvidencePoint(
-            row.get("setup_label") or row.get("setup_name"),
-            row.get("score"),
-            "ta.warnings_daily",
-            str(row.get("trade_date")),
-            note="risk warning",
-        ))
-    if regime:
-        points.append(EvidencePoint("market TA regime", regime.get("regime"), "ta.regime_daily", str(regime.get("trade_date")), note=f"confidence={regime.get('confidence')}"))
-    for row in metrics[:5]:
-        points.append(EvidencePoint(
-            f"{row.get('setup_name')} 60d edge",
-            _float(row.get("combined_score_60d")) if row.get("combined_score_60d") is not None else _float(row.get("winrate_60d")),
-            "ta.setup_metrics_daily",
-            str(row.get("trade_date")),
-            note=(
-                f"winrate_60d={row.get('winrate_60d')} avg_return_60d={row.get('avg_return_60d')} "
-                f"pl_ratio_60d={row.get('pl_ratio_60d')} decay={row.get('decay_score')}"
-            ),
-        ))
-
-    view = "neutral"
-    if candidates:
-        view = "positive"
-    if warnings and not candidates:
-        view = "risk"
-    if not points:
-        return PerspectiveEvidence("ta", "TA", "unavailable", "unknown", "未找到目标股近期 TA setup；按中性/信号不足处理。", missing=["ta.candidates_daily", "ta.warnings_daily"])
-    summary = "TA 有近期多头 setup。"
-    if candidates and metrics:
-        summary = "TA 有近期多头 setup，并已补充 setup_metrics_daily 历史 edge。"
-    elif not candidates:
-        summary = "TA 未见多头 setup，但存在风险形态。"
-    return PerspectiveEvidence("ta", "TA", "available", view, summary, points=points, freshness=_freshness_from_points(points))  # type: ignore[arg-type]
-
-
-def _ningbo_perspective(engine: Engine, ts_code: str, as_of: dt.date) -> PerspectiveEvidence:
-    rows = _query_dicts(engine, """
-        SELECT rec_date, ts_code, strategy, scoring_mode, param_version,
-               rec_price, confidence_score, rec_signal_meta
-        FROM ningbo.recommendations_daily
-        WHERE ts_code = :ts_code AND rec_date <= :as_of
-        ORDER BY rec_date DESC, confidence_score DESC NULLS LAST
-        LIMIT 10
-    """, {"ts_code": ts_code, "as_of": as_of})
-    if not rows:
-        rows = _query_dicts(engine, """
-            SELECT rec_date, ts_code, strategy, confidence_score, rec_price, signal_meta
-            FROM ningbo.candidates_daily
-            WHERE ts_code = :ts_code AND rec_date <= :as_of
-            ORDER BY rec_date DESC, confidence_score DESC NULLS LAST
-            LIMIT 10
-        """, {"ts_code": ts_code, "as_of": as_of})
-    if not rows:
-        return PerspectiveEvidence("ningbo", "Ningbo", "unavailable", "unknown", "宁波短线策略近期未命中目标股。", missing=["ningbo.recommendations_daily", "ningbo.candidates_daily"])
-    rank_context = _load_ningbo_rank_context(engine, ts_code, rows[0].get("rec_date"), rows[0].get("strategy"))
-    points = [
-        EvidencePoint(
-            f"{row.get('strategy')} {row.get('scoring_mode') or 'heuristic'}",
-            _float(row.get("confidence_score")),
-            "ningbo.recommendations_daily/candidates_daily",
-            str(row.get("rec_date")),
-            note=f"rec_price={row.get('rec_price')} recency_days={_days_between(row.get('rec_date'), as_of)}",
-        )
-        for row in rows[:5]
-    ]
-    if rank_context:
-        points.append(EvidencePoint(
-            "Ningbo same-day rank context",
-            rank_context,
-            "ningbo.recommendations_daily/candidates_daily",
-            str(rows[0].get("rec_date")),
-            note=f"strategy={rows[0].get('strategy')}",
-        ))
-    return PerspectiveEvidence("ningbo", "Ningbo", "available", "positive", "宁波独立短线策略近期命中目标股；可作为独立参考，不强制与其他视角一致。", points=points, freshness=_freshness_from_points(points), raw={"rows": rows, "rank_context": rank_context})
-
-
-def _research_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
-    lineup = snapshot.research_lineup.data or {}
-    events = (snapshot.event_context.data or {}).get("company_events") or []
-    catalysts = (snapshot.event_context.data or {}).get("catalyst_events") or []
-    theme_heat = _load_theme_heat(engine, snapshot.ctx.as_of.as_of_trade_date)
-    sector = snapshot.sector_membership.data or {}
-    ts_code = snapshot.ctx.request.ts_code
-    points: list[EvidencePoint] = []
-    for key, label in [("annual_factors", "annual fundamentals"), ("quarterly_factors", "quarterly fundamentals"), ("recent_research_reports", "recent sell-side reports")]:
-        values = lineup.get(key) or []
-        if values:
-            points.append(EvidencePoint(label, len(values), "research.period_factor_decomposition/pdf_extract_cache"))
-    for row in [*events[:3], *catalysts[:3]]:
-        points.append(EvidencePoint(row.get("event_type") or "event", row.get("polarity"), "research/ta event memory", str(row.get("capture_date")), note=row.get("title") or row.get("summary")))
-    theme_hits = []
-    for row in theme_heat[:5]:
-        hit = _theme_hit(row, ts_code, sector)
-        if hit:
-            theme_hits.append(row)
-        label = f"weekly theme #{row.get('theme_rank')}"
-        value = row.get("theme_label")
-        note = f"quality={row.get('quality_flag')} heat={row.get('heat_score')}"
-        if hit:
-            note += f" theme_hit={hit}"
-        points.append(EvidencePoint(label, value, "stock.theme_heat_weekly", str(row.get("valid_week")), note=note))
-    if not points:
-        return PerspectiveEvidence("research_news", "Research / Fundamentals / News", "unavailable", "unknown", "未找到可复用的基本面、公告/新闻或主题热度证据。", missing=["research memory", "event memory", "stock.theme_heat_weekly"])
-    view = "neutral"
-    polarities = [str(row.get("polarity") or "").lower() for row in [*events, *catalysts]]
-    if any(p in {"positive", "bullish"} for p in polarities):
-        view = "positive"
-    if any(p in {"negative", "bearish"} for p in polarities):
-        view = "negative"
-    summary = "已收集基本面/事件/主题热度证据；stub 主题热度不作为 alpha 证据。"
-    if theme_hits:
-        summary = f"命中 {len(theme_hits)} 个周度主题缓存；仍需区分人工/LLM缓存质量。"
-    return PerspectiveEvidence("research_news", "Research / Fundamentals / News / Theme", "partial", view, summary, points=points, freshness=_freshness_from_points(points), raw={"theme_heat": theme_heat, "theme_hits": theme_hits})  # type: ignore[arg-type]
-
-
-def _risk_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
-    ts_code = snapshot.ctx.request.ts_code
-    as_of = snapshot.ctx.as_of.as_of_trade_date
-    rows = {
-        "blacklist": _query_dicts(engine, "SELECT trade_date, reason, severity, ann_title FROM ta.blacklist_daily WHERE ts_code=:ts_code AND trade_date <= :as_of ORDER BY trade_date DESC LIMIT 5", {"ts_code": ts_code, "as_of": as_of}),
-        "suspend": _query_dicts(engine, "SELECT trade_date, suspend_type, suspend_timing FROM ta.suspend_daily WHERE ts_code=:ts_code AND trade_date <= :as_of ORDER BY trade_date DESC LIMIT 5", {"ts_code": ts_code, "as_of": as_of}),
-        "limit": _query_dicts(engine, "SELECT trade_date, name, pct_chg_pct, fc_ratio, fl_ratio, fd_amount_yuan, open_times, limit FROM ta.stk_limit_daily WHERE ts_code=:ts_code AND trade_date <= :as_of ORDER BY trade_date DESC LIMIT 5", {"ts_code": ts_code, "as_of": as_of}),
-    }
-    points: list[EvidencePoint] = []
-    vetoes: list[dict[str, Any]] = []
-    for row in rows["blacklist"]:
-        category = "hard_blacklist" if _is_hard_blacklist(row) else "soft_blacklist"
-        vetoes.append({"category": category, "hard": category == "hard_blacklist", "source": "ta.blacklist_daily", "as_of": row.get("trade_date"), "reason": row.get("reason") or row.get("ann_title")})
-        points.append(EvidencePoint("blacklist", row.get("severity"), "ta.blacklist_daily", str(row.get("trade_date")), note=row.get("reason") or row.get("ann_title")))
-    for row in rows["suspend"]:
-        vetoes.append({"category": "suspension", "hard": True, "source": "ta.suspend_daily", "as_of": row.get("trade_date"), "reason": row.get("suspend_type")})
-        points.append(EvidencePoint("suspension", row.get("suspend_type"), "ta.suspend_daily", str(row.get("trade_date")), note=row.get("suspend_timing")))
-    for row in rows["limit"]:
-        vetoes.append({"category": "limit_event", "hard": False, "source": "ta.stk_limit_daily", "as_of": row.get("trade_date"), "reason": row.get("limit")})
-        points.append(EvidencePoint("limit event", row.get("limit"), "ta.stk_limit_daily", str(row.get("trade_date")), note=f"pct={row.get('pct_chg_pct')} open_times={row.get('open_times')}"))
-    if vetoes:
-        points.append(EvidencePoint(
-            "normalized veto registry",
-            {"hard": sum(1 for item in vetoes if item["hard"]), "soft": sum(1 for item in vetoes if not item["hard"])},
-            "stock.diagnostic_risk_veto_registry",
-            note="Derived from TA risk source tables; no separate production veto table mutation.",
-        ))
-
-    daily = snapshot.daily_bars.data
-    basic = snapshot.daily_basic.data
-    if isinstance(daily, pd.DataFrame) and not daily.empty:
-        tech = compute_technical_summary(daily)
-        points.append(EvidencePoint("avg amount 7d yuan", tech.avg_amount_7d_yuan, "smartmoney.raw_daily", str(daily["trade_date"].iloc[-1])))
-        atr14_pct = (tech.atr14 / tech.close * 100.0) if tech.atr14 is not None and tech.close else None
-        points.append(EvidencePoint("ATR14 pct", atr14_pct, "smartmoney.raw_daily"))
-    if isinstance(basic, pd.DataFrame) and not basic.empty:
-        latest = basic.iloc[-1]
-        points.append(EvidencePoint("turnover rate", _float(latest.get("turnover_rate")), "smartmoney.raw_daily_basic", str(latest.get("trade_date"))))
-
-    hard = bool(rows["suspend"] or any(_is_hard_blacklist(row) for row in rows["blacklist"]))
-    soft_risk = bool(rows["blacklist"] or rows["limit"])
-    if hard:
-        summary = "命中停牌或硬性黑名单风险。"
-    elif soft_risk:
-        summary = "命中风险提示或涨跌停事件，但当前接入证据未构成硬性禁入。"
-    else:
-        summary = "未命中已接入的硬性风险表；仍需结合流动性、波动和限价事件控制仓位。"
-    view = "risk" if hard else ("negative" if soft_risk else "neutral")
-    raw = dict(rows)
-    raw["normalized_vetoes"] = vetoes
-    return PerspectiveEvidence("risk", "Risk", "available" if points else "unavailable", view, summary, points=points, freshness=_freshness_from_points(points), raw=raw)  # type: ignore[arg-type]
-
-
 def render_markdown(report: DiagnosticReport) -> str:
     lines = [
         f"# Stock Edge 单股诊断 · {report.name or report.ts_code} ({report.ts_code})",
@@ -811,152 +508,12 @@ def diagnostic_manifest_payload(
     }
 
 
-def _safe(key: str, fn: Callable[[], PerspectiveEvidence]) -> PerspectiveEvidence:
-    started = time.perf_counter()
-    try:
-        p = fn()
-        latency_ms = (time.perf_counter() - started) * 1000.0
-        return _with_contract_fields(p, latency_ms=latency_ms)
-    except Exception as exc:  # noqa: BLE001
-        latency_ms = (time.perf_counter() - started) * 1000.0
-        return PerspectiveEvidence(
-            key,
-            key,
-            "error",
-            "unknown",
-            f"{key} collector failed: {type(exc).__name__}: {exc}",
-            latency_ms=latency_ms,
-            missing_required=[key],
-        )
-
-
 def _query_dicts(engine: Engine, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     try:
         with engine.connect() as conn:
             return [dict(row) for row in conn.execute(text(sql), params).mappings().all()]
     except Exception:
         return []
-
-
-def _load_sme_sector_cycle(engine: Engine, ts_code: str, as_of: dt.date, sector: dict[str, Any]) -> dict[str, Any] | None:
-    l2_code = sector.get("l2_code")
-    if not l2_code:
-        return None
-    rows = _query_dicts(engine, """
-        SELECT o.trade_date, o.l2_code, o.l2_name, o.main_net_ratio, o.retail_net_ratio,
-               o.leader_ts_code, o.leader_name, o.leader_main_net_yuan,
-               d.diffusion_phase, d.diffusion_score,
-               s.current_state, s.state_score, s.state_confidence, s.risk_flags_json
-        FROM sme.sme_sector_orderflow_daily o
-        LEFT JOIN sme.sme_sector_diffusion_daily d ON d.trade_date=o.trade_date AND d.l2_code=o.l2_code
-        LEFT JOIN sme.sme_sector_state_daily s ON s.trade_date=o.trade_date AND s.l2_code=o.l2_code
-        WHERE o.l2_code=:l2_code AND o.trade_date <= :as_of
-        ORDER BY o.trade_date DESC
-        LIMIT 1
-    """, {"l2_code": l2_code, "as_of": as_of})
-    if not rows:
-        return None
-    row = rows[0]
-    row["_source"] = "sme sector orderflow/diffusion/state"
-    row["is_sector_leader"] = row.get("leader_ts_code") == ts_code
-    row["leader_score"] = row.get("leader_main_net_yuan") if row["is_sector_leader"] else None
-    return row
-
-
-def _load_target_orderflow(engine: Engine, ts_code: str, as_of: dt.date) -> dict[str, Any] | None:
-    rows = _query_dicts(engine, """
-        SELECT trade_date, ts_code, main_net_yuan, retail_net_yuan,
-               main_net_ratio, retail_net_ratio, quality_flag
-        FROM sme.sme_stock_orderflow_daily
-        WHERE ts_code=:ts_code AND trade_date <= :as_of
-        ORDER BY trade_date DESC
-        LIMIT 1
-    """, {"ts_code": ts_code, "as_of": as_of})
-    return rows[0] if rows else None
-
-
-def _load_sector_cycle_leader_rank(engine: Engine, ts_code: str, as_of: dt.date) -> dict[str, Any] | None:
-    rows = _query_dicts(engine, """
-        SELECT trade_date, ts_code, name, l1_code, l1_name, l2_code, l2_name,
-               rank_in_sector, sector_rank_count, leader_score,
-               sector_score, stock_score, quality_flag, evidence_json
-        FROM stock.sector_cycle_leader_daily
-        WHERE ts_code=:ts_code AND trade_date <= :as_of
-        ORDER BY trade_date DESC
-        LIMIT 1
-    """, {"ts_code": ts_code, "as_of": as_of})
-    return rows[0] if rows else None
-
-
-def _load_latest_stock_record(engine: Engine, ts_code: str, as_of: dt.date) -> dict[str, Any] | None:
-    rows = _query_dicts(engine, """
-        SELECT record_id, ts_code, analysis_type, triggered_at, data_cutoff,
-               status, conclusion_label, conclusion_text, forecast_json,
-               output_html_path
-        FROM stock.analysis_record
-        WHERE ts_code=:ts_code
-          AND data_cutoff::date <= :as_of
-          AND status IN ('succeeded', 'partial', 'cached')
-        ORDER BY data_cutoff DESC, triggered_at DESC
-        LIMIT 1
-    """, {"ts_code": ts_code, "as_of": as_of})
-    return rows[0] if rows else None
-
-
-def _load_ningbo_rank_context(engine: Engine, ts_code: str, rec_date: Any, strategy: Any) -> dict[str, Any] | None:
-    if rec_date is None:
-        return None
-    params = {"ts_code": ts_code, "rec_date": rec_date, "strategy": strategy}
-    rows = _query_dicts(engine, """
-        WITH ranked AS (
-            SELECT ts_code, strategy, confidence_score,
-                   rank() OVER (PARTITION BY rec_date, strategy ORDER BY confidence_score DESC NULLS LAST) AS rank_in_strategy,
-                   count(*) OVER (PARTITION BY rec_date, strategy) AS strategy_count
-            FROM ningbo.recommendations_daily
-            WHERE rec_date=:rec_date
-              AND (:strategy IS NULL OR strategy=:strategy)
-        )
-        SELECT rank_in_strategy, strategy_count
-        FROM ranked
-        WHERE ts_code=:ts_code
-        LIMIT 1
-    """, params)
-    if not rows:
-        rows = _query_dicts(engine, """
-            WITH ranked AS (
-                SELECT ts_code, strategy, confidence_score,
-                       rank() OVER (PARTITION BY rec_date, strategy ORDER BY confidence_score DESC NULLS LAST) AS rank_in_strategy,
-                       count(*) OVER (PARTITION BY rec_date, strategy) AS strategy_count
-                FROM ningbo.candidates_daily
-                WHERE rec_date=:rec_date
-                  AND (:strategy IS NULL OR strategy=:strategy)
-            )
-            SELECT rank_in_strategy, strategy_count
-            FROM ranked
-            WHERE ts_code=:ts_code
-            LIMIT 1
-        """, params)
-    return rows[0] if rows else None
-
-
-def _load_theme_heat(engine: Engine, as_of: dt.date) -> list[dict[str, Any]]:
-    from ifa.families.stock.theme_heat import week_start
-
-    return _query_dicts(engine, """
-        SELECT valid_week, theme_rank, theme_label, category, heat_score,
-               confidence, affected_sectors_json, representative_stocks_json,
-               quality_flag
-        FROM stock.theme_heat_weekly
-        WHERE valid_week <= :week
-        ORDER BY valid_week DESC, theme_rank
-        LIMIT 5
-    """, {"week": week_start(as_of)})
-
-
-def _pick_signals(matrix: dict[str, Any], keys: list[str]) -> list[dict[str, Any]]:
-    signals = matrix.get("signals") or []
-    by_key = {str(s.get("key")): s for s in signals if isinstance(s, dict)}
-    return [by_key[k] for k in keys if k in by_key]
 
 
 def _resolve_name(snapshot) -> str | None:
@@ -1054,26 +611,6 @@ def _with_quality(p: PerspectiveEvidence, as_of: dt.date) -> PerspectiveEvidence
     )
 
 
-def _with_contract_fields(p: PerspectiveEvidence, *, latency_ms: float | None) -> PerspectiveEvidence:
-    sources = p.source_tables or sorted({point.source for point in p.points if point.source})
-    missing_required = p.missing_required or (list(p.missing) if p.status in {"unavailable", "error"} else [])
-    return PerspectiveEvidence(
-        p.key,
-        p.title,
-        p.status,
-        p.view,
-        p.summary,
-        points=p.points,
-        conflicts=p.conflicts,
-        missing=p.missing,
-        freshness=p.freshness,
-        raw=p.raw,
-        latency_ms=latency_ms,
-        source_tables=sources,
-        missing_required=missing_required,
-    )
-
-
 def _parse_dateish(value: Any) -> dt.date | None:
     if isinstance(value, dt.date) and not isinstance(value, dt.datetime):
         return value
@@ -1107,23 +644,6 @@ def _conflict_chips(report: DiagnosticReport) -> str:
     return "".join(f"<span class='badge risk'>{html.escape(item)}</span>" for item in report.synthesis.conflicts[:3])
 
 
-def _theme_hit(row: dict[str, Any], ts_code: str, sector: dict[str, Any]) -> str | None:
-    sectors = row.get("affected_sectors_json") or []
-    stocks = row.get("representative_stocks_json") or []
-    l1 = str(sector.get("l1_code") or sector.get("l1_name") or "")
-    l2 = str(sector.get("l2_code") or sector.get("l2_name") or "")
-    for stock in stocks if isinstance(stocks, list) else []:
-        if isinstance(stock, dict) and ts_code in {str(stock.get("ts_code")), str(stock.get("code"))}:
-            return "stock"
-    for item in sectors if isinstance(sectors, list) else []:
-        if not isinstance(item, dict):
-            continue
-        values = {str(item.get(k) or "") for k in ("l1_code", "l1_name", "l2_code", "l2_name", "sector_code", "sector_name")}
-        if l1 in values or l2 in values:
-            return "sector"
-    return None
-
-
 def _dedupe_path(path: Path) -> Path:
     if not path.exists():
         return path
@@ -1146,23 +666,3 @@ def _key_conflict(report: DiagnosticReport) -> str:
 def _html_cell(label: str, value: Any) -> str:
     return f"<div class='cell'><div class='label'>{html.escape(label)}</div><div class='value'>{html.escape(str(value))}</div></div>"
 
-
-def _is_hard_blacklist(row: dict[str, Any]) -> bool:
-    severity = str(row.get("severity") or "").lower()
-    return severity in {"hard", "critical", "high", "severe"}
-
-
-def _float(value: Any) -> float | None:
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _days_between(start: Any, end: dt.date) -> int | None:
-    start_date = _parse_dateish(start)
-    if start_date is None:
-        return None
-    return (end - start_date).days

@@ -277,6 +277,56 @@ def diagnose_cmd(
         console.print("\n\n".join(rendered_payloads))
 
 
+@app.command("sector-cycle-leader-backfill")
+def sector_cycle_leader_backfill_cmd(
+    start: str = typer.Option(..., "--start", help="Start trade date YYYY-MM-DD"),
+    end: str | None = typer.Option(None, "--end", help="End trade date YYYY-MM-DD; defaults to --start"),
+    l2_code: str | None = typer.Option(None, "--l2-code", help="Optional SW L2 code filter for smoke/backfill"),
+    output_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON summary."),
+) -> None:
+    """Backfill stock.sector_cycle_leader_daily from PIT SME features."""
+    settings = get_settings()
+    engine = get_engine(settings)
+    from ifa.families.stock.diagnostic.sector_cycle_leader import backfill_sector_cycle_leader_daily
+
+    start_date = dt.date.fromisoformat(start)
+    end_date = dt.date.fromisoformat(end or start)
+    result = backfill_sector_cycle_leader_daily(engine, start=start_date, end=end_date, l2_code=l2_code)
+    if output_json:
+        console.print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
+        return
+    console.print(
+        "[green]stock.sector_cycle_leader_daily[/green] "
+        f"{result['start']}→{result['end']} rows={result['upserted_rows']} "
+        f"persisted={result['persisted_rows']} dates={result['date_count']} logic={result['logic_version']}"
+    )
+
+
+@app.command("risk-veto-backfill")
+def risk_veto_backfill_cmd(
+    start: str = typer.Option(..., "--start", help="Start trade date YYYY-MM-DD"),
+    end: str | None = typer.Option(None, "--end", help="End trade date YYYY-MM-DD; defaults to --start"),
+    ts_code: str | None = typer.Option(None, "--ts-code", help="Optional stock filter for smoke/backfill"),
+    output_json: bool = typer.Option(False, "--json", help="Print machine-readable JSON summary."),
+) -> None:
+    """Backfill stock.risk_veto_daily from existing PIT risk sources."""
+    settings = get_settings()
+    engine = get_engine(settings)
+    from ifa.families.stock.diagnostic.risk_veto import backfill_risk_veto_daily
+
+    start_date = dt.date.fromisoformat(start)
+    end_date = dt.date.fromisoformat(end or start)
+    result = backfill_risk_veto_daily(engine, start=start_date, end=end_date, ts_code=ts_code)
+    if output_json:
+        console.print(json.dumps(result, ensure_ascii=False, default=str, indent=2))
+        return
+    console.print(
+        "[green]stock.risk_veto_daily[/green] "
+        f"{result['start']}→{result['end']} rows={result['upserted_rows']} "
+        f"persisted={result['persisted_rows']} hard={result['hard_rows']} logic={result['logic_version']}"
+    )
+
+
 def _render_diagnostic_payload(report, output_format: str, *, render_markdown, render_html) -> str:
     if output_format == "json":
         return json.dumps(report.to_dict(), ensure_ascii=False, default=str, indent=2) + "\n"
