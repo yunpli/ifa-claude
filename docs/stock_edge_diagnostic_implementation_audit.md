@@ -2,11 +2,11 @@
 
 Date: 2026-05-08  
 Baseline commit: `ff10e2d Add Stock Edge diagnostic MVP`  
-Latest implementation update: P0 persistence/synthesis contract + P1 TA rollup pass
+Latest implementation update: P2 delivery dry-run contract + weekly theme heat source-policy builder
 
 ## Executive Read
 
-The diagnostic MVP has the right product shape: a read-only single-stock report with separate perspectives and conflict-preserving synthesis.  The latest P0/P1 pass adds structured run manifests, DB persistence, multi-stock directory output with index summary, per-perspective freshness quality (`fresh/stale/unavailable`), latency/source contracts, a compact institutional HTML layout, theme-cache hit surfacing, TA/Ningbo/risk rollup improvements, and a persisted `stock.sector_cycle_leader_daily` rank surface for future backfills.  The main remaining gap is that most perspectives are still thin evidence collectors, not yet split into first-class adapter modules.  Telegram delivery remains contract-only/deferred and no cron/report delivery behavior has changed.
+The diagnostic MVP has the right product shape: a read-only single-stock report with separate perspectives and conflict-preserving synthesis.  P0/P1 added structured run manifests, DB persistence, multi-stock directory output with index summary, per-perspective freshness quality (`fresh/stale/unavailable`), latency/source contracts, a compact institutional HTML layout, adapter modules, theme-cache hit surfacing, TA/Ningbo/risk rollup improvements, and a persisted `stock.sector_cycle_leader_daily` rank surface for future backfills.  P2 now adds a Telegram dry-run delivery payload contract and a weekly theme heat builder that can use existing cached local event memories.  No Telegram/external send, cron mutation, production YAML mutation, auto-promote, or apply-to-baseline behavior has changed.
 
 ## Current Implementation By Perspective
 
@@ -33,10 +33,12 @@ Available:
 - `--full-stock-edge` to run the expensive strategy matrix and decision layer
 - `--persist-db/--no-persist-db` for best-effort audit persistence; default tries DB and falls back to artifact/terminal output when unavailable
 - Existing full report path remains `uv run python -m ifa.cli stock report|quick`
+- Dry-run Telegram payload path:
+  `uv run python scripts/stock_edge_diagnostic_delivery.py --manifest <CN_stock_edge_diagnostic_*_manifest.json> --json`
+  This writes a `stock_edge_diagnostic_telegram_delivery_payload` JSON containing title, short text, attachment paths, recipient placeholder, dry-run flag, latency, and failure context. It never sends externally.
 
 Missing:
 
-- No Telegram-specific short summary/delivery contract.
 - No aggregate latency SLO monitor table; per-perspective `latency_ms` is already in manifest/DB evidence.
 
 ## Data / Table Gaps
@@ -51,7 +53,7 @@ DB promotion implemented as best-effort persistence:
 - `stock.diagnostic_runs`: one row per diagnostic request, with `ts_code`, `as_of_trade_date`, `generated_at`, `run_mode`, `status`, `synthesis_json`, `manifest_json`, `output_paths_json`, `logic_version`.
 - `stock.diagnostic_perspective_evidence`: normalized perspective evidence rows keyed by `run_id`, `perspective_key`, `status`, `view`, `source_tables_json`, `source_as_of`, `evidence_json`, `raw_json`.
 - CLI: `uv run python -m ifa.cli stock diagnose 300042.SZ --format json` attempts best-effort DB rows without mutating production YAML or crons; `--no-persist-db` disables DB writes.
-- Real `stock.theme_heat_weekly` rows with `quality_flag != 'stub'`, mapped to SW L1/L2 and representative stocks.
+- Real `stock.theme_heat_weekly` rows with `quality_flag != 'stub'`, mapped to SW L1/L2 and representative stocks. Implemented sources are approved JSON ingestion and local cached event memories; broad weekly news/report source policy is still the blocker for reliable production backfill.
 
 P1/P2 candidate surfaces:
 
@@ -128,13 +130,13 @@ Current P0/P1/P2 checklist:
    - Files: update Telegram skill/runbook docs, no cron mutation.
    - Output: 3-5 line summary plus HTML attachment path.
    - Verify: dry-run message payload from a generated diagnostic artifact.
-   - Status: deferred. Backlog item: add `docs/stock_edge_diagnostic_telegram_contract.md` with payload schema and a dry-run formatter that consumes manifest JSON only.
+   - Status: implemented as no-send dry-run formatter. Files: `ifa/families/stock/diagnostic/delivery.py`, `scripts/stock_edge_diagnostic_delivery.py`, tests in `tests/stock/test_diagnostic.py`. It consumes manifest JSON only and does not call Telegram.
 
 2. Real weekly theme heat.
    - Files: replace `scripts/stock_edge_theme_heat_stub.py` with a cache builder that writes non-stub rows from approved inputs.
    - Tables: `stock.theme_heat_weekly`.
    - Verify: no per-row LLM calls in backtests; every row has source URLs/evidence and sector mapping.
-   - Status: blocked/deferred. Needs approved upstream inputs/source policy; current `stock_edge_theme_heat_stub.py` remains stub-only and is not alpha evidence.
+   - Status: partially implemented. `scripts/stock_edge_theme_heat_builder.py` / `scripts/stock_edge_theme_heat_stub.py --build-local` can write `quality_flag=local_source_cache` rows from existing `research.company_event_memory` and `ta.catalyst_event_memory` without external LLM calls. If rows are insufficient it returns `status=blocked` with `reason=insufficient_cached_local_sources`; `--from-json` remains the approved cached/manual ingestion path. Remaining blocker: define/approve a wider weekly news/report source policy and mapping rules before calling this production alpha evidence.
 
 3. Latency/availability monitoring.
    - Files: CLI timing wrapper or `stock.diagnostic_latency_log`.
@@ -146,5 +148,5 @@ Current P0/P1/P2 checklist:
 ```bash
 uv run python scripts/stock_edge_diagnostic_audit.py
 uv run pytest tests/stock/test_diagnostic.py tests/stock/test_theme_heat.py -q
-uv run python -m compileall -q ifa/families/stock/diagnostic ifa/families/stock/theme_heat.py ifa/cli/stock.py scripts/stock_edge_diagnostic_audit.py
+uv run python -m compileall -q ifa/families/stock/diagnostic ifa/families/stock/theme_heat.py ifa/cli/stock.py scripts/stock_edge_diagnostic_audit.py scripts/stock_edge_diagnostic_delivery.py scripts/stock_edge_theme_heat_stub.py scripts/stock_edge_theme_heat_builder.py
 ```

@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 
 from ifa.families.stock.diagnostic.models import EvidencePoint, PerspectiveEvidence
+from ifa.families.stock.diagnostic.delivery import build_telegram_delivery_payload
 from ifa.families.stock.diagnostic.persistence import persist_diagnostic_run
 from ifa.families.stock.diagnostic.service import diagnostic_manifest_payload, render_html, render_markdown, synthesize_diagnostic
 from ifa.families.stock.diagnostic.models import DiagnosticReport
@@ -198,6 +199,44 @@ def test_manifest_payload_persists_run_contract():
     assert payload["conclusion"] == report.synthesis.conclusion
     assert payload["output_paths"]["html"] == "/tmp/report.html"
     assert payload["perspective_statuses"]["risk"]["sources"] == ["smartmoney.raw_daily"]
+
+
+def test_telegram_delivery_payload_is_dry_run_contract_only():
+    manifest = {
+        "artifact_type": "stock_edge_diagnostic_run",
+        "ts_code": "300042.SZ",
+        "name": "朗科科技",
+        "as_of_trade_date": "2026-05-06",
+        "conclusion": "watch only",
+        "confidence": "low",
+        "synthesis": {
+            "horizon_suitability": {"5d": "watch", "10d": "watch", "20d": "neutral"},
+            "trigger": "放量突破",
+            "invalidation": "跌破支撑",
+            "conflicts": ["sector positive but TA unconfirmed"],
+        },
+        "output_paths": {"html": "/tmp/report.html"},
+        "perspective_statuses": {
+            "ta": {"status": "available", "freshness_status": "fresh", "latency_ms": 12.3},
+            "research_news": {
+                "status": "unavailable",
+                "freshness_status": "unavailable",
+                "latency_ms": 3.0,
+                "missing_required": ["stock.theme_heat_weekly"],
+            },
+        },
+    }
+
+    payload = build_telegram_delivery_payload(manifest, recipient_placeholder="telegram:<chat_id>")
+
+    assert payload["artifact_type"] == "stock_edge_diagnostic_telegram_delivery_payload"
+    assert payload["dry_run"] is True
+    assert payload["external_send_performed"] is False
+    assert payload["delivery_mode"] == "ifa_direct_send_preferred_if_enabled"
+    assert "结论: watch only" in payload["short_text"]
+    assert payload["attachments"][0]["path"] == "/tmp/report.html"
+    assert payload["failure_context"]["unavailable"] == ["research_news"]
+    assert payload["latency"]["total_latency_ms"] == 15.3
 
 
 def test_synthesis_tags_conflict_taxonomy_for_hard_risk():

@@ -23,7 +23,9 @@ REQUIRED_PERSPECTIVES = {
 EXPECTED_SURFACES = {
     "diagnostic_models": "ifa/families/stock/diagnostic/models.py",
     "diagnostic_service": "ifa/families/stock/diagnostic/service.py",
+    "diagnostic_delivery": "ifa/families/stock/diagnostic/delivery.py",
     "diagnostic_persistence": "ifa/families/stock/diagnostic/persistence.py",
+    "diagnostic_delivery_cli": "scripts/stock_edge_diagnostic_delivery.py",
     "diagnose_cli": "ifa/cli/stock.py",
     "diagnostic_tests": "tests/stock/test_diagnostic.py",
     "theme_heat_model": "ifa/families/stock/theme_heat.py",
@@ -67,25 +69,29 @@ def main() -> int:
         })
 
     service_functions = _defined_functions("ifa/families/stock/diagnostic/service.py")
-    for fn in (
-        "build_diagnostic_report",
-        "synthesize_diagnostic",
-        "render_markdown",
-        "diagnostic_manifest_payload",
-        "_with_contract_fields",
-        "_stock_edge_perspective",
-        "_ta_perspective",
-        "_ningbo_perspective",
-        "_research_perspective",
-        "_risk_perspective",
-    ):
+    for fn in ("build_diagnostic_report", "synthesize_diagnostic", "render_markdown", "diagnostic_manifest_payload"):
         checks.append({"check": f"function:{fn}", "ok": fn in service_functions, "path": "ifa/families/stock/diagnostic/service.py"})
+    adapter_functions = {
+        key: _defined_functions(rel)
+        for key, rel in (
+            ("stock_edge_sector_cycle", "ifa/families/stock/diagnostic/adapters/stock_edge_sector_cycle.py"),
+            ("ta", "ifa/families/stock/diagnostic/adapters/ta.py"),
+            ("ningbo", "ifa/families/stock/diagnostic/adapters/ningbo.py"),
+            ("research_news", "ifa/families/stock/diagnostic/adapters/research_news.py"),
+            ("risk", "ifa/families/stock/diagnostic/adapters/risk.py"),
+        )
+    }
+    for key, funcs in adapter_functions.items():
+        checks.append({"check": f"adapter:{key}:collect", "ok": "collect" in funcs, "path": f"ifa/families/stock/diagnostic/adapters/{key}.py"})
     persistence_functions = _defined_functions("ifa/families/stock/diagnostic/persistence.py")
     checks.append({
         "check": "function:persist_diagnostic_run",
         "ok": "persist_diagnostic_run" in persistence_functions,
         "path": "ifa/families/stock/diagnostic/persistence.py",
     })
+    delivery_functions = _defined_functions("ifa/families/stock/diagnostic/delivery.py")
+    for fn in ("build_telegram_delivery_payload", "write_delivery_payload"):
+        checks.append({"check": f"function:{fn}", "ok": fn in delivery_functions, "path": "ifa/families/stock/diagnostic/delivery.py"})
 
     cli_text = _read("ifa/cli/stock.py")
     checks.append({"check": "cli:diagnose-command", "ok": '@app.command("diagnose")' in cli_text, "path": "ifa/cli/stock.py"})
@@ -98,6 +104,7 @@ def main() -> int:
             "ifa/families/stock/diagnostic/models.py",
             "ifa/families/stock/diagnostic/service.py",
             "ifa/families/stock/diagnostic/persistence.py",
+            "ifa/families/stock/diagnostic/delivery.py",
         )
     )
     for token in FORBIDDEN_MUTATION_TOKENS:

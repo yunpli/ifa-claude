@@ -10,13 +10,13 @@ from __future__ import annotations
 import datetime as dt
 import json
 from dataclasses import dataclass, field
-from typing import Any, Sequence
-
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+from typing import Any, Sequence
 
 
 PROMPT_VERSION = "stock_theme_heat_v1"
+SOURCE_POLICY_VERSION = "stock_theme_heat_local_sources_v1"
 
 
 @dataclass(frozen=True)
@@ -121,3 +121,193 @@ def load_weekly_theme_heat(engine: Engine, valid_week: dt.date) -> list[dict[str
     """)
     with engine.connect() as conn:
         return [dict(row) for row in conn.execute(sql, {"valid_week": week_start(valid_week)}).mappings().all()]
+
+
+def build_weekly_theme_heat_from_local_sources(
+    engine: Engine,
+    valid_week: dt.date,
+    *,
+    min_source_rows: int = 3,
+    max_themes: int = 5,
+    run_mode: str = "manual",
+) -> dict[str, Any]:
+    """Build non-stub weekly theme heat from already cached local event tables.
+
+    This is intentionally a conservative source-policy builder, not an online
+    extractor.  It reads only structured local memories that were produced by
+    other jobs.  If those rows do not include enough event/theme evidence for a
+    week, it returns a blocker and leaves operator JSON ingestion as the
+    supported path.
+    """
+    week = week_start(valid_week)
+    end = week + dt.timedelta(days=7)
+    rows = _load_theme_source_rows(engine, week, end)
+    if len(rows) < min_source_rows:
+        return {
+            "status": "blocked",
+            "valid_week": week.isoformat(),
+            "source_policy": SOURCE_POLICY_VERSION,
+            "source_rows": len(rows),
+            "required_source_rows": min_source_rows,
+            "reason": "insufficient_cached_local_sources",
+            "message": (
+                "No external LLM/news calls are made by this builder. Provide "
+                "--from-json with approved cached/manual theme rows, or backfill "
+                "research.company_event_memory / ta.catalyst_event_memory first."
+            ),
+        }
+    themes = _aggregate_theme_rows(rows, week=week, max_themes=max_themes, run_mode=run_mode)
+    if not themes:
+        return {
+            "status": "blocked",
+            "valid_week": week.isoformat(),
+            "source_policy": SOURCE_POLICY_VERSION,
+            "source_rows": len(rows),
+            "required_source_rows": min_source_rows,
+            "reason": "source_rows_not_theme_mappable",
+        }
+    return {
+        "status": "ready",
+        "valid_week": week.isoformat(),
+        "source_policy": SOURCE_POLICY_VERSION,
+        "source_rows": len(rows),
+        "rows": themes,
+    }
+
+
+def _load_theme_source_rows(engine: Engine, week: dt.date, end: dt.date) -> list[dict[str, Any]]:
+    sql = text("""
+        SELECT 'research.company_event_memory' AS source_table,
+               capture_date,
+               event_type,
+               title,
+               summary,
+               polarity,
+               importance,
+               source_url,
+               ts_code,
+               NULL::text[] AS target_ts_codes,
+               NULL::text[] AS target_sectors
+        FROM research.company_event_memory
+        WHERE capture_date >= :week AND capture_date < :end
+        UNION ALL
+        SELECT 'ta.catalyst_event_memory' AS source_table,
+               capture_date,
+               event_type,
+               title,
+               summary,
+               polarity,
+               importance,
+               source_url,
+               NULL AS ts_code,
+               target_ts_codes,
+               target_sectors
+        FROM ta.catalyst_event_memory
+        WHERE capture_date >= :week AND capture_date < :end
+    """)
+    try:
+        with engine.connect() as conn:
+            return [dict(row) for row in conn.execute(sql, {"week": week, "end": end}).mappings().all()]
+    except Exception:
+        return []
+
+
+def _aggregate_theme_rows(
+    rows: Sequence[dict[str, Any]],
+    *,
+    week: dt.date,
+    max_themes: int,
+    run_mode: str,
+) -> list[WeeklyThemeHeat]:
+    buckets: dict[str, dict[str, Any]] = {}
+    total_weight = 0.0
+    for row in rows:
+        label = _theme_label(row)
+        bucket = buckets.setdefault(
+            label,
+            {
+                "label": label,
+                "weight": 0.0,
+                "rows": 0,
+                "sources": set(),
+                "urls": set(),
+                "stocks": {},
+                "sectors": {},
+                "polarity": {"positive": 0, "neutral": 0, "negative": 0},
+            },
+        )
+        weight = _row_weight(row)
+        total_weight += weight
+        bucket["weight"] += weight
+        bucket["rows"] += 1
+        bucket["sources"].add(row.get("source_table"))
+        if row.get("source_url"):
+            bucket["urls"].add(str(row["source_url"]))
+        for stock in _stock_codes(row):
+            bucket["stocks"][stock] = {"ts_code": stock}
+        for sector in _sector_names(row):
+            bucket["sectors"][sector] = {"sector_name": sector}
+        polarity = str(row.get("polarity") or "neutral")
+        if polarity in bucket["polarity"]:
+            bucket["polarity"][polarity] += 1
+    ranked = sorted(buckets.values(), key=lambda item: (item["weight"], item["rows"], item["label"]), reverse=True)
+    denom = max(total_weight, 1.0)
+    output: list[WeeklyThemeHeat] = []
+    for rank, bucket in enumerate(ranked[:max_themes], start=1):
+        heat_score = max(0.05, min(1.0, float(bucket["weight"]) / denom))
+        output.append(
+            WeeklyThemeHeat(
+                valid_week=week,
+                theme_rank=rank,
+                theme_label=str(bucket["label"]),
+                category=str(bucket["label"]),
+                heat_score=round(heat_score, 4),
+                confidence=round(min(0.95, 0.35 + 0.1 * int(bucket["rows"])), 4),
+                affected_sectors=list(bucket["sectors"].values())[:20],
+                representative_stocks=list(bucket["stocks"].values())[:20],
+                source_urls=sorted(bucket["urls"])[:20],
+                evidence={
+                    "source_policy": SOURCE_POLICY_VERSION,
+                    "source_tables": sorted(s for s in bucket["sources"] if s),
+                    "source_rows": bucket["rows"],
+                    "polarity_counts": bucket["polarity"],
+                    "builder": "local_cached_event_memory",
+                },
+                model_name=None,
+                prompt_version=SOURCE_POLICY_VERSION,
+                run_mode=run_mode,
+                quality_flag="local_source_cache",
+            )
+        )
+    return output
+
+
+def _theme_label(row: dict[str, Any]) -> str:
+    event_type = str(row.get("event_type") or "").strip()
+    if event_type:
+        return event_type
+    title = str(row.get("title") or "").strip()
+    return title[:24] if title else "uncategorized_event"
+
+
+def _row_weight(row: dict[str, Any]) -> float:
+    importance = {"high": 1.0, "medium": 0.65, "low": 0.35}.get(str(row.get("importance") or "").lower(), 0.5)
+    polarity = {"positive": 1.0, "neutral": 0.75, "negative": 0.85}.get(str(row.get("polarity") or "").lower(), 0.75)
+    return importance * polarity
+
+
+def _stock_codes(row: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    if row.get("ts_code"):
+        values.append(str(row["ts_code"]))
+    targets = row.get("target_ts_codes") or []
+    if isinstance(targets, list):
+        values.extend(str(item) for item in targets if item)
+    return sorted(set(values))
+
+
+def _sector_names(row: dict[str, Any]) -> list[str]:
+    sectors = row.get("target_sectors") or []
+    if not isinstance(sectors, list):
+        return []
+    return sorted({str(item) for item in sectors if item})
