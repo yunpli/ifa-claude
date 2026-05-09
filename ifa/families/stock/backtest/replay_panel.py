@@ -88,6 +88,11 @@ class PanelManifest:
     total_pairs: int = 0
     failed_rows: int = 0
     failure_details: list[dict[str, Any]] = field(default_factory=list)
+    chunk_size: int | None = None
+    completed_pairs: int = 0
+    completed_chunks: int = 0
+    requested_chunks: int = 0
+    runtime_sec: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         total_pairs = self.total_pairs or (self.universe_size * len(self.as_of_dates))
@@ -99,6 +104,11 @@ class PanelManifest:
             "failed_rows": self.failed_rows,
             "failure_rate": round(self.failed_rows / total_pairs, 6) if total_pairs else 0.0,
             "failure_details": self.failure_details,
+            "chunk_size": self.chunk_size,
+            "completed_pairs": self.completed_pairs or total_pairs,
+            "completed_chunks": self.completed_chunks,
+            "requested_chunks": self.requested_chunks,
+            "runtime_sec": self.runtime_sec,
         }
 
 
@@ -156,30 +166,86 @@ def build_replay_panel(
         return rows, manifest
 
     total_pairs = sum(len(stocks) for _, stocks in chunks)
-    if on_progress:
-        on_progress({"event": "cache_miss", "path": str(cache_path), "total_pairs": total_pairs})
-    started = time.monotonic()
-    n_workers = n_workers or max(1, (os.cpu_count() or 4) - 1)
-
+    checkpoint_dir = _chunk_checkpoint_dir(cache_path)
+    chunk_results: dict[str, tuple[list[PanelRow], list[dict[str, Any]], int]] = {}
     rows: list[PanelRow] = []
     failure_details: list[dict[str, Any]] = []
     completed = 0
+    pending_chunks: list[tuple[dt.date, list[str], str]] = []
+    for as_of, codes in chunks:
+        chunk_key = _chunk_key(as_of, codes)
+        loaded = _load_chunk_checkpoint(checkpoint_dir, chunk_key)
+        if loaded is not None:
+            chunk_rows, chunk_failures, requested = loaded
+            chunk_results[chunk_key] = loaded
+            rows.extend(chunk_rows)
+            failure_details.extend(chunk_failures)
+            completed += requested
+        else:
+            pending_chunks.append((as_of, codes, chunk_key))
+    if on_progress:
+        on_progress({
+            "event": "cache_miss",
+            "path": str(cache_path),
+            "total_pairs": total_pairs,
+            "resumed_pairs": completed,
+            "pending_pairs": sum(len(codes) for _, codes, _ in pending_chunks),
+            "checkpoint_dir": str(checkpoint_dir),
+        })
+    started = time.monotonic()
+    n_workers = n_workers or max(1, (os.cpu_count() or 4) - 1)
+
+    _write_checkpoint_manifest(
+        checkpoint_dir,
+        cache_path=cache_path,
+        universe_id=universe_id,
+        base_hash=base_hash,
+        skip_llm=skip_llm,
+        total_pairs=total_pairs,
+        completed_pairs=completed,
+        requested_chunks=len(chunks),
+        completed_chunks=len(chunk_results),
+        chunk_size=max_codes_per_chunk,
+        failures=failure_details,
+        started=started,
+    )
     if n_workers <= 1:
-        for as_of, codes in chunks:
+        for as_of, codes, chunk_key in pending_chunks:
             chunk_rows, chunk_failures = _build_chunk_for_date(engine_url, as_of, codes, base_params, skip_llm, targets)
+            _save_chunk_checkpoint(checkpoint_dir, chunk_key, as_of, codes, chunk_rows, chunk_failures)
+            chunk_results[chunk_key] = (chunk_rows, chunk_failures, len(codes))
             rows.extend(chunk_rows)
             failure_details.extend(chunk_failures)
             completed += len(codes)
             if on_progress:
                 _emit_progress(on_progress, completed, total_pairs, len(rows), len(failure_details), started)
+            _write_checkpoint_manifest(
+                checkpoint_dir,
+                cache_path=cache_path,
+                universe_id=universe_id,
+                base_hash=base_hash,
+                skip_llm=skip_llm,
+                total_pairs=total_pairs,
+                completed_pairs=completed,
+                requested_chunks=len(chunks),
+                completed_chunks=len(chunk_results),
+                chunk_size=max_codes_per_chunk,
+                failures=failure_details,
+                started=started,
+            )
     else:
         with ProcessPoolExecutor(max_workers=n_workers) as ex:
             futures = {
                 ex.submit(_build_chunk_for_date, engine_url, as_of, codes, base_params, skip_llm, targets): (as_of, codes)
-                for as_of, codes in chunks
+                for as_of, codes, _chunk_key_value in pending_chunks
+            }
+            future_keys = {
+                fut: _chunk_key(as_of, codes)
+                for fut, (as_of, codes) in futures.items()
             }
             for fut in as_completed(futures):
                 as_of, codes = futures[fut]
+                chunk_key = future_keys[fut]
                 try:
                     chunk_rows, chunk_failures = fut.result()
                 except Exception as exc:
@@ -195,11 +261,27 @@ def build_replay_panel(
                             "failed": len(chunk_failures),
                             "error": repr(exc),
                         })
+                _save_chunk_checkpoint(checkpoint_dir, chunk_key, as_of, codes, chunk_rows, chunk_failures)
+                chunk_results[chunk_key] = (chunk_rows, chunk_failures, len(codes))
                 rows.extend(chunk_rows)
                 failure_details.extend(chunk_failures)
                 completed += len(codes)
                 if on_progress:
                     _emit_progress(on_progress, completed, total_pairs, len(rows), len(failure_details), started)
+                _write_checkpoint_manifest(
+                    checkpoint_dir,
+                    cache_path=cache_path,
+                    universe_id=universe_id,
+                    base_hash=base_hash,
+                    skip_llm=skip_llm,
+                    total_pairs=total_pairs,
+                    completed_pairs=completed,
+                    requested_chunks=len(chunks),
+                    completed_chunks=len(chunk_results),
+                    chunk_size=max_codes_per_chunk,
+                    failures=failure_details,
+                    started=started,
+                )
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     _save_panel_parquet(rows, cache_path)
@@ -218,6 +300,11 @@ def build_replay_panel(
         total_pairs=total_pairs,
         failed_rows=len(failure_details),
         failure_details=failure_details[:200],
+        chunk_size=max_codes_per_chunk,
+        completed_pairs=completed,
+        completed_chunks=len(chunk_results),
+        requested_chunks=len(chunks),
+        runtime_sec=round(time.monotonic() - started, 3),
     )
     manifest_path.write_text(json.dumps(manifest.to_dict(), ensure_ascii=False, default=str, indent=2), encoding="utf-8")
     return rows, manifest
@@ -811,6 +898,11 @@ def _load_manifest(path: Path) -> PanelManifest:
         total_pairs=total_pairs,
         failed_rows=int(raw.get("failed_rows") or max(0, total_pairs - int(raw["n_rows"]))),
         failure_details=list(raw.get("failure_details") or []),
+        chunk_size=int(raw["chunk_size"]) if raw.get("chunk_size") is not None else None,
+        completed_pairs=int(raw.get("completed_pairs") or total_pairs),
+        completed_chunks=int(raw.get("completed_chunks") or 0),
+        requested_chunks=int(raw.get("requested_chunks") or 0),
+        runtime_sec=float(raw["runtime_sec"]) if raw.get("runtime_sec") is not None else None,
     )
 
 
@@ -843,6 +935,112 @@ def _failure_detail(
     }
     detail.update({k: v for k, v in extra.items() if v is not None})
     return detail
+
+
+def _chunk_checkpoint_dir(cache_path: Path) -> Path:
+    """Sidecar checkpoint directory for an in-progress final panel cache.
+
+    The final panel cache filename remains the compatibility boundary. Chunk files
+    live next to it and are intentionally keyed by the exact PIT date + code list,
+    so changing chunk size, universe membership, params hash, or LLM mode naturally
+    lands in a different final stem or different chunk ids.
+    """
+    return cache_path.with_suffix(".chunks")
+
+
+def _chunk_key(as_of_date: dt.date, codes: Sequence[str]) -> str:
+    payload = {"as_of_date": as_of_date.isoformat(), "ts_codes": list(codes)}
+    digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
+    return f"{as_of_date:%Y%m%d}_{digest}"
+
+
+def _chunk_paths(checkpoint_dir: Path, chunk_key: str) -> tuple[Path, Path]:
+    return checkpoint_dir / f"{chunk_key}.parquet", checkpoint_dir / f"{chunk_key}.json"
+
+
+def _save_chunk_checkpoint(
+    checkpoint_dir: Path,
+    chunk_key: str,
+    as_of_date: dt.date,
+    codes: Sequence[str],
+    rows: list[PanelRow],
+    failures: list[dict[str, Any]],
+) -> None:
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    parquet_path, meta_path = _chunk_paths(checkpoint_dir, chunk_key)
+    tmp_parquet = parquet_path.with_suffix(".parquet.tmp")
+    tmp_meta = meta_path.with_suffix(".json.tmp")
+    _save_panel_parquet(rows, tmp_parquet)
+    meta = {
+        "chunk_key": chunk_key,
+        "as_of_date": as_of_date.isoformat(),
+        "ts_codes": list(codes),
+        "requested": len(codes),
+        "ok": len(rows),
+        "failed": len(failures),
+        "failure_details": failures[:200],
+        "completed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    tmp_meta.write_text(json.dumps(meta, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
+    tmp_parquet.replace(parquet_path)
+    tmp_meta.replace(meta_path)
+
+
+def _load_chunk_checkpoint(checkpoint_dir: Path, chunk_key: str) -> tuple[list[PanelRow], list[dict[str, Any]], int] | None:
+    parquet_path, meta_path = _chunk_paths(checkpoint_dir, chunk_key)
+    if not parquet_path.exists() or not meta_path.exists():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        rows = _load_panel_parquet(parquet_path)
+        failures = list(meta.get("failure_details") or [])
+        requested = int(meta.get("requested") or (len(rows) + len(failures)))
+        if requested != len(rows) + int(meta.get("failed", len(failures))):
+            return None
+        return rows, failures, requested
+    except Exception:
+        return None
+
+
+def _write_checkpoint_manifest(
+    checkpoint_dir: Path,
+    *,
+    cache_path: Path,
+    universe_id: str,
+    base_hash: str,
+    skip_llm: bool,
+    total_pairs: int,
+    completed_pairs: int,
+    requested_chunks: int,
+    completed_chunks: int,
+    chunk_size: int | None,
+    failures: list[dict[str, Any]],
+    started: float,
+) -> None:
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    elapsed = time.monotonic() - started
+    payload = {
+        "status": "complete" if completed_pairs >= total_pairs else "in_progress",
+        "panel_path": str(cache_path),
+        "universe_id": universe_id,
+        "base_param_hash": base_hash,
+        "skip_llm": skip_llm,
+        "requested": total_pairs,
+        "completed": completed_pairs,
+        "failed": len(failures),
+        "ok": max(0, completed_pairs - len(failures)),
+        "failure_rate": round(len(failures) / total_pairs, 6) if total_pairs else 0.0,
+        "requested_chunks": requested_chunks,
+        "completed_chunks": completed_chunks,
+        "chunk_size": chunk_size,
+        "runtime_sec": round(elapsed, 3),
+        "failure_details": failures[:200],
+        "updated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    (checkpoint_dir / "checkpoint_manifest.json").write_text(
+        json.dumps(payload, ensure_ascii=False, default=str, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _forward_labels_from_db(

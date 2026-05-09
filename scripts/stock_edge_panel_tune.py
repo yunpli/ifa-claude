@@ -44,6 +44,10 @@ from ifa.families.stock.backtest.panel_evaluator import (
     regime_bucketed_rank_ic_lift,
     walk_forward_split,
 )
+from ifa.families.stock.backtest.outcome_proxy import (
+    build_outcome_proxy_cache,
+    summarize_outcome_proxy,
+)
 from ifa.families.stock.backtest.promotion import auto_promote_if_passing, evaluate_promotion_gates
 from ifa.families.stock.backtest.replay_panel import build_replay_panel
 from ifa.families.stock.backtest.tuning_artifact import write_tuning_artifact
@@ -294,6 +298,8 @@ def main() -> int:
     parser.add_argument("--stratified-pool-multiple", type=int, default=8, help="Candidate pool multiple for stratified-pit (default 8)")
     parser.add_argument("--diagnose-panel", action=argparse.BooleanOptionalAction, default=True, help="Write panel diagnosis artifact after panel build")
     parser.add_argument("--diagnosis-output-dir", default="/Users/neoclaw/claude/ifaenv/manifests/stock_edge_panel_diagnostics", help="Directory for panel diagnosis JSON artifacts")
+    parser.add_argument("--proxy-only", action="store_true", help="Build fast forward-label/cheap-feature proxy cache and diagnostics, then exit before full replay")
+    parser.add_argument("--force-proxy-cache", action="store_true", help="Rebuild the fast outcome proxy cache even if it already exists")
     parser.add_argument("--two-stage", action="store_true", help="Use cheap proxy prefilter before expensive replay search")
     parser.add_argument("--proxy-candidates", type=int, default=128, help="Cheap proxy candidate budget in --two-stage mode")
     parser.add_argument("--proxy-max-rows", type=int, default=600, help="Max rows for cheap proxy subset in --two-stage mode")
@@ -455,6 +461,52 @@ def main() -> int:
         )
 
     requested_rows = sum(len(ts_codes_by_date.get(d, [])) for d in pit_dates) if ts_codes_by_date else len(ts_codes) * len(pit_dates)
+
+    if args.proxy_only:
+        print(f"\n[3/4] Building fast outcome proxy ({requested_rows} requested rows)...")
+        t0 = time.monotonic()
+        proxy_df, proxy_manifest = build_outcome_proxy_cache(
+            engine,
+            universe_id=universe_label,
+            as_of_dates=pit_dates,
+            ts_codes=ts_codes,
+            ts_codes_by_date=ts_codes_by_date,
+            universe_selection=universe_selection,
+            force=args.force_proxy_cache,
+        )
+        proxy_elapsed = time.monotonic() - t0
+        summary = summarize_outcome_proxy(proxy_df)
+        output_dir = Path(args.diagnosis_output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        proxy_report_path = output_dir / f"{universe_label}__outcome_proxy_{stamp}.json"
+        proxy_report = {
+            "manifest": proxy_manifest.to_dict(),
+            "diagnostics": summary,
+            "usage": {
+                "purpose": "fast PIT forward-label and cheap-feature diagnostics; no production strategy replay scores",
+                "next_step": "run full replay only after proxy diagnostics show label/cohort coverage is acceptable",
+            },
+        }
+        proxy_report_path.write_text(json.dumps(proxy_report, ensure_ascii=False, default=str, indent=2), encoding="utf-8")
+        print(f"      proxy built: {len(proxy_df)} rows in {proxy_elapsed:.1f}s ({len(proxy_df)*60/max(proxy_elapsed,1):.1f} rows/min)")
+        print(f"      cached at: {proxy_manifest.cache_path}")
+        print(f"      manifest: {proxy_manifest.manifest_path}")
+        print(f"      diagnostics: {proxy_report_path}")
+        print(
+            f"      row summary: requested={proxy_manifest.requested_rows} ok={proxy_manifest.n_rows} "
+            f"fail={proxy_manifest.failed_rows} failure_rate={proxy_manifest.failed_rows / max(proxy_manifest.requested_rows, 1):.2%}"
+        )
+        for h in (5, 10, 20):
+            hdiag = summary.get("horizons", {}).get(f"{h}d", {})
+            cheap_ic = summary.get("cheap_composite_rank_ic", {}).get(f"{h}d", 0.0)
+            print(
+                f"      {h}d labels: n={hdiag.get('n', 0)} avg={float(hdiag.get('avg_return', 0.0))*100:+.2f}% "
+                f"positive={float(hdiag.get('positive_rate', 0.0)):.2f} cheap_rank_ic={cheap_ic:+.3f}"
+            )
+        print("\n  [proxy-only] full strategy replay/search skipped; YAML untouched")
+        return 0
+
     print(f"\n[3/4] Building replay panel ({requested_rows} requested rows)...")
     t0 = time.monotonic()
     url = engine.url.render_as_string(hide_password=False)
@@ -467,7 +519,12 @@ def main() -> int:
             print(f"      [cache] reused panel: {p['rows']} rows from {p['path']}")
             return
         if p.get("event") == "cache_miss":
-            print(f"      [cache] miss/rebuild: {p.get('total_pairs', 0)} requested rows -> {p['path']}")
+            resumed = int(p.get("resumed_pairs") or 0)
+            pending = int(p.get("pending_pairs") or p.get("total_pairs") or 0)
+            resume_text = f", resumed={resumed}, pending={pending}" if resumed else ""
+            print(f"      [cache] miss/rebuild: {p.get('total_pairs', 0)} requested rows{resume_text} -> {p['path']}")
+            if p.get("checkpoint_dir"):
+                print(f"      [cache] checkpoints: {p.get('checkpoint_dir')}")
             return
         if p.get("event") == "row_error":
             print(f"      [panel row error] {p.get('error')}")

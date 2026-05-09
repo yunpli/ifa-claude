@@ -12,11 +12,16 @@ from ifa.families.stock.backtest.panel_evaluator import (
 from ifa.families.stock.backtest.replay_panel import (
     ALL_SIGNAL_KEYS,
     PanelRow,
+    _chunk_checkpoint_dir,
+    _chunk_key,
+    _load_chunk_checkpoint,
     _load_manifest,
     _membership_hash,
     _panel_cache_path,
     _panel_chunks,
+    _save_chunk_checkpoint,
 )
+from ifa.families.stock.backtest.outcome_proxy import summarize_outcome_proxy
 from scripts.stock_edge_panel_tune import _cheap_proxy_rows, _strata_counts
 
 
@@ -84,6 +89,48 @@ def test_panel_chunks_can_split_large_date_cohorts_for_progress():
     assert chunks == [(d1, ["a", "b"]), (d1, ["c", "d"]), (d1, ["e"])]
 
 
+def test_chunk_checkpoint_roundtrip_preserves_rows_and_failures(tmp_path):
+    day = dt.date(2026, 1, 2)
+    cache_path = tmp_path / "panel.parquet"
+    chunk_dir = _chunk_checkpoint_dir(cache_path)
+    key = _chunk_key(day, ["000001.SZ", "000002.SZ"])
+    row = PanelRow(
+        ts_code="000001.SZ",
+        as_of_date=day,
+        entry_close=10.0,
+        signals={"entry_fill_replay": {"score": 0.7, "status": "active", "cluster": "execution"}},
+        forward_5d_return=1.0,
+        forward_10d_return=2.0,
+        forward_20d_return=3.0,
+        forward_5d_target_first=False,
+        forward_10d_target_first=False,
+        forward_20d_target_first=False,
+        forward_5d_stop_first=False,
+        forward_10d_stop_first=False,
+        forward_20d_stop_first=False,
+        forward_5d_max_drawdown=-1.0,
+        forward_10d_max_drawdown=-1.0,
+        forward_20d_max_drawdown=-1.0,
+        forward_5d_mfe=2.0,
+        forward_10d_mfe=3.0,
+        forward_20d_mfe=4.0,
+        forward_available_days=20,
+        regime="range",
+    )
+    failures = [{"ts_code": "000002.SZ", "as_of_date": day.isoformat(), "reason": "unit"}]
+
+    _save_chunk_checkpoint(chunk_dir, key, day, ["000001.SZ", "000002.SZ"], [row], failures)
+    loaded = _load_chunk_checkpoint(chunk_dir, key)
+
+    assert loaded is not None
+    rows, loaded_failures, requested = loaded
+    assert requested == 2
+    assert len(rows) == 1
+    assert rows[0].ts_code == "000001.SZ"
+    assert rows[0].forward_20d_return == 3.0
+    assert loaded_failures == failures
+
+
 def test_pit_local_cache_key_isolated_from_latest_mode():
     dates = [dt.date(2026, 1, 2), dt.date(2026, 1, 5)]
 
@@ -129,6 +176,38 @@ def test_manifest_load_defaults_legacy_universe_mode(tmp_path):
 
     assert manifest.universe_mode == "latest"
     assert manifest.universe_selection == {}
+
+
+def test_manifest_load_reads_checkpoint_fields(tmp_path):
+    manifest_path = tmp_path / "panel.manifest.json"
+    manifest_path.write_text(
+        json.dumps({
+            "universe_id": "top_liquidity_top5",
+            "universe_size": 5,
+            "as_of_dates": ["2026-01-02", "2026-01-05"],
+            "base_param_hash": "abc123",
+            "skip_llm": True,
+            "n_rows": 9,
+            "built_at": "2026-01-06T00:00:00+00:00",
+            "panel_path": "/tmp/panel.parquet",
+            "manifest_path": str(manifest_path),
+            "total_pairs": 10,
+            "failed_rows": 1,
+            "chunk_size": 2,
+            "completed_pairs": 10,
+            "completed_chunks": 5,
+            "requested_chunks": 5,
+            "runtime_sec": 12.5,
+        }),
+        encoding="utf-8",
+    )
+
+    manifest = _load_manifest(manifest_path)
+
+    assert manifest.total_pairs == 10
+    assert manifest.chunk_size == 2
+    assert manifest.completed_chunks == 5
+    assert manifest.runtime_sec == 12.5
 
 
 def test_stratified_metadata_counts_dimensions():
@@ -187,6 +266,31 @@ def test_cheap_proxy_rows_balances_regime_and_date():
         ("range", dt.date(2026, 1, 2)),
         ("range", dt.date(2026, 1, 5)),
     }
+
+
+def test_outcome_proxy_summary_reports_feature_rank_ic():
+    import pandas as pd
+
+    df = pd.DataFrame({
+        "ts_code": [f"000{i:03d}.SZ" for i in range(40)],
+        "as_of_date": [dt.date(2026, 1, 2)] * 40,
+        "ret_5d_pct": list(range(40)),
+        "ret_20d_pct": list(range(40)),
+        "volatility_20d_pct": list(reversed(range(40))),
+        "avg_amount_20d": [1000 + i for i in range(40)],
+        "moneyflow_net_5d_pct_amount": [i / 100.0 for i in range(40)],
+        "total_mv": [10000 + i for i in range(40)],
+        "forward_5d_return": list(range(40)),
+        "forward_10d_return": list(range(40)),
+        "forward_20d_return": list(range(40)),
+    })
+
+    summary = summarize_outcome_proxy(df)
+
+    assert summary["rows"] == 40
+    assert summary["horizons"]["5d"]["n"] == 40
+    assert summary["feature_rank_ic"]["5d"]["ret_5d_pct"] > 0.99
+    assert summary["cheap_composite_rank_ic"]["10d"] > 0
 
 
 def test_panel_metrics_include_top_bucket_payoff_and_spread():
