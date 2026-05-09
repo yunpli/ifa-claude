@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 import subprocess
 import sys
@@ -128,6 +129,42 @@ def today_alias(
         fresh=fresh,
         base_position_shares=None,
     )
+
+
+@app.command("diagnose")
+def diagnose_cmd(
+    query: str = typer.Argument(..., help="Stock code/name, e.g. 300042.SZ or 朗科科技"),
+    requested_at: str | None = typer.Option(
+        None,
+        "--requested-at",
+        help="Beijing time ISO datetime for reproducible as-of routing, e.g. 2026-05-08T15:01:00",
+    ),
+    run_mode: str | None = typer.Option(None, "--run-mode", help="manual | production | test; defaults to settings.run_mode"),
+    output_format: str = typer.Option("markdown", "--format", help="markdown | json"),
+    full_stock_edge: bool = typer.Option(False, "--full-stock-edge", help="Also run the expensive full Stock Edge strategy matrix and decision layer."),
+) -> None:
+    """Build a read-only multi-perspective single-stock diagnostic report."""
+    settings = get_settings()
+    engine = get_engine(settings)
+    ts_code = _resolve_ts_code(query, engine)
+    from ifa.families.stock.diagnostic import DiagnosticRequest, build_diagnostic_report
+    from ifa.families.stock.diagnostic.service import render_markdown
+
+    report = build_diagnostic_report(
+        DiagnosticRequest(
+            ts_code=ts_code,
+            requested_at=_parse_requested_at(requested_at),
+            run_mode=run_mode or settings.run_mode.value,
+            include_full_stock_edge=full_stock_edge,
+        ),
+        engine=engine,
+    )
+    if output_format == "json":
+        console.print(json.dumps(report.to_dict(), ensure_ascii=False, default=str, indent=2))
+    elif output_format == "markdown":
+        console.print(render_markdown(report))
+    else:
+        raise typer.BadParameter("--format must be markdown or json")
 
 
 @app.command("data-check")
