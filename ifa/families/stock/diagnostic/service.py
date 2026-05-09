@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import html
 import json
 from typing import Any, Callable
 
@@ -273,7 +274,7 @@ def synthesize_diagnostic(perspectives: list[PerspectiveEvidence]) -> Diagnostic
         conclusion = "avoid"
     elif stock and "拥挤" in stock.summary and positive_count > 0:
         conclusion = "overheated"
-    elif positive_count >= 2 and negative_count == 0:
+    elif positive_count >= 2 and negative_count == 0 and not conflict_notes:
         conclusion = "short-term tradable"
     elif positive_count >= 1:
         conclusion = "wait for pullback" if ta and ta.view != "positive" else "watch only"
@@ -332,9 +333,13 @@ def _stock_edge_perspective(
             ("main_net_ratio", "sector main-money ratio"),
             ("retail_net_ratio", "sector retail ratio"),
             ("leader_ts_code", "sector leader"),
+            ("leader_score", "target leader score"),
+            ("risk_flags_json", "sector heat/crowding flags"),
         ]:
             if sme.get(key) is not None:
                 points.append(EvidencePoint(label, sme.get(key), sme.get("_source", "sme"), sme.get("trade_date")))
+        if sme.get("is_sector_leader") is False:
+            missing.append("stock-specific sector_cycle_leader replay/proxy rank is not persisted yet; implement stock.sector_cycle_leader_daily before treating leader evidence as target-specific alpha")
     else:
         missing.append("SME sector-cycle/orderflow rows")
 
@@ -395,6 +400,7 @@ def _stock_edge_perspective(
         summary,
         points=points,
         missing=missing,
+        freshness=_freshness_from_points(points),
         raw={"sme": sme, "target_flow": target_flow, "horizon_decisions": horizon_decisions, "latest_record": latest_record},
     )
 
@@ -432,7 +438,7 @@ def _ta_perspective(snapshot) -> PerspectiveEvidence:
     if not points:
         return PerspectiveEvidence("ta", "TA", "unavailable", "unknown", "未找到目标股近期 TA setup；按中性/信号不足处理。", missing=["ta.candidates_daily", "ta.warnings_daily"])
     summary = "TA 有近期多头 setup。" if candidates else "TA 未见多头 setup，但存在风险形态。"
-    return PerspectiveEvidence("ta", "TA", "available", view, summary, points=points)  # type: ignore[arg-type]
+    return PerspectiveEvidence("ta", "TA", "available", view, summary, points=points, freshness=_freshness_from_points(points))  # type: ignore[arg-type]
 
 
 def _ningbo_perspective(engine: Engine, ts_code: str, as_of: dt.date) -> PerspectiveEvidence:
@@ -464,7 +470,7 @@ def _ningbo_perspective(engine: Engine, ts_code: str, as_of: dt.date) -> Perspec
         )
         for row in rows[:5]
     ]
-    return PerspectiveEvidence("ningbo", "Ningbo", "available", "positive", "宁波独立短线策略近期命中目标股；可作为独立参考，不强制与其他视角一致。", points=points, raw={"rows": rows})
+    return PerspectiveEvidence("ningbo", "Ningbo", "available", "positive", "宁波独立短线策略近期命中目标股；可作为独立参考，不强制与其他视角一致。", points=points, freshness=_freshness_from_points(points), raw={"rows": rows})
 
 
 def _research_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
@@ -489,7 +495,7 @@ def _research_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
         view = "positive"
     if any(p in {"negative", "bearish"} for p in polarities):
         view = "negative"
-    return PerspectiveEvidence("research_news", "Research / Fundamentals / News", "partial", view, "已收集基本面/事件/主题热度证据；stub 主题热度不作为 alpha 证据。", points=points, raw={"theme_heat": theme_heat})  # type: ignore[arg-type]
+    return PerspectiveEvidence("research_news", "Research / Fundamentals / News", "partial", view, "已收集基本面/事件/主题热度证据；stub 主题热度不作为 alpha 证据。", points=points, freshness=_freshness_from_points(points), raw={"theme_heat": theme_heat})  # type: ignore[arg-type]
 
 
 def _risk_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
@@ -519,9 +525,16 @@ def _risk_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
         latest = basic.iloc[-1]
         points.append(EvidencePoint("turnover rate", _float(latest.get("turnover_rate")), "smartmoney.raw_daily_basic", str(latest.get("trade_date"))))
 
-    hard = bool(rows["blacklist"] or rows["suspend"])
-    summary = "命中黑名单/停牌等硬风险。" if hard else "未命中已接入的硬性风险表；仍需结合流动性、波动和限价事件控制仓位。"
-    return PerspectiveEvidence("risk", "Risk", "available" if points else "unavailable", "risk" if hard else "neutral", summary, points=points, raw=rows)  # type: ignore[arg-type]
+    hard = bool(rows["suspend"] or any(_is_hard_blacklist(row) for row in rows["blacklist"]))
+    soft_risk = bool(rows["blacklist"] or rows["limit"])
+    if hard:
+        summary = "命中停牌或硬性黑名单风险。"
+    elif soft_risk:
+        summary = "命中风险提示或涨跌停事件，但当前接入证据未构成硬性禁入。"
+    else:
+        summary = "未命中已接入的硬性风险表；仍需结合流动性、波动和限价事件控制仓位。"
+    view = "risk" if hard else ("negative" if soft_risk else "neutral")
+    return PerspectiveEvidence("risk", "Risk", "available" if points else "unavailable", view, summary, points=points, freshness=_freshness_from_points(points), raw=rows)  # type: ignore[arg-type]
 
 
 def render_markdown(report: DiagnosticReport) -> str:
@@ -530,20 +543,27 @@ def render_markdown(report: DiagnosticReport) -> str:
         f"",
         f"- 观察交易日: {report.as_of_trade_date.isoformat()}",
         f"- 数据截止: {report.data_cutoff_bjt}",
-        f"- 结论: {report.synthesis.conclusion} / confidence={report.synthesis.confidence}",
         "",
-        "## Advisor Synthesis",
-        f"- 5d/10d/20d: {json.dumps(report.synthesis.horizon_suitability, ensure_ascii=False)}",
+        "## Top Summary",
+        f"- Conclusion: {report.synthesis.conclusion}",
+        f"- Confidence: {report.synthesis.confidence}",
+        f"- Horizon suitability: {json.dumps(report.synthesis.horizon_suitability, ensure_ascii=False)}",
         f"- Trigger: {report.synthesis.trigger}",
         f"- Invalidation: {report.synthesis.invalidation}",
+        f"- Key conflict: {_key_conflict(report)}",
+        "",
+        "## Advisor Synthesis",
+        f"- Time window: {report.synthesis.time_window}",
         f"- Position/Risk: {report.synthesis.position_risk}",
     ]
     if report.synthesis.conflicts:
         lines.append(f"- Conflicts: {'; '.join(report.synthesis.conflicts)}")
     for p in report.perspectives:
         lines.extend(["", f"## {p.title}", f"- Status/View: {p.status} / {p.view}", f"- Summary: {p.summary}"])
+        if p.freshness:
+            lines.append(f"- Freshness: {json.dumps(p.freshness, ensure_ascii=False, default=str)}")
         if p.missing:
-            lines.append(f"- Missing: {'; '.join(p.missing)}")
+            lines.append(f"- Missing evidence: {'; '.join(p.missing)}")
         for point in p.points[:12]:
             value = point.value
             as_of = f", as_of={point.as_of}" if point.as_of else ""
@@ -551,6 +571,55 @@ def render_markdown(report: DiagnosticReport) -> str:
             if point.note:
                 lines.append(f"  - note: {point.note}")
     return "\n".join(lines) + "\n"
+
+
+def render_html(report: DiagnosticReport) -> str:
+    """Render a standalone diagnostic HTML artifact without touching report crons."""
+    css = """
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;margin:0;background:#f6f7f9;color:#171717}
+main{max-width:1120px;margin:0 auto;padding:28px 18px 48px}
+header,.summary,.perspective{background:#fff;border:1px solid #dde1e6;border-radius:8px;padding:18px;margin-bottom:14px}
+h1{font-size:26px;margin:0 0 10px} h2{font-size:18px;margin:0 0 12px} h3{font-size:16px;margin:16px 0 8px}
+.meta,.muted{color:#626b77;font-size:13px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+.cell{border:1px solid #e5e8ec;border-radius:6px;padding:10px;background:#fbfcfd}.label{font-size:12px;color:#626b77}.value{font-weight:650;margin-top:4px}
+.badge{display:inline-block;border-radius:999px;padding:3px 9px;font-size:12px;background:#eef2f6;margin-right:6px}.positive{background:#e6f4ea}.negative,.risk{background:#fdecea}.neutral,.unknown{background:#eef2f6}
+ul{padding-left:19px} li{margin:5px 0} code{white-space:pre-wrap}
+"""
+    parts = [
+        "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>",
+        f"<title>{html.escape(report.name or report.ts_code)} Stock Edge Diagnostic</title><style>{css}</style></head><body><main>",
+        f"<header><h1>Stock Edge 单股诊断 · {html.escape(report.name or report.ts_code)} ({html.escape(report.ts_code)})</h1>",
+        f"<div class='meta'>观察交易日 {report.as_of_trade_date.isoformat()} · 数据截止 {html.escape(report.data_cutoff_bjt)} · 生成 {html.escape(report.generated_at_bjt)}</div></header>",
+        "<section class='summary'><h2>Top Summary</h2><div class='grid'>",
+        _html_cell("Conclusion", report.synthesis.conclusion),
+        _html_cell("Confidence", report.synthesis.confidence),
+        _html_cell("Horizon", json.dumps(report.synthesis.horizon_suitability, ensure_ascii=False)),
+        _html_cell("Key Conflict", _key_conflict(report)),
+        "</div>",
+        f"<h3>Trigger</h3><p>{html.escape(report.synthesis.trigger)}</p>",
+        f"<h3>Invalidation</h3><p>{html.escape(report.synthesis.invalidation)}</p>",
+        f"<p class='muted'>{html.escape(report.synthesis.position_risk)}</p></section>",
+    ]
+    for p in report.perspectives:
+        parts.append(f"<section class='perspective'><h2>{html.escape(p.title)}</h2>")
+        parts.append(f"<span class='badge'>{html.escape(p.status)}</span><span class='badge {html.escape(p.view)}'>{html.escape(p.view)}</span>")
+        parts.append(f"<p>{html.escape(p.summary)}</p>")
+        if p.freshness:
+            parts.append(f"<p class='muted'>Freshness: {html.escape(json.dumps(p.freshness, ensure_ascii=False, default=str))}</p>")
+        if p.missing:
+            parts.append("<h3>Missing Evidence</h3><ul>")
+            parts.extend(f"<li>{html.escape(item)}</li>" for item in p.missing)
+            parts.append("</ul>")
+        if p.points:
+            parts.append("<h3>Evidence</h3><ul>")
+            for point in p.points[:12]:
+                as_of = f" · as_of={point.as_of}" if point.as_of else ""
+                note = f"<div class='muted'>{html.escape(point.note)}</div>" if point.note else ""
+                parts.append(f"<li><strong>{html.escape(str(point.label))}</strong>: {html.escape(str(point.value))} <span class='muted'>({html.escape(point.source)}{html.escape(as_of)})</span>{note}</li>")
+            parts.append("</ul>")
+        parts.append("</section>")
+    parts.append("</main></body></html>")
+    return "".join(parts)
 
 
 def _safe(key: str, fn: Callable[[], PerspectiveEvidence]) -> PerspectiveEvidence:
@@ -589,6 +658,7 @@ def _load_sme_sector_cycle(engine: Engine, ts_code: str, as_of: dt.date, sector:
     row = rows[0]
     row["_source"] = "sme sector orderflow/diffusion/state"
     row["is_sector_leader"] = row.get("leader_ts_code") == ts_code
+    row["leader_score"] = row.get("leader_main_net_yuan") if row["is_sector_leader"] else None
     return row
 
 
@@ -666,6 +736,33 @@ def _first_point_note(p: PerspectiveEvidence | None, token: str) -> str | None:
         if token in note.lower():
             return note
     return None
+
+
+def _freshness_from_points(points: list[EvidencePoint]) -> dict[str, Any]:
+    dated = [str(point.as_of) for point in points if point.as_of]
+    return {
+        "latest_as_of": max(dated) if dated else None,
+        "source_count": len({point.source for point in points if point.source}),
+        "evidence_count": len(points),
+    }
+
+
+def _key_conflict(report: DiagnosticReport) -> str:
+    if report.synthesis.conflicts:
+        return report.synthesis.conflicts[0]
+    views = {p.title: p.view for p in report.perspectives if p.status != "unavailable"}
+    if not views:
+        return "No usable perspective evidence yet."
+    return "No major cross-perspective conflict detected."
+
+
+def _html_cell(label: str, value: Any) -> str:
+    return f"<div class='cell'><div class='label'>{html.escape(label)}</div><div class='value'>{html.escape(str(value))}</div></div>"
+
+
+def _is_hard_blacklist(row: dict[str, Any]) -> bool:
+    severity = str(row.get("severity") or "").lower()
+    return severity in {"hard", "critical", "high", "severe"}
 
 
 def _float(value: Any) -> float | None:

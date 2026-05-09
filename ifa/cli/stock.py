@@ -133,38 +133,82 @@ def today_alias(
 
 @app.command("diagnose")
 def diagnose_cmd(
-    query: str = typer.Argument(..., help="Stock code/name, e.g. 300042.SZ or 朗科科技"),
+    queries: list[str] = typer.Argument(..., help="One or more stock codes/names, e.g. 300042.SZ 朗科科技"),
     requested_at: str | None = typer.Option(
         None,
         "--requested-at",
         help="Beijing time ISO datetime for reproducible as-of routing, e.g. 2026-05-08T15:01:00",
     ),
     run_mode: str | None = typer.Option(None, "--run-mode", help="manual | production | test; defaults to settings.run_mode"),
-    output_format: str = typer.Option("markdown", "--format", help="markdown | json"),
+    output_format: str = typer.Option("markdown", "--format", help="markdown | json | html"),
+    output: Path | None = typer.Option(None, "--output", "-o", help="Write artifact to a file or directory. Multiple stocks require a directory."),
     full_stock_edge: bool = typer.Option(False, "--full-stock-edge", help="Also run the expensive full Stock Edge strategy matrix and decision layer."),
 ) -> None:
     """Build a read-only multi-perspective single-stock diagnostic report."""
     settings = get_settings()
     engine = get_engine(settings)
-    ts_code = _resolve_ts_code(query, engine)
     from ifa.families.stock.diagnostic import DiagnosticRequest, build_diagnostic_report
-    from ifa.families.stock.diagnostic.service import render_markdown
+    from ifa.families.stock.diagnostic.service import render_html, render_markdown
 
-    report = build_diagnostic_report(
-        DiagnosticRequest(
-            ts_code=ts_code,
-            requested_at=_parse_requested_at(requested_at),
-            run_mode=run_mode or settings.run_mode.value,
-            include_full_stock_edge=full_stock_edge,
-        ),
-        engine=engine,
-    )
-    if output_format == "json":
-        console.print(json.dumps(report.to_dict(), ensure_ascii=False, default=str, indent=2))
-    elif output_format == "markdown":
-        console.print(render_markdown(report))
+    if output_format not in {"markdown", "json", "html"}:
+        raise typer.BadParameter("--format must be markdown, json, or html")
+    if len(queries) > 1 and output is not None and output.suffix:
+        raise typer.BadParameter("--output must be a directory when diagnosing multiple stocks")
+
+    written: list[Path] = []
+    rendered_payloads: list[str] = []
+    for query in queries:
+        ts_code = _resolve_ts_code(query, engine)
+        report = build_diagnostic_report(
+            DiagnosticRequest(
+                ts_code=ts_code,
+                requested_at=_parse_requested_at(requested_at),
+                run_mode=run_mode or settings.run_mode.value,
+                include_full_stock_edge=full_stock_edge,
+            ),
+            engine=engine,
+        )
+        payload = _render_diagnostic_payload(report, output_format, render_markdown=render_markdown, render_html=render_html)
+        if output:
+            path = _diagnostic_output_path(output, report, output_format, default_dir=_default_diagnostic_output_dir(settings, report, run_mode))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(payload, encoding="utf-8")
+            written.append(path)
+        else:
+            rendered_payloads.append(payload)
+
+    if written:
+        for path in written:
+            console.print(f"[green]{output_format.upper()}[/green] → {path}")
     else:
-        raise typer.BadParameter("--format must be markdown or json")
+        console.print("\n\n".join(rendered_payloads))
+
+
+def _render_diagnostic_payload(report, output_format: str, *, render_markdown, render_html) -> str:
+    if output_format == "json":
+        return json.dumps(report.to_dict(), ensure_ascii=False, default=str, indent=2) + "\n"
+    if output_format == "html":
+        return render_html(report)
+    return render_markdown(report)
+
+
+def _default_diagnostic_output_dir(settings, report, run_mode: str | None) -> Path:
+    from ifa.families.stock.output import output_dir_for_stock_edge
+
+    return output_dir_for_stock_edge(settings, report.as_of_trade_date, run_mode=run_mode or settings.run_mode.value) / "diagnostic"
+
+
+def _diagnostic_output_path(output: Path, report, output_format: str, *, default_dir: Path) -> Path:
+    suffix = {"markdown": ".md", "json": ".json", "html": ".html"}[output_format]
+    if output.suffix:
+        return output
+    stem = (
+        f"CN_stock_edge_diagnostic_{report.ts_code.replace('.', '_')}_"
+        f"{report.as_of_trade_date.strftime('%Y%m%d')}_"
+        f"{bjt_now().strftime('%H%M%S')}"
+    )
+    directory = output if str(output) not in {"", "."} else default_dir
+    return directory / f"{stem}{suffix}"
 
 
 @app.command("data-check")

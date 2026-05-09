@@ -1,17 +1,18 @@
 # Stock Edge Diagnostic Implementation Audit
 
 Date: 2026-05-08  
-Baseline commit: `ff10e2d Add Stock Edge diagnostic MVP`
+Baseline commit: `ff10e2d Add Stock Edge diagnostic MVP`  
+Latest implementation update: P0 output-quality/CLI pass after `583604a Document Stock Edge diagnostic scope`
 
 ## Executive Read
 
-The diagnostic MVP has the right product shape: a read-only single-stock report with separate perspectives and conflict-preserving synthesis.  The main gap is that most perspectives are thin evidence collectors, not yet full adapters to their native family outputs.  Delivery is markdown/json only; there is no persisted diagnostic run table or HTML/Telegram artifact path yet.
+The diagnostic MVP has the right product shape: a read-only single-stock report with separate perspectives and conflict-preserving synthesis.  The latest P0 pass adds a concise top summary, explicit JSON aliases (`stance`, `evidence`, `missing_evidence`, `freshness`), standalone HTML rendering, and CLI artifact writing for markdown/json/html.  The main remaining gap is that most perspectives are still thin evidence collectors, not yet full adapters to their native family outputs.  There is still no persisted diagnostic run table or Telegram delivery contract.
 
 ## Current Implementation By Perspective
 
 | Perspective | Current code | Data / tables read | Usable fields today | Stub / unavailable / slow | Key gaps |
 |---|---|---|---|---|---|
-| Stock Edge / sector-cycle | `ifa/families/stock/diagnostic/service.py::_stock_edge_perspective`; full matrix optional via `--full-stock-edge` | `smartmoney.sw_member_monthly`, `sme.sme_sector_orderflow_daily`, `sme.sme_sector_diffusion_daily`, `sme.sme_sector_state_daily`, `sme.sme_stock_orderflow_daily`, `stock.analysis_record` | SW L2, sector state/diffusion, sector main/retail ratios, sector leader, target main/retail flow, latest persisted report summary, optional 5d/10d/20d decisions | Full strategy matrix/decision layer skipped by default for latency; `sector_cycle_leader` is proxy/research only; theme heat not joined to SW sector yet | Need first-class sector-cycle adapter with normalized fields, latest report reuse, latency budget, and explicit leader-within-sector rank |
+| Stock Edge / sector-cycle | `ifa/families/stock/diagnostic/service.py::_stock_edge_perspective`; full matrix optional via `--full-stock-edge` | `smartmoney.sw_member_monthly`, `sme.sme_sector_orderflow_daily`, `sme.sme_sector_diffusion_daily`, `sme.sme_sector_state_daily`, `sme.sme_stock_orderflow_daily`, `stock.analysis_record` | SW L2, sector state/diffusion, sector main/retail ratios, main/retail divergence, risk/crowding flags when available, sector leader, target main/retail flow, latest persisted report summary, optional 5d/10d/20d decisions | Full strategy matrix/decision layer skipped by default for latency; `sector_cycle_leader` replay/proxy rank is not stock-specific/persisted yet and is explicitly marked missing | Need first-class sector-cycle adapter with normalized fields, latest report reuse, latency budget, and explicit leader-within-sector rank |
 | TA | `_ta_perspective`; light loader `_load_light_ta_context` | `ta.candidates_daily`, `ta.warnings_daily`, `ta.regime_daily` | setup name/label, rank, final score, stars, entry, stop, target, RR, warnings, market regime | `setup_metrics_daily` not loaded; no family-level historical edge in diagnostic | Add TA family rollup: setup family, tier, 60/180d edge, sector role, and trigger/invalidation normalization |
 | Ningbo | `_ningbo_perspective` | `ningbo.recommendations_daily`, fallback `ningbo.candidates_daily` | rec date, strategy, scoring mode, confidence, rec price, signal meta raw | No recent hit becomes unavailable; no explanation of why not selected; Kronos/ML context only indirectly available | Add recency window policy, top-N rank context, reason fields, and optional Ningbo tracking outcome |
 | Research / news / theme | `_research_perspective`; `_load_light_research_lineup`; `_load_light_event_context`; `ifa/families/stock/theme_heat.py` | `research.period_factor_decomposition`, `research.report_runs`, `research.company_event_memory`, `ta.catalyst_event_memory`, `stock.theme_heat_weekly` | annual/quarterly factor counts, recent research reports, event title/polarity/importance, weekly top-5 theme rows | `stock.theme_heat_weekly` currently allows explicit `quality_flag='stub'`; theme rows are not mapped to SW sectors/stocks; no fundamental factor scoring | Need concise fundamental scorecard fields, event freshness/severity normalization, real weekly theme/news backfill and sector/stock mapping |
@@ -23,6 +24,9 @@ The diagnostic MVP has the right product shape: a read-only single-stock report 
 Available:
 
 - `uv run python -m ifa.cli stock diagnose <query> --format markdown|json`
+- `uv run python -m ifa.cli stock diagnose <query> --format html`
+- `uv run python -m ifa.cli stock diagnose <query> --format markdown|json|html --output <file-or-dir>`
+- Multiple stocks are accepted as positional arguments; when `--output` is used with multiple stocks, it must be a directory.
 - `--requested-at` for reproducible BJT as-of routing
 - `--run-mode` for settings-compatible routing
 - `--full-stock-edge` to run the expensive strategy matrix and decision layer
@@ -30,9 +34,7 @@ Available:
 
 Missing:
 
-- No HTML diagnostic template.
 - No persisted `stock.diagnostic_runs` / `stock.diagnostic_perspective_evidence` tables.
-- No output directory helper for diagnostic artifacts.
 - No Telegram-specific short summary/delivery contract.
 - No latency SLO measurement in CLI output.
 
@@ -54,22 +56,27 @@ P1/P2 candidate surfaces:
 
 ### P0 - Make Diagnostic Product Shippable
 
+Done in latest P0 pass:
+
+- Top summary block: conclusion, confidence, horizon suitability, trigger, invalidation, key conflict.
+- Per-perspective contract aliases in JSON: `status`, `stance`, `evidence`, `missing_evidence`, `freshness`.
+- Standalone HTML renderer and markdown/json/html CLI artifact writing.
+- Better SME/sector-cycle evidence labels for stage, main/retail divergence, crowding/risk flags, and explicit missing note for non-persisted stock-specific sector-cycle leader rank.
+- Minimal multi-stock CLI support for cheap batch diagnostics.
+
+Still P0:
+
 1. Persist diagnostic runs.
    - Files: new Alembic migration, `ifa/families/stock/diagnostic/persistence.py`, `ifa/families/stock/diagnostic/service.py`, `ifa/cli/stock.py`.
    - Tables: `stock.diagnostic_runs`, `stock.diagnostic_perspective_evidence`.
    - Verify: unit test persistence with transaction rollback; smoke `stock diagnose 300042.SZ --format json` and confirm rows.
 
-2. Add HTML diagnostic renderer.
-   - Files: `ifa/families/stock/diagnostic/renderer.py`, `ifa/families/stock/diagnostic/templates/diagnostic.html`, `ifa/families/stock/output.py`.
-   - Output: `/Users/neoclaw/claude/ifaenv/out/<run_mode>/<YYYYMMDD>/stock_edge/diagnostic/`.
-   - Verify: Playwright desktop/mobile screenshot, no horizontal overflow, all perspectives render unavailable/stub labels.
-
-3. Normalize perspective adapters.
+2. Normalize perspective adapters.
    - Files: split `service.py` into `perspectives/{stock_edge,ta,ningbo,research,risk}.py`.
    - Contract: each adapter returns `PerspectiveEvidence` plus `latency_ms`, `source_tables`, `missing_required`.
    - Verify: unit tests for each adapter with mocked query rows.
 
-4. Define synthesis version.
+3. Define synthesis version.
    - Files: `models.py`, `service.py`, docs.
    - Fields: `logic_version='stock_diagnostic_synthesis_v1'`, conflict taxonomy, hard-veto precedence.
    - Verify: tests for hard risk, sector positive/TA neutral, Ningbo positive/risk negative, all unavailable.

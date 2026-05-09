@@ -50,6 +50,7 @@ class PerspectiveEvidence:
     points: list[EvidencePoint] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    freshness: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -80,4 +81,8 @@ class DiagnosticReport:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["as_of_trade_date"] = self.as_of_trade_date.isoformat()
+        for perspective in data.get("perspectives", []):
+            perspective["stance"] = perspective.get("view")
+            perspective["evidence"] = perspective.get("points", [])
+            perspective["missing_evidence"] = perspective.get("missing", [])
         return data

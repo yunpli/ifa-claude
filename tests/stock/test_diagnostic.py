@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 
 from ifa.families.stock.diagnostic.models import EvidencePoint, PerspectiveEvidence
-from ifa.families.stock.diagnostic.service import render_markdown, synthesize_diagnostic
+from ifa.families.stock.diagnostic.service import render_html, render_markdown, synthesize_diagnostic
 from ifa.families.stock.diagnostic.models import DiagnosticReport
 
 
@@ -69,6 +69,69 @@ def test_markdown_marks_unavailable_perspective_explicitly():
 
     md = render_markdown(report)
 
+    assert "## Top Summary" in md
+    assert "Key conflict" in md
     assert "Status/View: unavailable / unknown" in md
     assert "ningbo.recommendations_daily" in md
     assert "avg amount 7d yuan" in md
+
+
+def test_report_dict_exposes_customer_contract_aliases():
+    report = DiagnosticReport(
+        ts_code="300042.SZ",
+        name="朗科科技",
+        as_of_trade_date=dt.date(2026, 5, 6),
+        generated_at_bjt="2026-05-08T10:00:00+08:00",
+        data_cutoff_bjt="2026-05-06T15:00:00+08:00",
+        perspectives=[
+            PerspectiveEvidence(
+                "risk",
+                "Risk",
+                "available",
+                "neutral",
+                "未命中硬性风险。",
+                points=[EvidencePoint("avg amount 7d yuan", 123.0, "smartmoney.raw_daily", "2026-05-06")],
+                freshness={"latest_as_of": "2026-05-06", "evidence_count": 1},
+            ),
+        ],
+        synthesis=synthesize_diagnostic([
+            PerspectiveEvidence("risk", "Risk", "available", "neutral", "ok"),
+        ]),
+    )
+
+    data = report.to_dict()
+    perspective = data["perspectives"][0]
+
+    assert perspective["stance"] == "neutral"
+    assert perspective["evidence"][0]["label"] == "avg amount 7d yuan"
+    assert perspective["missing_evidence"] == []
+    assert perspective["freshness"]["latest_as_of"] == "2026-05-06"
+
+
+def test_html_renderer_includes_summary_and_missing_evidence():
+    report = DiagnosticReport(
+        ts_code="300042.SZ",
+        name="朗科科技",
+        as_of_trade_date=dt.date(2026, 5, 6),
+        generated_at_bjt="2026-05-08T10:00:00+08:00",
+        data_cutoff_bjt="2026-05-06T15:00:00+08:00",
+        perspectives=[
+            PerspectiveEvidence(
+                "stock_edge_sector_cycle",
+                "Stock Edge / Sector-Cycle-Leader",
+                "partial",
+                "neutral",
+                "板块证据不完整。",
+                missing=["stock.sector_cycle_leader_daily"],
+            ),
+        ],
+        synthesis=synthesize_diagnostic([
+            PerspectiveEvidence("stock_edge_sector_cycle", "Stock Edge", "partial", "neutral", "ok"),
+        ]),
+    )
+
+    html = render_html(report)
+
+    assert "<h2>Top Summary</h2>" in html
+    assert "Missing Evidence" in html
+    assert "stock.sector_cycle_leader_daily" in html
