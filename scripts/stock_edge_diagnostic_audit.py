@@ -23,10 +23,13 @@ REQUIRED_PERSPECTIVES = {
 EXPECTED_SURFACES = {
     "diagnostic_models": "ifa/families/stock/diagnostic/models.py",
     "diagnostic_service": "ifa/families/stock/diagnostic/service.py",
+    "diagnostic_persistence": "ifa/families/stock/diagnostic/persistence.py",
     "diagnose_cli": "ifa/cli/stock.py",
     "diagnostic_tests": "tests/stock/test_diagnostic.py",
     "theme_heat_model": "ifa/families/stock/theme_heat.py",
     "theme_heat_migration": "alembic/versions/o3p4q5r6s7t8_stock_theme_heat_weekly.py",
+    "diagnostic_runs_migration": "alembic/versions/p0q1r2s3t4u5_stock_diagnostic_runs.py",
+    "diagnostic_sector_leader_migration": "alembic/versions/p4q5r6s7t8u9_stock_diagnostic_persistence.py",
     "product_definition": "docs/stock_edge_diagnostic_product_definition.md",
     "implementation_audit": "docs/stock_edge_diagnostic_implementation_audit.md",
 }
@@ -68,6 +71,8 @@ def main() -> int:
         "build_diagnostic_report",
         "synthesize_diagnostic",
         "render_markdown",
+        "diagnostic_manifest_payload",
+        "_with_contract_fields",
         "_stock_edge_perspective",
         "_ta_perspective",
         "_ningbo_perspective",
@@ -75,14 +80,28 @@ def main() -> int:
         "_risk_perspective",
     ):
         checks.append({"check": f"function:{fn}", "ok": fn in service_functions, "path": "ifa/families/stock/diagnostic/service.py"})
+    persistence_functions = _defined_functions("ifa/families/stock/diagnostic/persistence.py")
+    checks.append({
+        "check": "function:persist_diagnostic_run",
+        "ok": "persist_diagnostic_run" in persistence_functions,
+        "path": "ifa/families/stock/diagnostic/persistence.py",
+    })
 
     cli_text = _read("ifa/cli/stock.py")
     checks.append({"check": "cli:diagnose-command", "ok": '@app.command("diagnose")' in cli_text, "path": "ifa/cli/stock.py"})
     checks.append({"check": "cli:full-stock-edge-flag", "ok": "--full-stock-edge" in cli_text, "path": "ifa/cli/stock.py"})
+    checks.append({"check": "cli:persist-db-switch", "ok": "--persist-db/--no-persist-db" in cli_text, "path": "ifa/cli/stock.py"})
 
-    combined_doc = _read("docs/stock_edge_diagnostic_product_definition.md") + "\n" + _read("docs/stock_edge_diagnostic_implementation_audit.md")
+    diagnostic_impl = "\n".join(
+        _read(rel)
+        for rel in (
+            "ifa/families/stock/diagnostic/models.py",
+            "ifa/families/stock/diagnostic/service.py",
+            "ifa/families/stock/diagnostic/persistence.py",
+        )
+    )
     for token in FORBIDDEN_MUTATION_TOKENS:
-        checks.append({"check": f"no-production-mutation:{token}", "ok": token not in combined_doc, "path": "docs/stock_edge_diagnostic_*.md"})
+        checks.append({"check": f"no-production-mutation:{token}", "ok": token not in diagnostic_impl, "path": "ifa/families/stock/diagnostic"})
 
     payload = {
         "status": "ok" if all(c["ok"] for c in checks) else "failed",

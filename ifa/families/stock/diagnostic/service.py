@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import html
 import json
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -24,6 +25,7 @@ from .models import (
     DiagnosticSynthesis,
     EvidencePoint,
     PerspectiveEvidence,
+    SYNTHESIS_LOGIC_VERSION,
 )
 
 
@@ -70,10 +72,12 @@ def build_diagnostic_report(request: DiagnosticRequest, *, engine: Engine) -> Di
         synthesis=synthesis,
         audit={
             "as_of_rule": ctx.as_of.rule,
+            "run_mode": request.run_mode,
             "param_hash": ctx.param_hash,
+            "run_mode": request.run_mode,
             "freshness": snapshot.freshness,
             "degraded_reasons": snapshot.degraded_reasons,
-            "db_schema_plan": "If JSON artifacts become insufficient, add stock.diagnostic_runs(run_id, ts_code, name, requested_at, generated_at, as_of_trade_date, conclusion, confidence, output_paths_json, perspective_status_json, evidence_freshness_json) and stock.diagnostic_evidence(run_id, perspective_key, source_table, as_of, freshness_status, payload_json).",
+            "db_schema": "stock.diagnostic_runs + stock.diagnostic_perspective_evidence",
         },
     )
 
@@ -162,15 +166,32 @@ def _load_light_ta_context(engine: Engine, ts_code: str, as_of: dt.date) -> Load
         ORDER BY trade_date DESC
         LIMIT 1
     """, {"as_of": as_of})
+    setup_names = sorted({
+        str(row.get("setup_name"))
+        for row in [*candidates, *warnings]
+        if row.get("setup_name")
+    })
+    setup_metrics: list[dict[str, Any]] = []
+    if setup_names:
+        setup_metrics = _query_dicts(engine, """
+            SELECT DISTINCT ON (setup_name)
+                   trade_date, setup_name, triggers_count, winrate_60d,
+                   avg_return_60d, pl_ratio_60d, winrate_250d,
+                   decay_score, combined_score_60d, suitable_regimes,
+                   regime_winrates
+            FROM ta.setup_metrics_daily
+            WHERE setup_name = ANY(:setup_names) AND trade_date <= :as_of
+            ORDER BY setup_name, trade_date DESC
+        """, {"setup_names": setup_names, "as_of": as_of})
     from ifa.families.stock.data.gateway import _decorate_ta_row
 
     data = {
         "candidates": [_decorate_ta_row(row) for row in candidates],
         "warnings": [_decorate_ta_row(row) for row in warnings],
         "regime": regime_rows[0] if regime_rows else None,
-        "setup_metrics": [],
+        "setup_metrics": setup_metrics,
     }
-    rows = len(candidates) + len(warnings) + len(regime_rows)
+    rows = len(candidates) + len(warnings) + len(regime_rows) + len(setup_metrics)
     return LoadResult(
         "ta_context",
         data if rows else None,
@@ -318,7 +339,9 @@ def synthesize_diagnostic(perspectives: list[PerspectiveEvidence]) -> Diagnostic
         invalidation=_first_point_note(ta, "invalidation") or _first_point_note(stock, "invalidation") or "跌破近期关键支撑或出现硬性风控事件。",
         time_window="优先按 5/10/20 个交易日滚动复核，不把单次诊断当长期评级。",
         position_risk="低置信或冲突证据下只适合小仓试错；硬风险命中时不建议新开仓。",
+        logic_version=SYNTHESIS_LOGIC_VERSION,
         conflicts=conflict_notes,
+        conflict_taxonomy=_conflict_taxonomy(perspectives),
         rationale=rationale,
     )
 
@@ -353,9 +376,22 @@ def _stock_edge_perspective(
             if sme.get(key) is not None:
                 points.append(EvidencePoint(label, sme.get(key), sme.get("_source", "sme"), sme.get("trade_date")))
         if sme.get("is_sector_leader") is False:
-            missing.append("stock-specific sector_cycle_leader replay/proxy rank is not persisted yet; implement stock.sector_cycle_leader_daily before treating leader evidence as target-specific alpha")
+            missing.append("target is not current SME sector leader; use stock.sector_cycle_leader_daily for stock-specific rank context when populated")
     else:
         missing.append("SME sector-cycle/orderflow rows")
+
+    leader_rank = _load_sector_cycle_leader_rank(engine, snapshot.ctx.request.ts_code, snapshot.ctx.as_of.as_of_trade_date)
+    if leader_rank:
+        for key, label in [
+            ("rank_in_sector", "sector-cycle leader rank"),
+            ("leader_score", "sector-cycle leader score"),
+            ("sector_rank_count", "sector rank universe count"),
+            ("quality_flag", "sector-cycle leader quality"),
+        ]:
+            if leader_rank.get(key) is not None:
+                points.append(EvidencePoint(label, leader_rank.get(key), "stock.sector_cycle_leader_daily", leader_rank.get("trade_date")))
+    else:
+        missing.append("stock.sector_cycle_leader_daily")
 
     target_flow = _load_target_orderflow(engine, snapshot.ctx.request.ts_code, snapshot.ctx.as_of.as_of_trade_date)
     if target_flow:
@@ -415,7 +451,7 @@ def _stock_edge_perspective(
         points=points,
         missing=missing,
         freshness=_freshness_from_points(points),
-        raw={"sme": sme, "target_flow": target_flow, "horizon_decisions": horizon_decisions, "latest_record": latest_record},
+        raw={"sme": sme, "leader_rank": leader_rank, "target_flow": target_flow, "horizon_decisions": horizon_decisions, "latest_record": latest_record},
     )
 
 
@@ -424,7 +460,22 @@ def _ta_perspective(snapshot) -> PerspectiveEvidence:
     candidates = data.get("candidates") or []
     warnings = data.get("warnings") or []
     regime = data.get("regime") or {}
+    metrics = data.get("setup_metrics") or []
     points: list[EvidencePoint] = []
+    setup_names = sorted({str(row.get("setup_label") or row.get("setup_name")) for row in candidates if row.get("setup_label") or row.get("setup_name")})
+    warning_names = sorted({str(row.get("setup_label") or row.get("setup_name")) for row in warnings if row.get("setup_label") or row.get("setup_name")})
+    if candidates or warnings:
+        latest_signal_date = max(
+            [str(row.get("trade_date")) for row in [*candidates, *warnings] if row.get("trade_date")],
+            default=None,
+        )
+        points.append(EvidencePoint(
+            "TA rollup",
+            {"candidate_count": len(candidates), "warning_count": len(warnings), "metric_count": len(metrics)},
+            "ta.candidates_daily/ta.warnings_daily/ta.setup_metrics_daily",
+            latest_signal_date,
+            note=f"setups={', '.join(setup_names[:5]) or '-'} warnings={', '.join(warning_names[:5]) or '-'}",
+        ))
     for row in candidates[:5]:
         points.append(EvidencePoint(
             row.get("setup_label") or row.get("setup_name"),
@@ -443,6 +494,17 @@ def _ta_perspective(snapshot) -> PerspectiveEvidence:
         ))
     if regime:
         points.append(EvidencePoint("market TA regime", regime.get("regime"), "ta.regime_daily", str(regime.get("trade_date")), note=f"confidence={regime.get('confidence')}"))
+    for row in metrics[:5]:
+        points.append(EvidencePoint(
+            f"{row.get('setup_name')} 60d edge",
+            _float(row.get("combined_score_60d")) if row.get("combined_score_60d") is not None else _float(row.get("winrate_60d")),
+            "ta.setup_metrics_daily",
+            str(row.get("trade_date")),
+            note=(
+                f"winrate_60d={row.get('winrate_60d')} avg_return_60d={row.get('avg_return_60d')} "
+                f"pl_ratio_60d={row.get('pl_ratio_60d')} decay={row.get('decay_score')}"
+            ),
+        ))
 
     view = "neutral"
     if candidates:
@@ -451,7 +513,11 @@ def _ta_perspective(snapshot) -> PerspectiveEvidence:
         view = "risk"
     if not points:
         return PerspectiveEvidence("ta", "TA", "unavailable", "unknown", "未找到目标股近期 TA setup；按中性/信号不足处理。", missing=["ta.candidates_daily", "ta.warnings_daily"])
-    summary = "TA 有近期多头 setup。" if candidates else "TA 未见多头 setup，但存在风险形态。"
+    summary = "TA 有近期多头 setup。"
+    if candidates and metrics:
+        summary = "TA 有近期多头 setup，并已补充 setup_metrics_daily 历史 edge。"
+    elif not candidates:
+        summary = "TA 未见多头 setup，但存在风险形态。"
     return PerspectiveEvidence("ta", "TA", "available", view, summary, points=points, freshness=_freshness_from_points(points))  # type: ignore[arg-type]
 
 
@@ -474,17 +540,26 @@ def _ningbo_perspective(engine: Engine, ts_code: str, as_of: dt.date) -> Perspec
         """, {"ts_code": ts_code, "as_of": as_of})
     if not rows:
         return PerspectiveEvidence("ningbo", "Ningbo", "unavailable", "unknown", "宁波短线策略近期未命中目标股。", missing=["ningbo.recommendations_daily", "ningbo.candidates_daily"])
+    rank_context = _load_ningbo_rank_context(engine, ts_code, rows[0].get("rec_date"), rows[0].get("strategy"))
     points = [
         EvidencePoint(
             f"{row.get('strategy')} {row.get('scoring_mode') or 'heuristic'}",
             _float(row.get("confidence_score")),
             "ningbo.recommendations_daily/candidates_daily",
             str(row.get("rec_date")),
-            note=f"rec_price={row.get('rec_price')}",
+            note=f"rec_price={row.get('rec_price')} recency_days={_days_between(row.get('rec_date'), as_of)}",
         )
         for row in rows[:5]
     ]
-    return PerspectiveEvidence("ningbo", "Ningbo", "available", "positive", "宁波独立短线策略近期命中目标股；可作为独立参考，不强制与其他视角一致。", points=points, freshness=_freshness_from_points(points), raw={"rows": rows})
+    if rank_context:
+        points.append(EvidencePoint(
+            "Ningbo same-day rank context",
+            rank_context,
+            "ningbo.recommendations_daily/candidates_daily",
+            str(rows[0].get("rec_date")),
+            note=f"strategy={rows[0].get('strategy')}",
+        ))
+    return PerspectiveEvidence("ningbo", "Ningbo", "available", "positive", "宁波独立短线策略近期命中目标股；可作为独立参考，不强制与其他视角一致。", points=points, freshness=_freshness_from_points(points), raw={"rows": rows, "rank_context": rank_context})
 
 
 def _research_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
@@ -535,12 +610,24 @@ def _risk_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
         "limit": _query_dicts(engine, "SELECT trade_date, name, pct_chg_pct, fc_ratio, fl_ratio, fd_amount_yuan, open_times, limit FROM ta.stk_limit_daily WHERE ts_code=:ts_code AND trade_date <= :as_of ORDER BY trade_date DESC LIMIT 5", {"ts_code": ts_code, "as_of": as_of}),
     }
     points: list[EvidencePoint] = []
+    vetoes: list[dict[str, Any]] = []
     for row in rows["blacklist"]:
+        category = "hard_blacklist" if _is_hard_blacklist(row) else "soft_blacklist"
+        vetoes.append({"category": category, "hard": category == "hard_blacklist", "source": "ta.blacklist_daily", "as_of": row.get("trade_date"), "reason": row.get("reason") or row.get("ann_title")})
         points.append(EvidencePoint("blacklist", row.get("severity"), "ta.blacklist_daily", str(row.get("trade_date")), note=row.get("reason") or row.get("ann_title")))
     for row in rows["suspend"]:
+        vetoes.append({"category": "suspension", "hard": True, "source": "ta.suspend_daily", "as_of": row.get("trade_date"), "reason": row.get("suspend_type")})
         points.append(EvidencePoint("suspension", row.get("suspend_type"), "ta.suspend_daily", str(row.get("trade_date")), note=row.get("suspend_timing")))
     for row in rows["limit"]:
+        vetoes.append({"category": "limit_event", "hard": False, "source": "ta.stk_limit_daily", "as_of": row.get("trade_date"), "reason": row.get("limit")})
         points.append(EvidencePoint("limit event", row.get("limit"), "ta.stk_limit_daily", str(row.get("trade_date")), note=f"pct={row.get('pct_chg_pct')} open_times={row.get('open_times')}"))
+    if vetoes:
+        points.append(EvidencePoint(
+            "normalized veto registry",
+            {"hard": sum(1 for item in vetoes if item["hard"]), "soft": sum(1 for item in vetoes if not item["hard"])},
+            "stock.diagnostic_risk_veto_registry",
+            note="Derived from TA risk source tables; no separate production veto table mutation.",
+        ))
 
     daily = snapshot.daily_bars.data
     basic = snapshot.daily_basic.data
@@ -562,7 +649,9 @@ def _risk_perspective(engine: Engine, snapshot) -> PerspectiveEvidence:
     else:
         summary = "未命中已接入的硬性风险表；仍需结合流动性、波动和限价事件控制仓位。"
     view = "risk" if hard else ("negative" if soft_risk else "neutral")
-    return PerspectiveEvidence("risk", "Risk", "available" if points else "unavailable", view, summary, points=points, freshness=_freshness_from_points(points), raw=rows)  # type: ignore[arg-type]
+    raw = dict(rows)
+    raw["normalized_vetoes"] = vetoes
+    return PerspectiveEvidence("risk", "Risk", "available" if points else "unavailable", view, summary, points=points, freshness=_freshness_from_points(points), raw=raw)  # type: ignore[arg-type]
 
 
 def render_markdown(report: DiagnosticReport) -> str:
@@ -698,8 +787,10 @@ def diagnostic_manifest_payload(
             "view": p.view,
             "freshness_status": p.freshness_status,
             "freshness": p.freshness,
-            "sources": sorted({point.source for point in p.points if point.source}),
+            "sources": p.source_tables or sorted({point.source for point in p.points if point.source}),
             "missing_evidence": p.missing,
+            "missing_required": p.missing_required,
+            "latency_ms": p.latency_ms,
         }
     return {
         "artifact_type": "stock_edge_diagnostic_run",
@@ -709,20 +800,34 @@ def diagnostic_manifest_payload(
         "requested_at": requested_at.isoformat() if requested_at else None,
         "generated_at": report.generated_at_bjt,
         "as_of_trade_date": report.as_of_trade_date.isoformat(),
+        "logic_version": report.synthesis.logic_version,
+        "synthesis": report.to_dict().get("synthesis"),
         "perspective_statuses": perspectives,
         "conclusion": report.synthesis.conclusion,
         "confidence": report.synthesis.confidence,
         "output_paths": output_paths,
         "evidence_freshness": _perspective_quality_summary(report),
-        "db_schema_plan": report.audit.get("db_schema_plan"),
+        "db_schema": report.audit.get("db_schema"),
     }
 
 
 def _safe(key: str, fn: Callable[[], PerspectiveEvidence]) -> PerspectiveEvidence:
+    started = time.perf_counter()
     try:
-        return fn()
+        p = fn()
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        return _with_contract_fields(p, latency_ms=latency_ms)
     except Exception as exc:  # noqa: BLE001
-        return PerspectiveEvidence(key, key, "error", "unknown", f"{key} collector failed: {type(exc).__name__}: {exc}")
+        latency_ms = (time.perf_counter() - started) * 1000.0
+        return PerspectiveEvidence(
+            key,
+            key,
+            "error",
+            "unknown",
+            f"{key} collector failed: {type(exc).__name__}: {exc}",
+            latency_ms=latency_ms,
+            missing_required=[key],
+        )
 
 
 def _query_dicts(engine: Engine, sql: str, params: dict[str, Any]) -> list[dict[str, Any]]:
@@ -770,6 +875,19 @@ def _load_target_orderflow(engine: Engine, ts_code: str, as_of: dt.date) -> dict
     return rows[0] if rows else None
 
 
+def _load_sector_cycle_leader_rank(engine: Engine, ts_code: str, as_of: dt.date) -> dict[str, Any] | None:
+    rows = _query_dicts(engine, """
+        SELECT trade_date, ts_code, name, l1_code, l1_name, l2_code, l2_name,
+               rank_in_sector, sector_rank_count, leader_score,
+               sector_score, stock_score, quality_flag, evidence_json
+        FROM stock.sector_cycle_leader_daily
+        WHERE ts_code=:ts_code AND trade_date <= :as_of
+        ORDER BY trade_date DESC
+        LIMIT 1
+    """, {"ts_code": ts_code, "as_of": as_of})
+    return rows[0] if rows else None
+
+
 def _load_latest_stock_record(engine: Engine, ts_code: str, as_of: dt.date) -> dict[str, Any] | None:
     rows = _query_dicts(engine, """
         SELECT record_id, ts_code, analysis_type, triggered_at, data_cutoff,
@@ -782,6 +900,42 @@ def _load_latest_stock_record(engine: Engine, ts_code: str, as_of: dt.date) -> d
         ORDER BY data_cutoff DESC, triggered_at DESC
         LIMIT 1
     """, {"ts_code": ts_code, "as_of": as_of})
+    return rows[0] if rows else None
+
+
+def _load_ningbo_rank_context(engine: Engine, ts_code: str, rec_date: Any, strategy: Any) -> dict[str, Any] | None:
+    if rec_date is None:
+        return None
+    params = {"ts_code": ts_code, "rec_date": rec_date, "strategy": strategy}
+    rows = _query_dicts(engine, """
+        WITH ranked AS (
+            SELECT ts_code, strategy, confidence_score,
+                   rank() OVER (PARTITION BY rec_date, strategy ORDER BY confidence_score DESC NULLS LAST) AS rank_in_strategy,
+                   count(*) OVER (PARTITION BY rec_date, strategy) AS strategy_count
+            FROM ningbo.recommendations_daily
+            WHERE rec_date=:rec_date
+              AND (:strategy IS NULL OR strategy=:strategy)
+        )
+        SELECT rank_in_strategy, strategy_count
+        FROM ranked
+        WHERE ts_code=:ts_code
+        LIMIT 1
+    """, params)
+    if not rows:
+        rows = _query_dicts(engine, """
+            WITH ranked AS (
+                SELECT ts_code, strategy, confidence_score,
+                       rank() OVER (PARTITION BY rec_date, strategy ORDER BY confidence_score DESC NULLS LAST) AS rank_in_strategy,
+                       count(*) OVER (PARTITION BY rec_date, strategy) AS strategy_count
+                FROM ningbo.candidates_daily
+                WHERE rec_date=:rec_date
+                  AND (:strategy IS NULL OR strategy=:strategy)
+            )
+            SELECT rank_in_strategy, strategy_count
+            FROM ranked
+            WHERE ts_code=:ts_code
+            LIMIT 1
+        """, params)
     return rows[0] if rows else None
 
 
@@ -823,6 +977,30 @@ def _collect_conflicts(perspectives: list[PerspectiveEvidence]) -> list[str]:
     if positives and negatives:
         return [f"Positive evidence from {', '.join(positives)} conflicts with risk/negative evidence from {', '.join(negatives)}."]
     return [c for p in perspectives for c in p.conflicts]
+
+
+def _conflict_taxonomy(perspectives: list[PerspectiveEvidence]) -> list[str]:
+    by_key = {p.key: p for p in perspectives}
+    tags: list[str] = []
+    risk = by_key.get("risk")
+    stock = by_key.get("stock_edge_sector_cycle")
+    ta = by_key.get("ta")
+    ningbo = by_key.get("ningbo")
+    research = by_key.get("research_news")
+    if risk and risk.view == "risk":
+        tags.append("hard_risk_precedence")
+    if stock and stock.view == "positive" and ta and ta.view != "positive":
+        tags.append("sector_positive_ta_unconfirmed")
+    if ningbo and ningbo.view == "positive" and risk and risk.view in {"negative", "risk"}:
+        tags.append("ningbo_positive_risk_conflict")
+    if research and research.view == "negative" and any(
+        p and p.view == "positive" for p in (stock, ta, ningbo)
+    ):
+        tags.append("research_negative_signal_conflict")
+    unavailable = [p.key for p in perspectives if p.status in {"unavailable", "error"}]
+    if unavailable:
+        tags.append("missing_key_evidence")
+    return tags
 
 
 def _first_point_note(p: PerspectiveEvidence | None, token: str) -> str | None:
@@ -870,6 +1048,29 @@ def _with_quality(p: PerspectiveEvidence, as_of: dt.date) -> PerspectiveEvidence
         missing=p.missing,
         freshness=freshness,
         raw=p.raw,
+        latency_ms=p.latency_ms,
+        source_tables=p.source_tables or sorted({point.source for point in p.points if point.source}),
+        missing_required=p.missing_required,
+    )
+
+
+def _with_contract_fields(p: PerspectiveEvidence, *, latency_ms: float | None) -> PerspectiveEvidence:
+    sources = p.source_tables or sorted({point.source for point in p.points if point.source})
+    missing_required = p.missing_required or (list(p.missing) if p.status in {"unavailable", "error"} else [])
+    return PerspectiveEvidence(
+        p.key,
+        p.title,
+        p.status,
+        p.view,
+        p.summary,
+        points=p.points,
+        conflicts=p.conflicts,
+        missing=p.missing,
+        freshness=p.freshness,
+        raw=p.raw,
+        latency_ms=latency_ms,
+        source_tables=sources,
+        missing_required=missing_required,
     )
 
 
@@ -958,3 +1159,10 @@ def _float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _days_between(start: Any, end: dt.date) -> int | None:
+    start_date = _parse_dateish(start)
+    if start_date is None:
+        return None
+    return (end - start_date).days

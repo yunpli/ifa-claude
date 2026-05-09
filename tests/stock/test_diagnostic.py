@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 
 from ifa.families.stock.diagnostic.models import EvidencePoint, PerspectiveEvidence
+from ifa.families.stock.diagnostic.persistence import persist_diagnostic_run
 from ifa.families.stock.diagnostic.service import diagnostic_manifest_payload, render_html, render_markdown, synthesize_diagnostic
 from ifa.families.stock.diagnostic.models import DiagnosticReport
 
@@ -192,7 +193,89 @@ def test_manifest_payload_persists_run_contract():
     payload = diagnostic_manifest_payload(report, output_paths={"html": "/tmp/report.html"})
 
     assert payload["artifact_type"] == "stock_edge_diagnostic_run"
+    assert payload["logic_version"] == "stock_diagnostic_synthesis_v1"
     assert payload["ts_code"] == "300042.SZ"
     assert payload["conclusion"] == report.synthesis.conclusion
     assert payload["output_paths"]["html"] == "/tmp/report.html"
     assert payload["perspective_statuses"]["risk"]["sources"] == ["smartmoney.raw_daily"]
+
+
+def test_synthesis_tags_conflict_taxonomy_for_hard_risk():
+    perspectives = [
+        PerspectiveEvidence("stock_edge_sector_cycle", "Stock Edge", "available", "positive", "sector flow positive"),
+        PerspectiveEvidence("ta", "TA", "available", "neutral", "no TA setup"),
+        PerspectiveEvidence("risk", "Risk", "available", "risk", "blacklist hit"),
+    ]
+
+    synthesis = synthesize_diagnostic(perspectives)
+
+    assert synthesis.logic_version == "stock_diagnostic_synthesis_v1"
+    assert "hard_risk_precedence" in synthesis.conflict_taxonomy
+    assert "sector_positive_ta_unconfirmed" in synthesis.conflict_taxonomy
+
+
+def test_persist_diagnostic_run_uses_transaction_and_evidence_rows(monkeypatch):
+    report = DiagnosticReport(
+        ts_code="300042.SZ",
+        name="朗科科技",
+        as_of_trade_date=dt.date(2026, 5, 6),
+        generated_at_bjt="2026-05-08T10:00:00+08:00",
+        data_cutoff_bjt="2026-05-06T15:00:00+08:00",
+        perspectives=[
+            PerspectiveEvidence(
+                "risk",
+                "Risk",
+                "available",
+                "neutral",
+                "未命中硬性风险。",
+                points=[EvidencePoint("avg amount 7d yuan", 123.0, "smartmoney.raw_daily", "2026-05-06")],
+                freshness={"status": "fresh", "latest_as_of": "2026-05-06"},
+            ),
+        ],
+        synthesis=synthesize_diagnostic([
+            PerspectiveEvidence("risk", "Risk", "available", "neutral", "ok", freshness={"status": "fresh"}),
+        ]),
+    )
+
+    class FakeTx:
+        def __init__(self):
+            self.calls = []
+            self.entered = False
+            self.exited = False
+
+        def __enter__(self):
+            self.entered = True
+            return self
+
+        def __exit__(self, *args):
+            self.exited = True
+            return None
+
+        def execute(self, sql, params):
+            self.calls.append((str(sql), params))
+
+    class FakeEngine:
+        def __init__(self):
+            self.tx = FakeTx()
+
+        def begin(self):
+            return self.tx
+
+    import ifa.families.stock.diagnostic.persistence as persistence
+
+    monkeypatch.setattr(persistence, "Engine", FakeEngine)
+    engine = FakeEngine()
+    run_id = persist_diagnostic_run(
+        report,
+        engine=engine,
+        output_paths={"html": "/tmp/report.html"},
+        requested_at=dt.datetime(2026, 5, 8, 9, 0, tzinfo=dt.timezone.utc),
+    )
+
+    assert run_id["status"] == "persisted"
+    assert engine.tx.entered and engine.tx.exited
+    assert len(engine.tx.calls) == 2
+    assert "stock.diagnostic_runs" in engine.tx.calls[0][0]
+    assert engine.tx.calls[0][1]["logic_version"] == "stock_diagnostic_synthesis_v1"
+    assert "stock.diagnostic_perspective_evidence" in engine.tx.calls[1][0]
+    assert engine.tx.calls[1][1]["perspective_key"] == "risk"

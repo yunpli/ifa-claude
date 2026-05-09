@@ -49,17 +49,19 @@ Implementation:
 - `ifa/families/stock/diagnostic/models.py` defines the typed evidence schema.
 - `ifa/families/stock/diagnostic/service.py` builds a read-only diagnostic report.
 - `ifa/cli/stock.py diagnose` exposes markdown/json/html output, one file per stock when `--output` is a directory, plus a multi-stock JSON index.
-- Every written diagnostic also gets a lightweight manifest JSON containing stock code/name, requested/generated timestamps, perspective status/freshness, conclusion, confidence, output paths, and DB schema plan.
+- Every written diagnostic also gets a lightweight manifest JSON containing stock code/name, requested/generated timestamps, perspective status/freshness, latency/source tables, conclusion, confidence, and output paths.
+- `--persist-db/--no-persist-db` controls best-effort persistence of the same run/evidence contract to `stock.diagnostic_runs` and `stock.diagnostic_perspective_evidence`; default is best-effort persistence, and schema/DB failures fall back to artifact-only output. This is audit-only and must not feed production YAML promotion or crons.
 - `tests/stock/test_diagnostic.py` verifies conflict-preserving synthesis and unavailable-perspective rendering.
 
 The MVP deliberately uses a light snapshot.  It does not run the expensive full Stock Edge strategy matrix unless `--full-stock-edge` is passed, and it skips optional intraday/model-context loaders in the default path.
 
 ## Persistence Contract
 
-P0 uses structured JSON artifacts instead of a DB migration because the diagnostic report shape is still being hardened and this path does not affect report/delivery crons.  If artifacts become insufficient, promote the same manifest shape into:
+P0 writes structured JSON artifacts and persists DB audit rows once migrations are applied:
 
-- `stock.diagnostic_runs(run_id, ts_code, name, requested_at, generated_at, as_of_trade_date, conclusion, confidence, output_paths_json, perspective_status_json, evidence_freshness_json)`.
-- `stock.diagnostic_evidence(run_id, perspective_key, source_table, as_of, freshness_status, payload_json)`.
+- `stock.diagnostic_runs(run_id, ts_code, name, requested_at, generated_at, as_of_trade_date, run_mode, status, conclusion, confidence, logic_version, output_paths_json, perspective_status_json, evidence_freshness_json, synthesis_json, manifest_json)`.
+- `stock.diagnostic_perspective_evidence(run_id, perspective_key, title, status, view, freshness_status, latency_ms, source_tables_json, missing_evidence_json, missing_required_json, source_as_of, summary, evidence_json, raw_json)`.
+- `stock.sector_cycle_leader_daily(trade_date, ts_code, l2_code, rank_in_sector, sector_rank_count, leader_score, sector_score, stock_score, quality_flag, logic_version, evidence_json)` is the new P1 PIT rank/score surface for sector-first leader evidence. The diagnostic reads it when populated.
 
 Freshness is shown per perspective as `fresh`, `stale`, or `unavailable`; synthesis confidence is lowered when key perspectives are stale or unavailable.
 

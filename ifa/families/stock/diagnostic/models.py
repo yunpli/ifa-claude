@@ -15,6 +15,7 @@ from typing import Any, Literal
 PerspectiveStatus = Literal["available", "partial", "unavailable", "error"]
 PerspectiveView = Literal["positive", "neutral", "negative", "risk", "unknown"]
 FreshnessStatus = Literal["fresh", "stale", "unavailable"]
+SYNTHESIS_LOGIC_VERSION = "stock_diagnostic_synthesis_v1"
 AdvisorConclusion = Literal[
     "short-term tradable",
     "watch only",
@@ -53,6 +54,9 @@ class PerspectiveEvidence:
     missing: list[str] = field(default_factory=list)
     freshness: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict)
+    latency_ms: float | None = None
+    source_tables: list[str] = field(default_factory=list)
+    missing_required: list[str] = field(default_factory=list)
 
     @property
     def freshness_status(self) -> FreshnessStatus:
@@ -73,7 +77,9 @@ class DiagnosticSynthesis:
     invalidation: str
     time_window: str
     position_risk: str
+    logic_version: str = SYNTHESIS_LOGIC_VERSION
     conflicts: list[str] = field(default_factory=list)
+    conflict_taxonomy: list[str] = field(default_factory=list)
     rationale: list[str] = field(default_factory=list)
 
 
@@ -96,4 +102,9 @@ class DiagnosticReport:
             perspective["evidence"] = perspective.get("points", [])
             perspective["missing_evidence"] = perspective.get("missing", [])
             perspective["freshness_status"] = self.perspectives[idx].freshness_status
+            perspective["latency_ms"] = self.perspectives[idx].latency_ms
+            perspective["source_tables"] = self.perspectives[idx].source_tables or sorted(
+                {point.source for point in self.perspectives[idx].points if point.source}
+            )
+            perspective["missing_required"] = self.perspectives[idx].missing_required
         return data

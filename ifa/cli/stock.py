@@ -197,6 +197,7 @@ def diagnose_cmd(
     output_format: str = typer.Option("markdown", "--format", help="markdown | json | html"),
     output: Path | None = typer.Option(None, "--output", "-o", help="Write artifact to a file or directory. Multiple stocks require a directory."),
     full_stock_edge: bool = typer.Option(False, "--full-stock-edge", help="Also run the expensive full Stock Edge strategy matrix and decision layer."),
+    persist_db: bool = typer.Option(True, "--persist-db/--no-persist-db", help="Best-effort persist diagnostic run/evidence into stock.diagnostic_* tables. Does not mutate YAML or crons."),
 ) -> None:
     """Build a read-only multi-perspective single-stock diagnostic report."""
     settings = get_settings()
@@ -207,6 +208,7 @@ def diagnose_cmd(
         render_markdown,
         write_diagnostic_artifact,
     )
+    from ifa.families.stock.diagnostic.persistence import try_persist_diagnostic_run
 
     if output_format not in {"markdown", "json", "html"}:
         raise typer.BadParameter("--format must be markdown, json, or html")
@@ -233,16 +235,36 @@ def diagnose_cmd(
             path = _diagnostic_output_path(output, report, output_format, default_dir=_default_diagnostic_output_dir(settings, report, run_mode))
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(payload, encoding="utf-8")
+            output_paths = {output_format: str(path)}
             manifest_path = write_diagnostic_artifact(
                 report,
                 artifact_dir=path.parent,
-                output_paths={output_format: str(path)},
+                output_paths=output_paths,
                 requested_at=req_at,
             )
+            output_paths["manifest"] = str(manifest_path)
+            if persist_db:
+                persist_result = try_persist_diagnostic_run(
+                    report,
+                    engine=engine,
+                    output_paths=output_paths,
+                    requested_at=req_at,
+                )
+                if persist_result.get("status") == "persisted":
+                    console.print(f"[green]DB[/green] → stock.diagnostic_runs run_id={persist_result.get('run_id')}")
+                else:
+                    console.print(f"[yellow]DB[/yellow] → skipped ({persist_result.get('reason')})")
             written.append(path)
             written.append(manifest_path)
             index_rows.append(_diagnostic_index_row(report, path, manifest_path))
         else:
+            if persist_db:
+                try_persist_diagnostic_run(
+                    report,
+                    engine=engine,
+                    output_paths={},
+                    requested_at=req_at,
+                )
             rendered_payloads.append(payload)
 
     if written:
