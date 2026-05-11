@@ -47,6 +47,7 @@ from ifa.core.tushare import TuShareClient
 from ifa.families.macro.morning import _safe_chat_json
 
 from . import prompts
+from .hypothesis_review import build_noon_hypothesis_reviews
 from ._common import (
     MarketCtx,
     _persist_model_output,
@@ -179,56 +180,16 @@ def _build_n3_review(ctx: MarketCtx, hyps: list[dict]) -> dict:
                 "order": 3, "type": "review_table",
                 "content_json": {"rows": [],
                                   "fallback_text": "今日未找到早报主报告假设。"}}
-    breadth = ctx.breadth
-    indices = "; ".join(f"{s.name} {s.pct_change:+.2f}%"
-                          for s in ctx.indices if s.pct_change is not None)
-    main_top = "; ".join(f"{s.name} {s.pct_change:+.2f}%"
-                          for s in ctx.main_lines[:8] if s.pct_change is not None)
-    cands = "\n".join(
-        f"[{i}] {h['hypothesis']}  · 验证规则: {h.get('review_rule') or '—'}  · 关联: {h.get('related') or '—'}"
-        for i, h in enumerate(hyps)
-    )
-    user = f"""
-=== 上午盘市场快照 ===
-{indices}
-全 A 成交 {breadth.total_amount} 万亿；涨/跌 {breadth.up_count}/{breadth.down_count}；
-涨停 {breadth.limit_up_count}, 跌停 {breadth.limit_down_count}, 连板 {breadth.max_consec_streak}
-主线候选: {main_top}
-
-=== 早报假设 ===
-{cands}
-
-=== 任务 ===
-{prompts.REVIEW_INSTRUCTIONS}
-
-=== 输出 schema ===
-{prompts.REVIEW_SCHEMA}
-"""
-    parsed, resp, status = _safe_chat_json(
-        ctx.llm, system=prompts.SYSTEM_PERSONA, user=user, max_tokens=2400,
-    )
-    moid = _persist_model_output(ctx, section_key="market_noon.s3_review",
-                                  prompt_name="market_noon.s3_review",
-                                  parsed=parsed, resp=resp, status=status)
-    rows = []
-    if isinstance(parsed, dict):
-        for entry in parsed.get("results") or []:
-            idx = entry.get("candidate_index")
-            if not isinstance(idx, int) or idx < 0 or idx >= len(hyps):
-                continue
-            h = hyps[idx]
-            rows.append({
-                "hypothesis": h["hypothesis"],
-                "review_result": entry.get("review_result"),
-                "review_result_display": entry.get("review_result_display") or entry.get("review_result"),
-                "evidence_text": entry.get("evidence_text"),
-                "lesson": entry.get("lesson"),
-            })
+    rows = build_noon_hypothesis_reviews(ctx, hyps)
     return {
         "key": "market_noon.s3_review", "title": "早报假设初步验证 (上午盘)",
         "order": 3, "type": "review_table",
-        "content_json": {"rows": rows},
-        "prompt_name": "market_noon.s3_review", "model_output_id": moid,
+        "content_json": {
+            "rows": rows,
+            "method_note": "结构化规则优先：指数、全A广度、涨跌停/炸板率、申万L1/L2、关注股分时。",
+        },
+        "prompt_name": "market_noon.s3_review_rules",
+        "model_output_id": None,
     }
 
 

@@ -13,10 +13,16 @@
     </thead>
     <tbody>
       {% for r in c.rows %}
+      {% set signal = '升温' if r.review_result == 'validated' else ('降温' if r.review_result in ['failed', 'falsified'] else '平稳') %}
       <tr>
         <td>{{ r.hypothesis }}</td>
-        <td><span class="ifa-matrix__signal" data-signal="{{ '升温' if r.review_result == 'validated' else ('降温' if r.review_result == 'failed' else '平稳') }}">{{ r.review_result_display or r.review_result }}</span></td>
-        <td>{{ r.evidence_text or '—' }}</td>
+        <td><span class="ifa-matrix__signal" data-signal="{{ signal }}">{{ r.review_result_display or r.review_result }}</span></td>
+        <td>
+          {{ r.evidence_text or '—' }}
+          {% if r.missing_reason %}
+          <div class="ifa-review-missing">{{ r.missing_reason }}</div>
+          {% endif %}
+        </td>
         <td class="ifa-matrix__areas">{{ r.lesson or '—' }}</td>
       </tr>
       {% endfor %}
@@ -40,4 +46,5 @@
 <style>
 .ifa-grader-stats{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:10px;padding:8px 14px;background:var(--paper-tint);border:1px solid var(--rule);font-size:12px;color:var(--ink-2);}
 .ifa-grader-stats__lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:0.06em;font-weight:600;color:var(--ink-muted);margin-right:4px;}
+.ifa-review-missing{margin-top:4px;color:var(--ink-muted);font-size:11.5px;line-height:1.45;}
 </style>
