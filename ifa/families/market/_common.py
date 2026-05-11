@@ -92,6 +92,27 @@ def _fmt_count(v: float | None) -> str:
     return f"{v:,.0f}"
 
 
+def _safe_float(v: Any) -> float | None:
+    try:
+        if v is None or pd.isna(v):
+            return None
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _daily_amount_to_yuan(v: Any) -> float | None:
+    """TuShare `daily.amount` is 千元; focus report stores `amount` in 元."""
+    raw = _safe_float(v)
+    return raw * 1000.0 if raw is not None else None
+
+
+def _daily_vol_to_shares(v: Any) -> float | None:
+    """TuShare `daily.vol` is 手; focus report stores `volume` in 股."""
+    raw = _safe_float(v)
+    return raw * 100.0 if raw is not None else None
+
+
 def _persist_model_output(ctx: MarketCtx, *, section_key: str, prompt_name: str,
                            parsed: Any, resp: Any, status: str):
     if resp is None:
@@ -208,21 +229,29 @@ def enrich_market_focus(
         df_d = tushare.call("daily", trade_date=end)
     except Exception:
         df_d = pd.DataFrame()
+    if df_d is None:
+        df_d = pd.DataFrame()
     try:
         df_db = tushare.call("daily_basic", trade_date=end)
     except Exception:
+        df_db = pd.DataFrame()
+    if df_db is None:
         df_db = pd.DataFrame()
     try:
         df_mf = tushare.call("moneyflow", trade_date=end)
     except Exception:
         df_mf = pd.DataFrame()
+    if df_mf is None:
+        df_mf = pd.DataFrame()
 
     by_d = {r.ts_code: r for r in df_d.itertuples()} if not df_d.empty else {}
     by_db = {r.ts_code: r for r in df_db.itertuples()} if not df_db.empty else {}
-    by_mf = (
-        {r.ts_code: float(r.net_mf_amount) for r in df_mf.itertuples() if r.net_mf_amount is not None}
-        if not df_mf.empty else {}
-    )
+    by_mf: dict[str, float] = {}
+    if not df_mf.empty and "net_mf_amount" in df_mf.columns:
+        for r in df_mf.itertuples():
+            net = _safe_float(getattr(r, "net_mf_amount", None))
+            if net is not None:
+                by_mf[r.ts_code] = net
 
     # Slot-aware sparkline caption
     today = dt.datetime.now(BJT).date()
@@ -234,8 +263,85 @@ def enrich_market_focus(
     else:
         spark_caption = f"近 {history_days} 日趋势（日 K 收盘）"
 
-    def _fetch_intraday_5min(ts_code: str, *, until_hhmm: str | None = None) -> tuple[list[float], list[str]]:
-        """Fetch intraday 5min bars, hard-cut at slot's official cutoff.
+    prev_close_by_code: dict[str, float] = {}
+    prev_close_loaded = False
+
+    def _get_prev_close(ts_code: str) -> float | None:
+        """Previous trading day's close from `daily`, not calendar T-1.
+
+        `enrich_market_focus` has no hard dependency on the DB calendar, so the
+        batch path walks back calendar days until TuShare returns a populated
+        `daily(trade_date=...)` frame. This preserves trading-day semantics over
+        weekends/holidays without adding a DB requirement to unit tests.
+        """
+        nonlocal prev_close_loaded
+        if not prev_close_loaded:
+            prev_close_loaded = True
+            for back in range(1, 15):
+                td = (on_date - dt.timedelta(days=back)).strftime("%Y%m%d")
+                try:
+                    df_prev = tushare.call("daily", trade_date=td)
+                except Exception:
+                    continue
+                if df_prev is None or df_prev.empty:
+                    continue
+                for r in df_prev.itertuples():
+                    close = _safe_float(getattr(r, "close", None))
+                    if close is not None:
+                        prev_close_by_code[str(getattr(r, "ts_code"))] = close
+                if prev_close_by_code:
+                    break
+        v = prev_close_by_code.get(ts_code)
+        if v is not None:
+            return v
+        try:
+            prev_end = (on_date - dt.timedelta(days=1)).strftime("%Y%m%d")
+            df_prev = tushare.call("daily", ts_code=ts_code, start_date=start_h, end_date=prev_end)
+            if df_prev is not None and not df_prev.empty:
+                row = df_prev.sort_values("trade_date").iloc[-1]
+                return _safe_float(row.get("close"))
+        except Exception:
+            return None
+        return None
+
+    intraday_cache: dict[tuple[str, str | None], dict[str, Any]] = {}
+
+    def _normalize_intraday_frame(df: pd.DataFrame | None, *, until_hhmm: str) -> pd.DataFrame:
+        if df is None or df.empty:
+            return pd.DataFrame()
+        time_col = "time" if "time" in df.columns else (
+            "trade_time" if "trade_time" in df.columns else ("trade_date" if "trade_date" in df.columns else None)
+        )
+        if time_col is None or "close" not in df.columns:
+            return pd.DataFrame()
+        out = df.copy()
+
+        def _time_text(v: Any) -> str:
+            s = str(v)
+            if ":" in s and "-" not in s and len(s) <= 8:
+                return f"{on_date:%Y-%m-%d} {s}"
+            return s
+
+        out["_trade_time"] = pd.to_datetime(out[time_col].map(_time_text), errors="coerce")
+        cutoff = pd.Timestamp(f"{on_date:%Y-%m-%d} {until_hhmm}:00")
+        out = out[out["_trade_time"].notna() & (out["_trade_time"] <= cutoff)].copy()
+        if out.empty:
+            return out
+        for col in ("open", "high", "low", "close", "vol", "amount", "pre_close", "pct_chg"):
+            if col in out.columns:
+                out[col] = pd.to_numeric(out[col], errors="coerce")
+        return out.sort_values("_trade_time").reset_index(drop=True)
+
+    def _sum_numeric(df: pd.DataFrame, col: str) -> float | None:
+        if col not in df.columns:
+            return None
+        vals = pd.to_numeric(df[col], errors="coerce").dropna()
+        if vals.empty:
+            return None
+        return float(vals.sum())
+
+    def _fetch_intraday_5min_snapshot(ts_code: str, *, until_hhmm: str | None = None) -> dict[str, Any]:
+        """Fetch slot-cut 5min bars and derive the visible current snapshot.
 
         is_today=True  → pro.rt_min_daily (today's bars from open, realtime).
                          Even if the report is generated at 14:00 for a noon
@@ -244,61 +350,128 @@ def enrich_market_focus(
         is_today=False → pro.stk_mins (historical minute bars, range query).
                          End time of the range is also slot-aware so historical
                          replay matches production cutoff exactly.
+
+        Unit contract for focus stock report rows:
+          - `amount` is normalized to 元. `daily.amount` is 千元; minute
+            `amount` follows the project-wide intraday convention of 元.
+          - `volume` is normalized to 股. `daily.vol` is 手; minute `vol`
+            follows the project-wide intraday convention of 股.
+
+        Moneyflow is intentionally NOT proxied from minute amount/volume; only
+        official TuShare `moneyflow.net_mf_amount` populates `moneyflow_net`.
         """
+        cutoff = until_hhmm or "15:00"
+        key = (ts_code, cutoff)
+        if key in intraday_cache:
+            return intraday_cache[key]
         try:
             # Slot-aware end time for the historical range query as well —
             # otherwise stk_mins returns through 15:00 and noon replay would
             # see afternoon bars.
-            range_end = until_hhmm or "15:00"
             if is_today:
                 df = tushare.call("rt_min_daily", ts_code=ts_code, freq="5MIN")
+                source = "rt_min_daily"
             else:
                 start_dt = f"{on_date.strftime('%Y-%m-%d')} 09:30:00"
-                end_dt = f"{on_date.strftime('%Y-%m-%d')} {range_end}:00"
+                end_dt = f"{on_date.strftime('%Y-%m-%d')} {cutoff}:00"
                 df = tushare.call("stk_mins", ts_code=ts_code, freq="5min",
                                    start_date=start_dt, end_date=end_dt)
-            if df is None or df.empty:
-                return [], []
-            time_col = "time" if "time" in df.columns else ("trade_time" if "trade_time" in df.columns else None)
-            if time_col is None:
-                return [], []
-            df = df.sort_values(time_col).reset_index(drop=True)
-            # Always apply slot cutoff (covers both is_today rt_min_daily and
-            # any extra rows stk_mins may emit at boundary).
-            cutoff = f"{on_date.strftime('%Y-%m-%d')} {range_end}:00"
-            df = df[df[time_col] <= cutoff]
-            closes = [float(v) if pd.notna(v) else None for v in df["close"]]
-            times = df[time_col].astype(str).tolist()
-            return closes, times
+                source = "stk_mins"
+            bars = _normalize_intraday_frame(df, until_hhmm=cutoff)
         except Exception:
-            return [], []
+            bars = pd.DataFrame()
+            source = "rt_min_daily" if is_today else "stk_mins"
+        if bars.empty:
+            result = {
+                "history_close": [],
+                "history_dates": [],
+                "quote_source": source,
+                "quote_status": "missing",
+            }
+            intraday_cache[key] = result
+            return result
+
+        last = bars.iloc[-1]
+        close = _safe_float(last.get("close"))
+        pre_close = _safe_float(last.get("pre_close")) or _get_prev_close(ts_code)
+        pct_change = _safe_float(last.get("pct_chg"))
+        if pct_change is None and close is not None and pre_close and pre_close > 0:
+            pct_change = (close - pre_close) / pre_close * 100.0
+
+        closes = [_safe_float(v) for v in bars["close"]]
+        times = bars["_trade_time"].dt.strftime("%Y-%m-%d %H:%M:%S").tolist()
+        result = {
+            "close": close,
+            "pct_change": pct_change,
+            "volume": _sum_numeric(bars, "vol"),
+            "amount": _sum_numeric(bars, "amount"),
+            "trade_date": on_date,
+            "quote_time": str(times[-1]) if times else None,
+            "quote_source": source,
+            "quote_status": "ok" if close is not None else "missing_close",
+            "history_close": closes,
+            "history_dates": times,
+        }
+        intraday_cache[key] = result
+        return result
 
     def _build(spec: FocusStock) -> dict[str, Any]:
         d = by_d.get(spec.ts_code)
         db = by_db.get(spec.ts_code)
+        daily_close = _safe_float(getattr(d, "close", None)) if d else None
+        daily_pct = _safe_float(getattr(d, "pct_chg", None)) if d else None
+        daily_amount = _daily_amount_to_yuan(getattr(d, "amount", None)) if d else None
+        daily_volume = _daily_vol_to_shares(getattr(d, "vol", None)) if d else None
+        moneyflow_net = by_mf.get(spec.ts_code)
+        moneyflow_meta = {
+            "moneyflow_source": "moneyflow",
+            "moneyflow_status": "official",
+            "moneyflow_is_official": True,
+        } if moneyflow_net is not None else {
+            "moneyflow_source": None,
+            "moneyflow_status": "unavailable_intraday" if slot in ("noon", "evening") else "unavailable",
+            "moneyflow_is_official": False,
+        }
         out: dict[str, Any] = {
             "ts_code": spec.ts_code,
             "name": spec.display_name,
             "layer": spec.layer,
             "sub_theme": spec.sub_theme,
-            "close": float(getattr(d, "close")) if d and getattr(d, "close", None) is not None else None,
-            "pct_change": float(getattr(d, "pct_chg")) if d and getattr(d, "pct_chg", None) is not None else None,
-            "amount": float(getattr(d, "amount")) if d and getattr(d, "amount", None) is not None else None,
-            "turnover_rate": float(getattr(db, "turnover_rate")) if db and getattr(db, "turnover_rate", None) is not None else None,
-            "pe": float(getattr(db, "pe_ttm")) if db and getattr(db, "pe_ttm", None) is not None else None,
-            "moneyflow_net": by_mf.get(spec.ts_code),
+            "close": daily_close,
+            "pct_change": daily_pct,
+            "volume": daily_volume,
+            "amount": daily_amount,
+            "amount_unit": "yuan",
+            "volume_unit": "shares",
+            "quote_source": "daily" if daily_close is not None else None,
+            "quote_status": "ok" if daily_close is not None else "missing",
+            "turnover_rate": _safe_float(getattr(db, "turnover_rate", None)) if db else None,
+            "pe": _safe_float(getattr(db, "pe_ttm", None)) if db else None,
+            "moneyflow_net": moneyflow_net,
+            **moneyflow_meta,
             "history_close": [],
             "history_dates": [],
             "history_caption": spark_caption,
         }
         if slot == "noon":
-            closes, times = _fetch_intraday_5min(spec.ts_code, until_hhmm="11:30")
-            out["history_close"] = closes
-            out["history_dates"] = times
+            snap = _fetch_intraday_5min_snapshot(spec.ts_code, until_hhmm="11:30")
+            for k in ("close", "pct_change", "volume", "amount", "trade_date",
+                      "quote_time", "quote_source", "quote_status"):
+                if snap.get(k) is not None:
+                    out[k] = snap.get(k)
+            out["history_close"] = snap.get("history_close") or []
+            out["history_dates"] = snap.get("history_dates") or []
         elif slot == "evening":
-            closes, times = _fetch_intraday_5min(spec.ts_code, until_hhmm="15:00")
-            out["history_close"] = closes
-            out["history_dates"] = times
+            snap = _fetch_intraday_5min_snapshot(spec.ts_code, until_hhmm="15:00")
+            for k in ("volume", "amount", "quote_time"):
+                if snap.get(k) is not None:
+                    out[k] = snap.get(k)
+            if daily_close is None:
+                for k in ("close", "pct_change", "trade_date", "quote_source", "quote_status"):
+                    if snap.get(k) is not None:
+                        out[k] = snap.get(k)
+            out["history_close"] = snap.get("history_close") or []
+            out["history_dates"] = snap.get("history_dates") or []
         else:
             try:
                 hd = tushare.call("daily", ts_code=spec.ts_code,
@@ -674,7 +847,9 @@ def build_focus_deep_section(ctx: MarketCtx, *, order: int, title: str, key: str
             "candidate_index": i, "stock_code": spec.ts_code, "stock_name": spec.display_name,
             "layer": spec.layer, "sub_theme": spec.sub_theme,
             "close": d.get("close"), "pct_change": d.get("pct_change"),
+            "amount": d.get("amount"), "volume": d.get("volume"),
             "moneyflow_net": d.get("moneyflow_net"),
+            "moneyflow_status": d.get("moneyflow_status"),
             "history_close": (d.get("history_close") or [])[-5:],
         })
     user = f"""
@@ -710,6 +885,7 @@ def build_focus_deep_section(ctx: MarketCtx, *, order: int, title: str, key: str
             "close_display": f"{d['close']:,.2f}" if d.get("close") is not None else None,
             "pct_display": _fmt_pct(d.get("pct_change")) if d.get("pct_change") is not None else None,
             "pct_dir": _direction(d.get("pct_change")),
+            "amount_display": _fmt_amount_yi(d.get("amount")) if d.get("amount") is not None else None,
             "mf_display": (_fmt_count(d.get("moneyflow_net")) + " 元") if d.get("moneyflow_net") is not None else None,
             "spark_svg": spark,
             "spark_caption": d.get("history_caption") or "",
@@ -738,7 +914,9 @@ def build_focus_brief_section(ctx: MarketCtx, *, order: int, title: str, key: st
             "candidate_index": i, "stock_code": spec.ts_code, "stock_name": spec.display_name,
             "layer": spec.layer, "sub_theme": spec.sub_theme,
             "pct_change": d.get("pct_change"),
+            "amount": d.get("amount"), "volume": d.get("volume"),
             "moneyflow_net": d.get("moneyflow_net"),
+            "moneyflow_status": d.get("moneyflow_status"),
         })
     user = f"""
 === 用户普通关注 ({len(bulk)} 只) ===
@@ -772,6 +950,7 @@ def build_focus_brief_section(ctx: MarketCtx, *, order: int, title: str, key: st
             "close_display": f"{d['close']:,.2f}" if d.get("close") is not None else None,
             "pct_display": _fmt_pct(d.get("pct_change")) if d.get("pct_change") is not None else None,
             "pct_dir": _direction(d.get("pct_change")),
+            "amount_display": _fmt_amount_yi(d.get("amount")) if d.get("amount") is not None else None,
             "spark_svg": spark,
             "spark_caption": d.get("history_caption") or "",
             "state": info.get("state") or None,

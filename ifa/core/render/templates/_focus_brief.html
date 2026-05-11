@@ -20,7 +20,7 @@
       <tr>
         <td>
           <div class="ifa-panel__indicator">{{ r.stock_name }}</div>
-          <span class="ifa-panel__period">{{ r.stock_code }} · {{ r.sub_theme }}</span>
+          <span class="ifa-panel__period">{{ r.stock_code }} · {{ r.sub_theme }}{% if r.amount_display %} · 成交额 {{ r.amount_display }}{% endif %}</span>
         </td>
         <td><span class="ifa-tone__pill" style="font-size:9.5px; padding:2px 6px;">{{ (r.layer_id or '—') | upper }}</span></td>
         <td class="ifa-panel__value">{{ r.close_display or '—' }}</td>

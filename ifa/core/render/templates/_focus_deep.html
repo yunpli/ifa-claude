@@ -19,6 +19,7 @@
       {%- if r.sub_theme %}{%- set _ = sub_parts.append(r.sub_theme) -%}{%- endif -%}
       {%- if r.close_display %}{%- set _ = sub_parts.append('收盘 ' ~ r.close_display) -%}{%- endif -%}
       {%- if r.pct_display %}{%- set _ = sub_parts.append(r.pct_display) -%}{%- endif -%}
+      {%- if r.amount_display %}{%- set _ = sub_parts.append('成交额 ' ~ r.amount_display) -%}{%- endif -%}
       {%- if r.mf_display %}{%- set _ = sub_parts.append('主力 ' ~ r.mf_display) -%}{%- endif -%}
       {% if sub_parts %}<div class="ifa-focus-card__sub">{{ sub_parts | join(' · ') }}</div>{% endif %}
       {% if r.spark_svg %}
