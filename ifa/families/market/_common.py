@@ -101,6 +101,32 @@ def _safe_float(v: Any) -> float | None:
         return None
 
 
+def _source_confidence_label(v: str | None) -> str:
+    return {"high": "高置信", "medium": "中置信", "low": "低置信"}.get(v or "", v or "")
+
+
+def _limit_source_note(b: mdata.BreadthSnap, *, include_rate: bool = False) -> str:
+    parts: list[str] = []
+    if include_rate and b.broke_limit_pct is not None:
+        parts.append(f"炸板率 {b.broke_limit_pct * 100:.0f}%")
+    if b.touched_limit_up_count is not None and b.broke_limit_count is not None:
+        parts.append(f"触板 {b.touched_limit_up_count} 家，炸板 {b.broke_limit_count} 家")
+    if b.limit_source_label:
+        parts.append(b.limit_source_label)
+    conf = _source_confidence_label(b.limit_source_confidence)
+    if conf:
+        parts.append(conf)
+    if b.limit_source_method == "computed_rt_proxy":
+        if b.limit_anchor_date and b.limit_anchor_limit_up_count is not None:
+            anchor = f"官方锚 {b.limit_anchor_date:%m-%d} 涨停 {b.limit_anchor_limit_up_count}"
+            if b.limit_anchor_broke_limit_pct is not None:
+                anchor += f"，炸板率 {b.limit_anchor_broke_limit_pct * 100:.0f}%"
+            parts.append(anchor)
+        else:
+            parts.append("官方锚不可用")
+    return " · ".join(parts)
+
+
 def _daily_amount_to_yuan(v: Any) -> float | None:
     """TuShare `daily.amount` is 千元; focus report stores `amount` in 元."""
     raw = _safe_float(v)
@@ -543,11 +569,14 @@ def build_index_panel_section(ctx: MarketCtx, *, order: int, title: str, key: st
             "note": f"全 A 平均涨跌 {b.avg_pct_change:+.2f}%" if b.avg_pct_change is not None else "",
         })
     if b.limit_up_count is not None:
+        limit_note = _limit_source_note(b, include_rate=True)
         breadth_cells.append({
             "label": "涨停 / 跌停",
             "value": f"{b.limit_up_count} / {b.limit_down_count or 0}",
             "unit": "家",
-            "note": f"炸板率 {b.broke_limit_pct*100:.0f}%" if b.broke_limit_pct is not None else "",
+            "note": limit_note,
+            "source_method": b.limit_source_method,
+            "source_confidence": b.limit_source_confidence,
         })
     if b.max_consec_streak is not None:
         breadth_cells.append({
@@ -714,13 +743,17 @@ def build_sentiment_section(ctx: MarketCtx, *, order: int, title: str, key: str)
     cells = []
     if b.limit_up_count is not None:
         cells.append({"label": "涨停家数", "value": f"{b.limit_up_count}", "unit": "家",
-                       "note": "做多情绪"})
+                       "note": _limit_source_note(b) or "做多情绪",
+                       "source_method": b.limit_source_method,
+                       "source_confidence": b.limit_source_confidence})
     if b.limit_down_count is not None:
         cells.append({"label": "跌停家数", "value": f"{b.limit_down_count}", "unit": "家",
                        "note": "风险释放"})
     if b.broke_limit_pct is not None:
         cells.append({"label": "炸板率", "value": f"{b.broke_limit_pct*100:.0f}", "unit": "%",
-                       "note": "分歧风险"})
+                       "note": _limit_source_note(b) or "分歧风险",
+                       "source_method": b.limit_source_method,
+                       "source_confidence": b.limit_source_confidence})
     if b.max_consec_streak is not None:
         cells.append({"label": "连板高度", "value": f"{b.max_consec_streak}", "unit": "连板",
                        "note": "接力强度"})

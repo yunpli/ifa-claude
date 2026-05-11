@@ -253,7 +253,194 @@ class BreadthSnap:
     broke_limit_count: int | None    # 炸板（涨停封单未维持）
     broke_limit_pct: float | None    # 炸板率
     max_consec_streak: int | None    # 最高连板
+    touched_limit_up_count: int | None = None  # 盘中触及涨停价的个股数
+    limit_source_method: str | None = None
+    limit_source_label: str | None = None
+    limit_source_confidence: str | None = None
+    limit_anchor_date: dt.date | None = None
+    limit_anchor_limit_up_count: int | None = None
+    limit_anchor_broke_limit_pct: float | None = None
     consec_streak_dist: dict[int, int] = field(default_factory=dict)  # {streak: count}
+
+
+_LIMIT_PRICE_TOLERANCE = 0.005
+
+
+def _derive_realtime_limit_structure(
+    rt_df: pd.DataFrame,
+    limit_df: pd.DataFrame,
+    *,
+    tolerance: float = _LIMIT_PRICE_TOLERANCE,
+) -> dict[str, Any] | None:
+    """Derive noon limit/open-board stats from rt_k + stk_limit.
+
+    Task 3 change (2026-05-10): the old noon path only counted stocks whose
+    current `rt_k.close` was still at the涨停价, so official open-board fields
+    stayed unavailable until EOD `limit_list_d` published. The reader-facing
+    report needs an intraday proxy: touched = max(high/open/close) reached
+    `stk_limit.up_limit`; sealed = current close remains near up_limit; open
+    board/炸板 = touched but no longer sealed. This is runtime report data only
+    and does not rewrite historical/persisted SmartMoney tables.
+    """
+    required_limit_cols = {"ts_code", "up_limit", "down_limit"}
+    if rt_df is None or limit_df is None or rt_df.empty or limit_df.empty:
+        return None
+    if "ts_code" not in rt_df.columns or not required_limit_cols.issubset(limit_df.columns):
+        return None
+
+    cols = ["ts_code", "up_limit", "down_limit"]
+    merged = rt_df.merge(limit_df[cols], on="ts_code", how="left")
+    if merged.empty:
+        return None
+
+    for col in ("open", "high", "close", "up_limit", "down_limit"):
+        if col in merged.columns:
+            merged[col] = pd.to_numeric(merged[col], errors="coerce")
+
+    price_cols = [c for c in ("high", "open", "close") if c in merged.columns]
+    if not price_cols or "close" not in merged.columns:
+        return None
+
+    covered = int(merged["up_limit"].notna().sum())
+    if covered <= 0:
+        return None
+    coverage = covered / max(len(merged), 1)
+    # Below 80% exact limit-price coverage the whole-market count would be
+    # materially biased downward, so leave the limit fields unavailable.
+    if coverage < 0.80:
+        return None
+
+    touch_price = merged[price_cols].max(axis=1, skipna=True)
+    has_up_limit = merged["up_limit"].notna()
+    has_down_limit = merged["down_limit"].notna()
+    touched_up = has_up_limit & (touch_price >= merged["up_limit"] - tolerance)
+    sealed_up = has_up_limit & (merged["close"] >= merged["up_limit"] - tolerance)
+    opened_board = touched_up & ~sealed_up
+    sealed_down = has_down_limit & (merged["close"] <= merged["down_limit"] + tolerance)
+
+    touched_count = int(touched_up.sum())
+    open_board_count = int(opened_board.sum())
+    sealed_up_count = int(sealed_up.sum())
+
+    return {
+        "limit_up_count": sealed_up_count,
+        "limit_down_count": int(sealed_down.sum()),
+        "touched_limit_up_count": touched_count,
+        "broke_limit_count": open_board_count,
+        "broke_limit_pct": (
+            open_board_count / touched_count if touched_count > 0 else None
+        ),
+        "limit_source_method": "computed_rt_proxy",
+        "limit_source_label": "rt_k+stk_limit实时代理",
+        "limit_source_confidence": "medium" if coverage >= 0.95 else "low",
+    }
+
+
+def _derive_official_limit_structure(df_lim: pd.DataFrame | None) -> dict[str, Any] | None:
+    """Derive settled limit stats from official `limit_list_d` shaped rows."""
+    if df_lim is None or df_lim.empty:
+        return None
+
+    limit_col = "limit" if "limit" in df_lim.columns else ("limit_" if "limit_" in df_lim.columns else None)
+    if limit_col is None:
+        return None
+
+    limit_s = df_lim[limit_col].fillna("").astype(str).str.upper()
+    ups = limit_s == "U"
+    downs = limit_s == "D"
+    broken_rows = limit_s.isin({"Z", "OPEN", "BROKEN"})
+
+    broke = 0
+    parsed_up_stat = False
+    if "up_stat" in df_lim.columns:
+        for stat in df_lim.loc[ups, "up_stat"].fillna("").astype(str):
+            m = re.match(r"^(\d+)/(\d+)$", stat.strip())
+            if m:
+                parsed_up_stat = True
+                succ, attempts = int(m.group(1)), int(m.group(2))
+                if attempts > succ:
+                    broke += attempts - succ
+    if not parsed_up_stat and "open_times" in df_lim.columns:
+        open_times = pd.to_numeric(df_lim["open_times"], errors="coerce").fillna(0)
+        broke = int((ups & (open_times > 0)).sum())
+    if broken_rows.any():
+        broke += int(broken_rows.sum())
+
+    limit_up_count = int(ups.sum())
+    touched = limit_up_count + broke
+    return {
+        "limit_up_count": limit_up_count,
+        "limit_down_count": int(downs.sum()),
+        "touched_limit_up_count": touched if touched > 0 else None,
+        "broke_limit_count": broke,
+        "broke_limit_pct": (broke / touched if touched > 0 else None),
+        "limit_source_method": "official_limit_list_d",
+        "limit_source_label": "官方涨跌停明细",
+        "limit_source_confidence": "high",
+    }
+
+
+def _load_local_limit_list_d(engine: Engine | None, trade_date: dt.date) -> pd.DataFrame | None:
+    """Read locally persisted official EOD limit rows when available."""
+    if engine is None:
+        return None
+    try:
+        sql = text(
+            """
+            SELECT ts_code, trade_date, limit_ AS limit, open_times, up_stat
+            FROM smartmoney.raw_limit_list_d
+            WHERE trade_date = :d
+            """
+        )
+        with engine.connect() as conn:
+            rows = conn.execute(sql, {"d": trade_date}).mappings().all()
+        return pd.DataFrame(rows) if rows else None
+    except Exception:
+        return None
+
+
+def _load_official_limit_list_d(
+    client: TuShareClient,
+    engine: Engine | None,
+    trade_date: dt.date,
+) -> pd.DataFrame | None:
+    local = _load_local_limit_list_d(engine, trade_date)
+    if local is not None and not local.empty:
+        return local
+    try:
+        return client.call("limit_list_d", trade_date=trade_date.strftime("%Y%m%d"))
+    except Exception:
+        return None
+
+
+def _attach_recent_limit_anchor(
+    snap: BreadthSnap,
+    client: TuShareClient,
+    engine: Engine | None,
+    *,
+    on_date: dt.date,
+    prev_td: dt.date | None,
+) -> None:
+    """Attach a recent official EOD anchor for intraday proxy interpretation."""
+    if snap.limit_source_method != "computed_rt_proxy":
+        return
+
+    candidate_dates: list[dt.date] = []
+    if prev_td is not None and prev_td < on_date:
+        candidate_dates.append(prev_td)
+    for back in range(1, 15):
+        d = on_date - dt.timedelta(days=back)
+        if d not in candidate_dates:
+            candidate_dates.append(d)
+
+    for d in candidate_dates:
+        official = _derive_official_limit_structure(_load_official_limit_list_d(client, engine, d))
+        if official is None:
+            continue
+        snap.limit_anchor_date = d
+        snap.limit_anchor_limit_up_count = official["limit_up_count"]
+        snap.limit_anchor_broke_limit_pct = official["broke_limit_pct"]
+        return
 
 
 def _fetch_realtime_breadth_snapshot(client: TuShareClient, *, on_date: dt.date) -> dict | None:
@@ -298,6 +485,12 @@ def _fetch_realtime_breadth_snapshot(client: TuShareClient, *, on_date: dt.date)
         "avg_pct_change": float(df["pct_chg"].mean()),
         "limit_up_count": None,
         "limit_down_count": None,
+        "touched_limit_up_count": None,
+        "broke_limit_count": None,
+        "broke_limit_pct": None,
+        "limit_source_method": None,
+        "limit_source_label": None,
+        "limit_source_confidence": None,
     }
     # Join with stk_limit to get realtime limit-up / limit-down counts.
     # Prefer pre-market CSV cache (scripts/premarket_warm_cache.py) when present
@@ -317,12 +510,9 @@ def _fetch_realtime_breadth_snapshot(client: TuShareClient, *, on_date: dt.date)
             df_lim = None
     if df_lim is not None and not df_lim.empty:
         try:
-            merged = df.merge(df_lim[["ts_code", "up_limit", "down_limit"]], on="ts_code", how="left")
-            # Small tolerance (0.5 cent) handles float rounding
-            up_hit = (merged["close"] >= merged["up_limit"] - 0.005) & merged["up_limit"].notna()
-            down_hit = (merged["close"] <= merged["down_limit"] + 0.005) & merged["down_limit"].notna()
-            out["limit_up_count"] = int(up_hit.sum())
-            out["limit_down_count"] = int(down_hit.sum())
+            limit_stats = _derive_realtime_limit_structure(df, df_lim)
+            if limit_stats is not None:
+                out.update(limit_stats)
         except Exception:
             pass
     return out
@@ -364,6 +554,12 @@ def fetch_breadth(client: TuShareClient, *, on_date: dt.date,
             snap.avg_pct_change = agg["avg_pct_change"]
             snap.limit_up_count = agg["limit_up_count"]
             snap.limit_down_count = agg["limit_down_count"]
+            snap.touched_limit_up_count = agg.get("touched_limit_up_count")
+            snap.broke_limit_count = agg.get("broke_limit_count")
+            snap.broke_limit_pct = agg.get("broke_limit_pct")
+            snap.limit_source_method = agg.get("limit_source_method")
+            snap.limit_source_label = agg.get("limit_source_label")
+            snap.limit_source_confidence = agg.get("limit_source_confidence")
             snap.trade_date = on_date
         # else: snap fields stay None — renderer shows "—"
     else:
@@ -411,26 +607,21 @@ def fetch_breadth(client: TuShareClient, *, on_date: dt.date,
     # or stale (last published day). Keep the rt_k+stk_limit numbers.
     skip_limit_overwrite = realtime_intended and snap.limit_up_count is not None
     try:
-        df_lim = client.call("limit_list_d", trade_date=end)
-        if df_lim is not None and not df_lim.empty:
-            ups = df_lim[df_lim["limit"] == "U"]
-            downs = df_lim[df_lim["limit"] == "D"]
+        df_lim = _load_official_limit_list_d(client, engine, on_date)
+        official_limits = _derive_official_limit_structure(df_lim)
+        if official_limits is not None:
             if not skip_limit_overwrite:
-                snap.limit_up_count = len(ups)
-                snap.limit_down_count = len(downs)
-            # Use up_stat (e.g. "1/2") to detect 炸板 (succeeded < attempted)
-            broke = 0
-            for stat in ups["up_stat"].fillna("").astype(str):
-                m = re.match(r"^(\d+)/(\d+)$", stat.strip())
-                if m:
-                    succ, attempts = int(m.group(1)), int(m.group(2))
-                    if attempts > succ:
-                        broke += attempts - succ
-            snap.broke_limit_count = broke
-            if snap.limit_up_count and snap.limit_up_count > 0:
-                snap.broke_limit_pct = broke / max(snap.limit_up_count + broke, 1)
+                snap.limit_up_count = official_limits["limit_up_count"]
+                snap.limit_down_count = official_limits["limit_down_count"]
+                snap.touched_limit_up_count = official_limits["touched_limit_up_count"]
+                snap.limit_source_method = official_limits["limit_source_method"]
+                snap.limit_source_label = official_limits["limit_source_label"]
+                snap.limit_source_confidence = official_limits["limit_source_confidence"]
+                snap.broke_limit_count = official_limits["broke_limit_count"]
+                snap.broke_limit_pct = official_limits["broke_limit_pct"]
     except Exception:
         pass
+    _attach_recent_limit_anchor(snap, client, engine, on_date=on_date, prev_td=prev_td)
     # 连板高度: scan last 5 TRADING days of limit_list_d, group by ts_code.
     # Calendar-day window would conflate weekends/holidays with no-streak days.
     try:

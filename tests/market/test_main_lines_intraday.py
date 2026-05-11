@@ -43,6 +43,49 @@ class FakeTuShare:
         raise AssertionError(f"Unexpected TuShare call: {api} {params}")
 
 
+class FakeBreadthTuShare:
+    def __init__(self, *, rt_by_pattern: dict[str, pd.DataFrame], limits: pd.DataFrame, anchor_date: dt.date) -> None:
+        self.rt_by_pattern = rt_by_pattern
+        self.limits = limits
+        self.anchor_date = anchor_date
+
+    def call(self, api: str, **params):
+        if api == "rt_k":
+            return self.rt_by_pattern[params["ts_code"]].copy()
+        if api == "stk_limit":
+            return self.limits.copy()
+        if api == "limit_list_d":
+            if params.get("trade_date") == self.anchor_date.strftime("%Y%m%d"):
+                return pd.DataFrame(
+                    [
+                        {"ts_code": "600010.SH", "limit": "U", "open_times": 0, "up_stat": "1/1"},
+                        {"ts_code": "600011.SH", "limit": "U", "open_times": 1, "up_stat": "1/2"},
+                    ]
+                )
+            return pd.DataFrame(columns=["ts_code", "limit", "open_times", "up_stat"])
+        if api == "daily":
+            return pd.DataFrame()
+        raise AssertionError(f"Unexpected TuShare call: {api} {params}")
+
+
+def _make_rt_chunk(prefix: str, suffix: str, count: int) -> pd.DataFrame:
+    rows = []
+    for i in range(count):
+        rows.append(
+            {
+                "ts_code": f"{prefix}{i:03d}.{suffix}",
+                "pre_close": 10.0,
+                "open": 10.0,
+                "high": 10.05,
+                "low": 9.95,
+                "close": 10.0,
+                "vol": 1000.0,
+                "amount": 100_000.0,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _engine_with_empty_eod_sector_tables(on_date: dt.date):
     engine = create_engine(
         "sqlite://",
@@ -235,3 +278,120 @@ def test_rotation_section_surfaces_intraday_main_line_amount_breadth_and_source(
     assert "成交额 4 亿" in html
     assert "成分股实时代理" in html
     assert "67%" in html
+
+
+def test_fetch_breadth_noon_computes_open_board_from_rt_high_when_official_missing(monkeypatch):
+    on_date = dt.date(2099, 1, 5)
+    anchor_date = on_date - dt.timedelta(days=1)
+    rt_by_pattern = {
+        "6*.SH": _make_rt_chunk("600", "SH", 1001),
+        "0*.SZ": _make_rt_chunk("000", "SZ", 1001),
+        "3*.SZ": _make_rt_chunk("300", "SZ", 1001),
+    }
+    # sealed涨停、触板后炸板、接近涨停价封住、跌停各一只；其余样本未触板。
+    rt_by_pattern["6*.SH"].loc[0, ["high", "close"]] = [11.0, 11.0]
+    rt_by_pattern["0*.SZ"].loc[1, ["high", "close"]] = [11.0, 10.50]
+    rt_by_pattern["3*.SZ"].loc[2, ["high", "close"]] = [11.0, 10.996]
+    rt_by_pattern["6*.SH"].loc[1, ["low", "close"]] = [9.0, 9.0]
+
+    all_codes = pd.concat(rt_by_pattern.values(), ignore_index=True)["ts_code"]
+    limits = pd.DataFrame(
+        {
+            "ts_code": all_codes,
+            "up_limit": 11.0,
+            "down_limit": 9.0,
+        }
+    )
+    client = FakeBreadthTuShare(rt_by_pattern=rt_by_pattern, limits=limits, anchor_date=anchor_date)
+    monkeypatch.setattr(mdata, "_today_bjt", lambda: on_date)
+
+    snap = mdata.fetch_breadth(client, on_date=on_date, slot="noon", engine=None)
+
+    assert snap.limit_up_count == 2
+    assert snap.limit_down_count == 1
+    assert snap.touched_limit_up_count == 3
+    assert snap.broke_limit_count == 1
+    assert snap.broke_limit_pct == pytest.approx(1 / 3)
+    assert snap.limit_source_method == "computed_rt_proxy"
+    assert snap.limit_source_label == "rt_k+stk_limit实时代理"
+    assert snap.limit_source_confidence == "medium"
+    assert snap.limit_anchor_date == anchor_date
+    assert snap.limit_anchor_limit_up_count == 2
+    assert snap.limit_anchor_broke_limit_pct == pytest.approx(1 / 3)
+
+
+def test_sentiment_section_renders_limit_proxy_metadata(monkeypatch):
+    on_date = dt.date(2099, 1, 5)
+
+    def fake_chat_json(*args, **kwargs):
+        return ({"cycle_phase": "分歧", "ladder_health": "偏弱", "commentary": "炸板率升高。", "risk_note": ""}, None, "parsed")
+
+    monkeypatch.setattr(common, "_safe_chat_json", fake_chat_json)
+    ctx = common.MarketCtx(
+        engine=None,
+        llm=object(),
+        tushare=object(),
+        run=SimpleNamespace(report_run_id="test"),
+        user="default",
+        indices=[],
+        breadth=mdata.BreadthSnap(
+            trade_date=on_date,
+            total_amount=None,
+            total_amount_prev=None,
+            up_count=1200,
+            down_count=2800,
+            flat_count=100,
+            avg_pct_change=-0.35,
+            limit_up_count=2,
+            limit_down_count=1,
+            broke_limit_count=1,
+            broke_limit_pct=1 / 3,
+            max_consec_streak=None,
+            touched_limit_up_count=3,
+            limit_source_method="computed_rt_proxy",
+            limit_source_label="rt_k+stk_limit实时代理",
+            limit_source_confidence="medium",
+            limit_anchor_date=on_date - dt.timedelta(days=1),
+            limit_anchor_limit_up_count=2,
+            limit_anchor_broke_limit_pct=1 / 3,
+        ),
+        flows=mdata.FlowsSnap(
+            north_money=None,
+            south_money=None,
+            hsgt_date=None,
+            margin_total=None,
+            margin_change=None,
+            margin_date=None,
+        ),
+        sw_rotation=[],
+        main_lines=[],
+        fund_top=[],
+        dragon_tiger=[],
+        news_df=None,
+        aux_summaries={},
+        important_focus=[],
+        regular_focus=[],
+    )
+
+    section = common.build_sentiment_section(
+        ctx,
+        order=5,
+        title="市场情绪 · 午间状态",
+        key="market_noon.s5_sentiment",
+    )
+
+    cells = {cell["label"]: cell for cell in section["content_json"]["cells"]}
+    assert cells["炸板率"]["value"] == "33"
+    assert cells["炸板率"]["source_method"] == "computed_rt_proxy"
+    assert "触板 3 家，炸板 1 家" in cells["炸板率"]["note"]
+    assert "rt_k+stk_limit实时代理" in cells["炸板率"]["note"]
+    assert "中置信" in cells["炸板率"]["note"]
+    assert "官方锚" in cells["炸板率"]["note"]
+
+    template_dir = Path(common.__file__).parents[2] / "core" / "render" / "templates"
+    env = Environment(loader=FileSystemLoader(template_dir))
+    html = env.get_template("_sentiment_grid.html").render(s=section)
+    assert "炸板率" in html
+    assert "33" in html
+    assert "rt_k+stk_limit实时代理" in html
+    assert "中置信" in html
