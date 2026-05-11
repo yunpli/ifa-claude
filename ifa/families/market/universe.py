@@ -58,8 +58,9 @@ SW_LEVEL1: list[tuple[str, str]] = [
 
 # ── 主线候选（动态：今日 SW L2 资金流 + 涨幅 top-N） ─────────────────────
 # V2.1: 取代固定 THS 概念列表。实际选择逻辑见
-# `data.fetch_main_lines()` —— 优先按 sector_moneyflow_sw_daily.net_amount
-# 排序，fallback 到 raw_sw_daily.pct_change。
+# `data.fetch_main_lines()` —— 今日午报优先按成分股 rt_k 代理排序；
+# EOD / historical fallback 才按 sector_moneyflow_sw_daily.net_amount 或
+# raw_sw_daily.pct_change。
 MAIN_LINE_TOP_N: int = 10
 
 # ── 短线情绪指标阈值 ─────────────────────────────────────────────────────

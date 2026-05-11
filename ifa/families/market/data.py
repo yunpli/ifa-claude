@@ -549,6 +549,17 @@ class SectorBar:
     pct_change: float | None
     trade_date: dt.date | None
     rank: int | None = None
+    amount_yuan: float | None = None
+    up_count: int | None = None
+    down_count: int | None = None
+    flat_count: int | None = None
+    up_ratio: float | None = None
+    member_count: int | None = None
+    covered_count: int | None = None
+    source_method: str | None = None
+    source_label: str | None = None
+    source_confidence: str | None = None
+    unavailable_reason: str | None = None
 
 
 def fetch_sw_rotation(client: TuShareClient, *, on_date: dt.date,
@@ -579,6 +590,17 @@ def fetch_sw_rotation(client: TuShareClient, *, on_date: dt.date,
                 close=v.get("close"),
                 pct_change=v.get("pct_change"),
                 trade_date=v.get("trade_date"),
+                amount_yuan=v.get("amount_yuan"),
+                up_count=v.get("up_count"),
+                down_count=v.get("down_count"),
+                flat_count=v.get("flat_count"),
+                up_ratio=v.get("up_ratio"),
+                member_count=v.get("member_count"),
+                covered_count=v.get("covered_count"),
+                source_method=v.get("source_method"),
+                source_label="成分股实时代理",
+                source_confidence=v.get("source_confidence"),
+                unavailable_reason=v.get("unavailable_reason"),
             ))
         valid = [s for s in out if s.pct_change is not None]
         valid.sort(key=lambda s: s.pct_change or 0, reverse=True)
@@ -607,6 +629,10 @@ def fetch_sw_rotation(client: TuShareClient, *, on_date: dt.date,
             close=_f(row.get("close")) if is_current else None,
             pct_change=_f(row.get("pct_change")) if is_current else None,
             trade_date=row_td,
+            source_method="official_sw_daily_eod" if is_current else None,
+            source_label="申万官方日线" if is_current else None,
+            source_confidence="high" if is_current else None,
+            unavailable_reason=None if is_current else "申万日线未更新到观察日",
         ))
     valid = [s for s in out if s.pct_change is not None]
     valid.sort(key=lambda s: s.pct_change or 0, reverse=True)
@@ -617,8 +643,107 @@ def fetch_sw_rotation(client: TuShareClient, *, on_date: dt.date,
 
 # ─── Main-line candidates (动态 SW L2，V2.1) ──────────────────────────────
 
+def _fetch_sw_l2_metadata(engine: Engine, *, on_date: dt.date) -> dict[str, str]:
+    """Return current PIT SW L2 code -> name for the month covering on_date."""
+    snapshot_month = on_date.replace(day=1)
+    sql = text("""
+        SELECT l2_code AS code, MAX(l2_name) AS name
+          FROM smartmoney.sw_member_monthly
+         WHERE snapshot_month = :sm
+           AND l2_code IS NOT NULL
+         GROUP BY l2_code
+    """)
+    with engine.connect() as conn:
+        rows = conn.execute(sql, {"sm": snapshot_month}).all()
+    return {str(r.code): (str(r.name) if r.name else str(r.code)) for r in rows}
+
+
+def _fetch_main_lines_intraday_proxy(
+    client: TuShareClient,
+    engine: Engine,
+    *,
+    on_date: dt.date,
+    top_n: int,
+) -> list[SectorBar]:
+    """Rank SW L2 main lines from constituent realtime quotes.
+
+    TuShare does not expose a reliable intraday SW L2 index quote through the
+    adapters available in this project, while `raw_sw_daily` and
+    `sector_moneyflow_sw_daily` are EOD tables. For today's noon report we
+    therefore synthesize a transparent constituent proxy:
+
+      - pct/close: MV-weighted close vs pre_close from member `rt_k`
+      - amount/up_ratio: sum/count from the same member `rt_k` snapshot
+      - ranking: pct desc, then breadth, then amount
+
+    The source fields explicitly mark this as a proxy so downstream reports do
+    not present it as an official SW index print.
+    """
+    try:
+        meta = _fetch_sw_l2_metadata(engine, on_date=on_date)
+    except Exception:
+        return []
+    if not meta:
+        return []
+
+    from ifa.families.market._sw_realtime import compute_sw_realtime_snapshot
+
+    agg = compute_sw_realtime_snapshot(
+        client,
+        engine,
+        on_date=on_date,
+        sw_codes=list(meta.keys()),
+        level="l2",
+    )
+    bars: list[SectorBar] = []
+    for code, name in meta.items():
+        v = agg.get(code, {})
+        if not v:
+            continue
+        has_signal = any(
+            v.get(k) is not None
+            for k in ("pct_change", "amount_yuan", "up_ratio")
+        )
+        if not has_signal:
+            continue
+        bars.append(SectorBar(
+            code=code,
+            name=name,
+            close=_f(v.get("close")),
+            pct_change=_f(v.get("pct_change")),
+            trade_date=v.get("trade_date"),
+            amount_yuan=_f(v.get("amount_yuan")),
+            up_count=v.get("up_count"),
+            down_count=v.get("down_count"),
+            flat_count=v.get("flat_count"),
+            up_ratio=_f(v.get("up_ratio")),
+            member_count=v.get("member_count"),
+            covered_count=v.get("covered_count"),
+            source_method=v.get("source_method") or "constituent_rt_k_proxy",
+            source_label="成分股实时代理",
+            source_confidence=v.get("source_confidence"),
+            unavailable_reason=v.get("unavailable_reason"),
+        ))
+    if not bars:
+        return []
+    bars.sort(
+        key=lambda s: (
+            s.pct_change if s.pct_change is not None else -999.0,
+            s.up_ratio if s.up_ratio is not None else -1.0,
+            s.amount_yuan if s.amount_yuan is not None else -1.0,
+        ),
+        reverse=True,
+    )
+    out = bars[:top_n]
+    for i, s in enumerate(out):
+        s.rank = i + 1
+    return out
+
+
 def fetch_main_lines(engine: Engine, *, on_date: dt.date,
-                     top_n: int = MAIN_LINE_TOP_N) -> list[SectorBar]:
+                     top_n: int = MAIN_LINE_TOP_N,
+                     client: TuShareClient | None = None,
+                     slot: str = "morning") -> list[SectorBar]:
     """Top-N SW L2 sectors representing today's "main lines".
 
     V2.1 migration: replaces the fixed 15-element THS thematic-board list
@@ -626,9 +751,22 @@ def fetch_main_lines(engine: Engine, *, on_date: dt.date,
     V2.1.1 enhancement: prefers direct SW L2 OHLC from `raw_sw_daily` (now
     backfilled to L2). Falls back to member-stock aggregation if the L2 row
     is missing for `on_date`. Final fallback: rank by `raw_sw_daily.pct_change`.
+    V2.2.3 noon fix: today's noon report must not depend on EOD-only local
+    tables. It first uses a constituent realtime proxy from `rt_k` + PIT SW
+    membership, with source/method/confidence fields carried through.
 
     Returns a list of SectorBar with rank populated.
     """
+    if client is not None and slot == "noon" and on_date == _today_bjt():
+        intraday = _fetch_main_lines_intraday_proxy(
+            client,
+            engine,
+            on_date=on_date,
+            top_n=top_n,
+        )
+        if intraday:
+            return intraday
+
     out: list[SectorBar] = []
     snapshot_month = on_date.replace(day=1)
     # Primary path: net_amount-based ranking from sector_moneyflow_sw_daily.
@@ -675,6 +813,9 @@ def fetch_main_lines(engine: Engine, *, on_date: dt.date,
                 close=_f(r.close),
                 pct_change=_f(r.pct_change),
                 trade_date=on_date,
+                source_method="local_eod_sector_moneyflow_sw",
+                source_label="本地EOD主线",
+                source_confidence="high",
             ))
     except Exception:
         out = []
@@ -703,6 +844,9 @@ def fetch_main_lines(engine: Engine, *, on_date: dt.date,
                     close=_f(r.close),
                     pct_change=_f(r.pct_change),
                     trade_date=on_date,
+                    source_method="official_sw_daily_eod",
+                    source_label="申万官方日线",
+                    source_confidence="high",
                 ))
         except Exception:
             pass

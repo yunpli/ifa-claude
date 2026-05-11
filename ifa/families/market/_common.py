@@ -160,10 +160,10 @@ def prefetch_market_data(
     indices = mdata.fetch_index_family(tushare, on_date=on_date, history_days=10, slot=slot)
     on_log("computing whole-A breadth + 涨跌停 + 连板高度…")
     breadth = mdata.fetch_breadth(tushare, on_date=on_date, slot=slot, engine=engine)
-    on_log("fetching SW industry rotation (sw_daily)…")
+    on_log("fetching SW industry rotation (slot-aware)…")
     sw_rotation = mdata.fetch_sw_rotation(tushare, on_date=on_date, slot=slot, engine=engine)
     on_log("fetching main-line candidates (SW L2 dynamic)…")
-    main_lines = mdata.fetch_main_lines(engine, on_date=on_date)
+    main_lines = mdata.fetch_main_lines(engine, on_date=on_date, client=tushare, slot=slot)
 
     # Slot-aware fetches:
     # - fund_flow_top / dragon_tiger: only evening uses these (consume EOD
@@ -627,10 +627,13 @@ def build_three_aux_section(ctx: MarketCtx, *, order: int, title: str, key: str)
 
 
 def build_rotation_section(ctx: MarketCtx, *, order: int, title: str, key: str) -> dict | None:
-    valid_sw = [s for s in ctx.sw_rotation if s.pct_change is not None]
-    valid_sw.sort(key=lambda s: s.pct_change or 0, reverse=True)
-    valid_main = [s for s in ctx.main_lines if s.pct_change is not None]
-    valid_main.sort(key=lambda s: s.pct_change or 0, reverse=True)
+    def has_visible_sector_data(s: mdata.SectorBar) -> bool:
+        return any(v is not None for v in (s.pct_change, s.amount_yuan, s.up_ratio))
+
+    valid_sw = [s for s in ctx.sw_rotation if has_visible_sector_data(s)]
+    valid_sw.sort(key=lambda s: s.pct_change if s.pct_change is not None else -999.0, reverse=True)
+    valid_main = [s for s in ctx.main_lines if has_visible_sector_data(s)]
+    valid_main.sort(key=lambda s: s.pct_change if s.pct_change is not None else -999.0, reverse=True)
     # If the data layer has nothing (e.g., noon EOD endpoints empty AND realtime
     # path also failed), drop the entire section rather than render an empty
     # table. Caller filters None.
@@ -642,9 +645,13 @@ def build_rotation_section(ctx: MarketCtx, *, order: int, title: str, key: str) 
         bulk.append({
             "candidate_index": i, "name": s.name, "code": s.code,
             "pct_change": s.pct_change, "rank": s.rank,
+            "amount_yuan": s.amount_yuan,
+            "up_ratio": s.up_ratio,
+            "source_method": s.source_method,
+            "source_confidence": s.source_confidence,
         })
     user = f"""
-=== 板块清单 (申万一级 + 主线候选 THS 概念) ===
+=== 板块清单 (申万一级 + SW L2 主线候选) ===
 {json.dumps(bulk, ensure_ascii=False, indent=2)}
 
 === 任务 ===
@@ -665,19 +672,34 @@ def build_rotation_section(ctx: MarketCtx, *, order: int, title: str, key: str) 
             if isinstance(idx, int):
                 by_idx[idx] = entry
     rows = []
+    main_codes = {s.code for s in valid_main[:6]}
+    confidence_label = {"high": "高置信", "medium": "中置信", "low": "低置信"}
     for i, s in enumerate(items):
         info = by_idx.get(i, {})
-        is_main_line = s in valid_main[:6]
+        is_main_line = s.code in main_codes
+        source_bits = []
+        if s.source_label:
+            source_bits.append(s.source_label)
+            if s.source_confidence:
+                source_bits.append(confidence_label.get(s.source_confidence, str(s.source_confidence)))
+            if s.covered_count is not None and s.member_count:
+                source_bits.append(f"覆盖 {s.covered_count}/{s.member_count}")
+        unavailable_note = f"数据不可用：{s.unavailable_reason}" if s.unavailable_reason else ""
+        commentary = info.get("commentary") or unavailable_note or "—"
         rows.append({
             "category": s.name + ("（主线候选）" if is_main_line else f"（申万 #{s.rank}）"),
             "strength_label": info.get("strength_label") or "—",
             "avg_pct_display": _fmt_pct(s.pct_change),
             "avg_dir": _direction(s.pct_change),
-            "up_share_display": "",
+            "amount_display": _fmt_amount_yi(s.amount_yuan) if s.amount_yuan is not None else "",
+            "up_share_display": f"{s.up_ratio * 100:.0f}%" if s.up_ratio is not None else "",
+            "source_label": " · ".join(source_bits),
+            "source_method": s.source_method,
+            "source_confidence": s.source_confidence,
             "leader": info.get("rotation_role") or "",
             "leader_pct": "",
             "laggard": "", "laggard_pct": "",
-            "commentary": info.get("commentary") or "—",
+            "commentary": commentary,
             "a_share_focus": "",
         })
     return {

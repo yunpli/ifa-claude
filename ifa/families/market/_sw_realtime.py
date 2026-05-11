@@ -147,15 +147,29 @@ def compute_sw_realtime_snapshot(
       pct = SUM(close * w) / SUM(pre_close * w) - 1
       where w = T-1 daily_basic.total_mv (zero/NaN MV stocks fall back to equal weight).
       synthetic_close = prior_eod_sw_close * (1 + pct).
+      amount_yuan / up_count / down_count / flat_count / up_ratio are constituent
+      proxy fields from the same rt_k snapshot, not official SW index prints.
 
-    Returns empty dict for codes whose member set has no rt_k coverage
-    (caller should fall back to sw_daily EOD).
+    Returns None-valued entries for codes whose member set has no rt_k coverage
+    (caller should fall back to sw_daily EOD or surface an unavailable reason).
     """
     rt = _load_whole_a_rt_k(client, on_date=on_date)
     if rt is None or rt.empty:
         return {c: {"close": None, "pct_change": None,
-                     "trade_date": None, "member_count": 0} for c in sw_codes}
-    rt_idx = rt.set_index("ts_code")[["close", "pre_close"]]
+                     "trade_date": None, "member_count": 0, "covered_count": 0,
+                     "amount_yuan": None, "up_count": None, "down_count": None,
+                     "flat_count": None, "up_ratio": None,
+                     "source_method": "constituent_rt_k_proxy",
+                     "source_confidence": "low",
+                     "unavailable_reason": "实时成分股行情不可用"} for c in sw_codes}
+    rt = rt.copy()
+    for col in ("close", "pre_close", "amount"):
+        if col in rt.columns:
+            rt[col] = pd.to_numeric(rt[col], errors="coerce")
+    rt_cols = ["close", "pre_close"]
+    if "amount" in rt.columns:
+        rt_cols.append("amount")
+    rt_idx = rt.set_index("ts_code")[rt_cols]
     members = _load_member_map(engine, on_date=on_date, level=level)
     weights = _load_mv_weights(client, on_date=on_date, engine=engine)
     prior = _load_sw_prior_close(client, on_date=on_date, sw_codes=sw_codes)
@@ -165,12 +179,23 @@ def compute_sw_realtime_snapshot(
         ms = members.get(code, [])
         if not ms:
             result[code] = {"close": None, "pct_change": None,
-                             "trade_date": None, "member_count": 0}
+                             "trade_date": None, "member_count": 0, "covered_count": 0,
+                             "amount_yuan": None, "up_count": None, "down_count": None,
+                             "flat_count": None, "up_ratio": None,
+                             "source_method": "constituent_rt_k_proxy",
+                             "source_confidence": "low",
+                             "unavailable_reason": "缺申万成分股快照"}
             continue
         sub = rt_idx.reindex(ms).dropna(subset=["close", "pre_close"])
+        sub = sub[sub["pre_close"] > 0]
         if sub.empty:
             result[code] = {"close": None, "pct_change": None,
-                             "trade_date": None, "member_count": 0}
+                             "trade_date": None, "member_count": len(ms), "covered_count": 0,
+                             "amount_yuan": None, "up_count": None, "down_count": None,
+                             "flat_count": None, "up_ratio": None,
+                             "source_method": "constituent_rt_k_proxy",
+                             "source_confidence": "low",
+                             "unavailable_reason": "成分股实时行情缺失"}
             continue
         # Build weight series (default 1.0 if MV missing/zero)
         w = pd.Series([weights.get(tc, 1.0) or 1.0 for tc in sub.index], index=sub.index)
@@ -179,10 +204,37 @@ def compute_sw_realtime_snapshot(
         pct = (num / den - 1.0) * 100 if den > 0 else None
         prior_close = prior.get(code)
         syn_close = prior_close * (1 + pct / 100) if (prior_close and pct is not None) else None
+        member_count = int(len(ms))
+        covered_count = int(len(sub))
+        coverage = covered_count / member_count if member_count > 0 else 0.0
+        if coverage >= 0.8 and covered_count >= 5:
+            confidence = "high"
+        elif coverage >= 0.5 and covered_count >= 3:
+            confidence = "medium"
+        else:
+            confidence = "low"
+        pct_member = (sub["close"] - sub["pre_close"]) / sub["pre_close"] * 100
+        active = pct_member.dropna()
+        up_count = int((active > 0).sum()) if not active.empty else None
+        down_count = int((active < 0).sum()) if not active.empty else None
+        flat_count = int((active == 0).sum()) if not active.empty else None
+        denom = (up_count or 0) + (down_count or 0) + (flat_count or 0)
+        up_ratio = (up_count / denom) if denom > 0 and up_count is not None else None
+        amount_yuan = float(sub["amount"].sum()) if "amount" in sub.columns and sub["amount"].notna().any() else None
         result[code] = {
             "close": syn_close,
             "pct_change": pct,
             "trade_date": on_date if pct is not None else None,
-            "member_count": int(len(sub)),
+            "member_count": member_count,
+            "covered_count": covered_count,
+            "coverage_ratio": coverage,
+            "amount_yuan": amount_yuan,
+            "up_count": up_count,
+            "down_count": down_count,
+            "flat_count": flat_count,
+            "up_ratio": up_ratio,
+            "source_method": "constituent_rt_k_proxy",
+            "source_confidence": confidence,
+            "unavailable_reason": None if pct is not None else "成分股昨收或现价缺失",
         }
     return result

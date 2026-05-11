@@ -125,6 +125,28 @@ ORDER BY r.net_amount DESC;
 
 This makes 主线 a deterministic function of (date, top_n) — reproducible and auditable.
 
+### Noon main-line realtime proxy
+
+The A-share main noon report must not use EOD-only SW tables as the primary
+source for the observation date. `raw_sw_daily` and `sector_moneyflow_sw_daily`
+are settled daily tables; before the close they are normally empty for today,
+and any stale fallback would hide the actual morning tape.
+
+For `slot=noon` on the current BJT trading date, `market.fetch_main_lines()`
+now ranks SW L2 main lines from constituent realtime `rt_k` snapshots joined to
+PIT `sw_member_monthly`:
+
+- `pct_change` / synthetic `close`: MV-weighted member close vs member pre-close.
+- `amount_yuan`: sum of member intraday `rt_k.amount`.
+- `up_ratio`: advancing constituents divided by all covered constituents.
+- rank: sector `pct_change` descending, then `up_ratio`, then `amount_yuan`.
+
+This is explicitly tagged as `source_method=constituent_rt_k_proxy` with
+coverage and confidence metadata. It is not presented as an official SW index
+quote. If TuShare later exposes a reliable SW L2 intraday index endpoint, that
+official path should take precedence and keep the source tag distinct from this
+proxy path.
+
 ---
 
 ## The 千元 bug
