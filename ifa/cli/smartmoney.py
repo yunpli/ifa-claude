@@ -68,6 +68,7 @@ def compute(
     from ifa.families.smartmoney.factors.leader import compute_leaders_for_date, write_stock_signals
     from ifa.families.smartmoney.factors.candidate import compute_candidates_for_date
     from ifa.families.smartmoney.params.store import get_active_params
+    from ifa.families.smartmoney.etl.sw_member_fetcher import ensure_monthly_snapshots
 
     engine = _engine()
     params = get_active_params(engine)
@@ -95,6 +96,14 @@ def compute(
         raise typer.Exit(1)
 
     console.print(f"[bold]SmartMoney Compute · {dates[0]} → {dates[-1]}[/bold]  ({len(dates)} days)")
+
+    snapshot_status = ensure_monthly_snapshots(engine, start_date=dates[0], end_date=dates[-1])
+    if snapshot_status["materialised_months"]:
+        console.print(
+            "[yellow]SW monthly snapshots materialised:[/] "
+            f"{snapshot_status['materialised_months']} month(s), "
+            f"{snapshot_status['rows_inserted']} rows"
+        )
 
     for i, td in enumerate(dates, 1):
         console.print(f"\n[cyan]--- {i}/{len(dates)} · {td} ---[/cyan]")
@@ -176,6 +185,35 @@ def etl(
     s = run_etl_for_date(trade_date=d, on_log=lambda m: console.print(f"  {m}"),
                         skip_chips=skip_chips)
     _print_day_stats(s)
+
+
+@app.command("materialise-sw-members")
+def materialise_sw_members(
+    start_month: str = typer.Option(..., "--start-month", help="Month start YYYY-MM-01 or YYYY-MM"),
+    end_month: str = typer.Option(..., "--end-month", help="Month start YYYY-MM-01 or YYYY-MM"),
+    mode: str | None = typer.Option(None, "--mode"),
+) -> None:
+    """Materialise PIT SW monthly membership snapshots from raw_sw_member.
+
+    This is the safe repair path when a new calendar month is missing from
+    smartmoney.sw_member_monthly; it rebuilds from canonical raw_sw_member
+    rather than copying a previous month by hand.
+    """
+    _override_mode(mode)
+    from ifa.families.smartmoney.etl.sw_member_fetcher import materialise_monthly_snapshots
+
+    def parse_month(value: str) -> dt.date:
+        if len(value) == 7:
+            value = f"{value}-01"
+        parsed = dt.datetime.strptime(value, "%Y-%m-%d").date()
+        if parsed.day != 1:
+            raise typer.BadParameter("month must be first-of-month")
+        return parsed
+
+    start_d = parse_month(start_month)
+    end_d = parse_month(end_month)
+    rows = materialise_monthly_snapshots(_engine(), start_month=start_d, end_month=end_d)
+    console.print(f"[green]✓ materialised smartmoney.sw_member_monthly[/] {start_d} → {end_d}: {rows} rows")
 
 
 # ─── Evening report ───────────────────────────────────────────────────────────

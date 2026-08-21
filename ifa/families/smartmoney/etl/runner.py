@@ -27,6 +27,7 @@ from ifa.core.tushare import TuShareClient
 from ..universe import MAIN_INDEXES, SW_L1_SEED
 from . import raw_fetchers as rf
 from .sector_flow_sw_l2 import aggregate_sector_flow_sw_for_date
+from .sw_member_fetcher import ensure_monthly_snapshots
 
 log = logging.getLogger(__name__)
 SCHEMA = "smartmoney"
@@ -125,6 +126,17 @@ def run_etl_for_date(
     stats = DayStats(trade_date=trade_date)
     universes = _resolve_active_universes(client)
 
+    try:
+        snapshot_status = ensure_monthly_snapshots(engine, start_date=trade_date, end_date=trade_date)
+        if snapshot_status["materialised_months"]:
+            on_log(
+                "  [sw_member_monthly] materialised "
+                f"{snapshot_status['materialised_months']} month(s), "
+                f"{snapshot_status['rows_inserted']} rows"
+            )
+    except Exception as exc:  # noqa: BLE001
+        on_log(f"  [sw_member_monthly] WARN monthly snapshot guard failed: {exc}")
+
     # 18 trade-date-only fetchers
     for table, fn in rf.TRADE_DATE_FETCHERS:
         t0 = time.monotonic()
@@ -219,6 +231,17 @@ def run_backfill(
     cur = start
     settings = get_settings()
     client = TuShareClient(settings)
+    try:
+        snapshot_status = ensure_monthly_snapshots(get_engine(settings), start_date=start, end_date=end)
+        if snapshot_status["materialised_months"]:
+            on_log(
+                "sw_member_monthly guard: materialised "
+                f"{snapshot_status['materialised_months']} month(s), "
+                f"{snapshot_status['rows_inserted']} rows"
+            )
+    except Exception as exc:  # noqa: BLE001
+        on_log(f"sw_member_monthly guard WARN: {exc}")
+
     # Pull the full calendar slice once for efficient date iteration
     cal = client.call("trade_cal",
                       exchange="SSE",

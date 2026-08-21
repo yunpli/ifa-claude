@@ -128,7 +128,7 @@ def fetch_and_store_limit(engine: Engine, trade_date: date | str) -> int:
                 INSERT INTO ta.stk_limit_daily
                     (trade_date, ts_code, trade_date_str, name, close, pct_chg_pct,
                      amp, fc_ratio, fl_ratio, fd_amount_yuan,
-                     first_time, last_time, open_times, strth, limit)
+                     first_time, last_time, open_times, strth, "limit")
                 VALUES
                     (:trade_date, :ts_code, :trade_date_str, :name, :close, :pct_chg_pct,
                      :amp, :fc_ratio, :fl_ratio, :fd_amount_yuan,
@@ -145,7 +145,7 @@ def fetch_and_store_limit(engine: Engine, trade_date: date | str) -> int:
                     last_time = EXCLUDED.last_time,
                     open_times = EXCLUDED.open_times,
                     strth = EXCLUDED.strth,
-                    limit = EXCLUDED.limit
+                    "limit" = EXCLUDED."limit"
             """),
             rows,
         )

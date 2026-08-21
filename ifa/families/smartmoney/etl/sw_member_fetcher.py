@@ -220,6 +220,60 @@ def materialise_monthly_snapshots(
     return total
 
 
+def _month_start(value: dt.date) -> dt.date:
+    return dt.date(value.year, value.month, 1)
+
+
+def ensure_monthly_snapshots(
+    engine: Engine,
+    *,
+    start_date: dt.date,
+    end_date: dt.date,
+) -> dict[str, Any]:
+    """Ensure SW PIT monthly snapshots exist for every month in a date range.
+
+    SmartMoney aggregation and leader selection read ``sw_member_monthly`` via
+    ``date_trunc('month', trade_date)``. A missing new-month snapshot makes all
+    downstream sector flow / leader / candidate computations silently empty even
+    when ``raw_sw_member`` already has valid open-ended membership rows. This
+    guard is intentionally idempotent and only materialises missing or empty
+    months from the canonical raw table; it does not fetch TuShare or clone a
+    prior snapshot by hand.
+    """
+    start_month = _month_start(start_date)
+    end_month = _month_start(end_date)
+    if start_month > end_month:
+        raise ValueError("start_date > end_date")
+
+    expected: list[dt.date] = []
+    cur = start_month
+    while cur <= end_month:
+        expected.append(cur)
+        cur = dt.date(cur.year + 1, 1, 1) if cur.month == 12 else dt.date(cur.year, cur.month + 1, 1)
+
+    with engine.connect() as conn:
+        rows = conn.execute(text(f"""
+            SELECT snapshot_month, COUNT(*) AS n
+            FROM {SCHEMA}.sw_member_monthly
+            WHERE snapshot_month BETWEEN :start_month AND :end_month
+            GROUP BY snapshot_month
+        """), {"start_month": start_month, "end_month": end_month}).fetchall()
+    counts = {row[0]: int(row[1] or 0) for row in rows}
+    missing = [month for month in expected if counts.get(month, 0) <= 0]
+
+    inserted = 0
+    for month in missing:
+        inserted += materialise_monthly_snapshots(engine, start_month=month, end_month=month)
+
+    return {
+        "start_month": start_month,
+        "end_month": end_month,
+        "expected_months": len(expected),
+        "materialised_months": len(missing),
+        "rows_inserted": inserted,
+    }
+
+
 def _materialise_one_month(engine: Engine, snapshot_month: dt.date) -> int:
     """Build / refresh one monthly snapshot."""
     delete_sql = text(f"""

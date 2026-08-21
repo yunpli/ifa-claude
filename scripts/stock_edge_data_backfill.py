@@ -72,13 +72,35 @@ POSTGRES_DATASETS = [
     ("Stock signals", "smartmoney", "stock_signals_daily", "trade_date", "ts_code"),
     ("Predictions", "smartmoney", "predictions_daily", "trade_date", "ts_code"),
     ("TA candidates", "ta", "candidates_daily", "trade_date", "ts_code"),
+    ("TA candidate tracking", "ta", "candidate_tracking", "eval_date", None),
     ("TA setup metrics", "ta", "setup_metrics_daily", "trade_date", None),
     ("TA warnings", "ta", "warnings_daily", "trade_date", "ts_code"),
+    ("SME strategy eval", "sme", "sme_strategy_eval_daily", "trade_date", None),
+    ("Ningbo recommendation tracking", "ningbo", "recommendation_tracking", "rec_date", "ts_code"),
+    ("Ningbo legacy candidates", "ningbo", "candidates_daily", "rec_date", "ts_code"),
+    ("Ningbo legacy outcomes", "ningbo", "candidate_outcomes", "rec_date", "ts_code"),
     ("交易日历", "smartmoney", "trade_cal", "cal_date", None),
     ("Research reports", "research", "report_runs", "created_at", "ts_code"),
     ("Research factors", "research", "period_factor_decomposition", "created_at", "ts_code"),
     ("Research PDF cache", "research", "pdf_extract_cache", "created_at", None),
 ]
+
+FORWARD_LOOKING_TABLE_LAGS = {
+    # These tables are labels/tracking surfaces. Their latest source date can
+    # legitimately trail current market data because a future T+h close must
+    # exist before the row can be evaluated. Treat lag within the max horizon as
+    # maturing, not stale/backfill-needed.
+    "sme.sme_strategy_eval_daily": 20,
+    "ta.candidate_tracking": 30,
+    "ningbo.recommendation_tracking": 15,
+}
+
+LEGACY_TABLES = {
+    # Historical Ningbo ML candidate pool from the pre-v2 pipeline. It is useful
+    # for old training/replay audits but is not expected to stay fresh daily.
+    "ningbo.candidates_daily",
+    "ningbo.candidate_outcomes",
+}
 
 
 @dataclass
@@ -249,8 +271,7 @@ def _inventory_postgres(engine: Engine, family: str, schema: str, table: str, da
         select.extend([f"MIN({dc}) AS min_date", f"MAX({dc}) AS max_date"] if dc else ["NULL AS min_date", "NULL AS max_date"])
         data = conn.execute(text(f"SELECT {', '.join(select)} FROM {full}")).mappings().one()
     min_date, max_date = data["min_date"], data["max_date"]
-    enough = _enough_recent(max_date)
-    needs = "否" if enough and int(data["rows"] or 0) > 0 else "是"
+    freshness = _postgres_freshness_status(engine, full, max_date, int(data["rows"] or 0))
     return InventoryRow(
         family,
         "PostgreSQL",
@@ -259,11 +280,62 @@ def _inventory_postgres(engine: Engine, family: str, schema: str, table: str, da
         f"{min_date or '—'} → {max_date or '—'}",
         str(data["rows"]),
         ", ".join(cols[:14]) + ("..." if len(cols) > 14 else ""),
-        "是" if enough else "否",
-        "是" if enough else "否",
-        "是" if enough else "否",
-        needs,
+        freshness["supports_5d"],
+        freshness["supports_10d"],
+        freshness["supports_20d"],
+        freshness["needs_backfill"],
     )
+
+
+def _postgres_freshness_status(engine: Engine, full_table: str, max_date: Any, row_count: int) -> dict[str, str]:
+    if row_count <= 0 or max_date is None or pd.isna(max_date):
+        return {"supports_5d": "否", "supports_10d": "否", "supports_20d": "否", "needs_backfill": "是"}
+    if full_table in LEGACY_TABLES:
+        return {
+            "supports_5d": "历史",
+            "supports_10d": "历史",
+            "supports_20d": "历史",
+            "needs_backfill": "否（legacy，不按日刷新）",
+        }
+
+    max_horizon_lag = FORWARD_LOOKING_TABLE_LAGS.get(full_table)
+    if max_horizon_lag is not None:
+        lag = _trading_lag_to_today(engine, max_date)
+        if lag <= max_horizon_lag:
+            return {
+                "supports_5d": "maturing" if lag > 5 else "是",
+                "supports_10d": "maturing" if lag > 10 else "是",
+                "supports_20d": "maturing" if lag > 20 else "是",
+                "needs_backfill": f"否（forward labels mature; lag={lag}td <= {max_horizon_lag}td）",
+            }
+        return {
+            "supports_5d": "否",
+            "supports_10d": "否",
+            "supports_20d": "否",
+            "needs_backfill": f"是（label lag={lag}td > {max_horizon_lag}td）",
+        }
+
+    enough = _enough_recent(max_date)
+    return {
+        "supports_5d": "是" if enough else "否",
+        "supports_10d": "是" if enough else "否",
+        "supports_20d": "是" if enough else "否",
+        "needs_backfill": "否" if enough else "是",
+    }
+
+
+def _trading_lag_to_today(engine: Engine, max_date: Any) -> int:
+    try:
+        latest = pd.to_datetime(max_date).date()
+    except Exception:
+        return 10_000
+    today = bjt_now().date()
+    if latest >= today:
+        return 0
+    try:
+        return len(trading_days_between(engine, latest + dt.timedelta(days=1), today))
+    except Exception:
+        return (today - latest).days
 
 
 def _inventory_duckdb() -> list[InventoryRow]:

@@ -385,6 +385,24 @@ def compute_metrics_cmd(
     """Compute ta.setup_metrics_daily — rolling 60d/250d edge per setup."""
     target = date.fromisoformat(on_date) if on_date else bjt_now().date()
     engine = get_engine()
+    from sqlalchemy import text as _text
+    with engine.connect() as conn:
+        latest_tracking = conn.execute(_text("""
+            SELECT MAX(c.trade_date)
+            FROM ta.candidates_daily c
+            JOIN ta.candidate_tracking t ON t.candidate_id = c.candidate_id
+            WHERE c.trade_date <= :d
+        """), {"d": target}).scalar_one_or_none()
+    if latest_tracking is None:
+        console.print(
+            "[yellow]No candidate tracking found before this metrics date; run "
+            "`ta track-candidates` or a backfill workflow that includes tracking first.[/]"
+        )
+    elif latest_tracking < target - timedelta(days=10):
+        console.print(
+            f"[yellow]Latest tracked candidate date is {latest_tracking}; "
+            "setup metrics may be stale until candidate tracking is backfilled.[/]"
+        )
     n = compute_setup_metrics(engine, target)
     console.print(f"[green]✓ wrote {n} rows to ta.setup_metrics_daily for {target}[/]")
 
