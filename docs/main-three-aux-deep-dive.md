@@ -142,6 +142,34 @@ Asset:      美元偏强 + 铜回调 → A 股汇率压力
 - evening §7 `review_table` 自动 query 这些假设并对比当日实盘表现
 - 形成「假设 → 验证 → 复盘」闭环
 
+### 7.3 Main × Three-Aux date contract
+
+`market.prefetch_market_data(...)` 现在显式拆成两个关键日期：
+
+- `market_observation_date`：主报告要观察的 A 股市场日期
+- `aux_report_date`：Market 要读取的 Macro / Asset / Tech 报告资产日期
+
+固定口径如下：
+
+| Main slot | `market_observation_date` | `aux_report_date` | `aux_report_type` |
+|---|---|---|---|
+| `morning` | `prev_trading_day(report_date)` | `report_date` | `morning_long` |
+| `noon` | `report_date` | `report_date` | `morning_long` |
+| `evening` | `report_date` | `report_date` | `evening_long` |
+
+Why:
+
+- `morning` 主报告的指数 / 广度 / 主线 / 资金观察必须对应上一交易日收盘，而不是北京时间当天尚未开盘的数据。
+- 但 `morning` 引用的三辅晨报资产必须仍然是**当天**北京时间的 `macro/asset/tech morning_long`，不能错误退回上一交易日，更不能偷偷 fallback 到 prior-day aux。
+- `noon` 与 `evening` 维持原行为：主报告观察日与 aux 资产日都等于当日 `report_date`。
+
+Failure semantics:
+
+- 若请求的 `aux_report_date` 上某些 aux family 还**没有**成功 run，属于 soft dependency：Market 继续生成，并在日志中明确记录 `aux_report_date` 与缺失 families。
+- 若请求的 `aux_report_date` 上某个 aux family **已经有 succeeded run**，则该 run 必须带有预期的 `s1` section，并且其中要有 producer-required `headline` 与可用的三项 `top3`；这是 Market 消费该 family 的硬要求。
+- `summary`、`tone`、`tech_state` 属于可选字段：缺失时按 production 现有 fallback / normalization 规则处理，不会单独把该 family 判成 hard failure。
+- 只有在 succeeded run 缺少整段预期 `s1`，或缺少 producer-required headline，或 `top3` 不是可用的三项结论时，才视为已生成资产不一致，Market publication 必须明确失败，不能把这种“坏成功 run”当成普通缺失继续发布。
+
 ---
 
 ## 8. Run modes 对 4 个 family 的影响

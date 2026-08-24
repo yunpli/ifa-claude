@@ -404,7 +404,10 @@ def run_market_evening(
 
     try:
         prefetched = prefetch_market_data(
-            tushare=tushare, engine=engine, on_date=report_date,
+            tushare=tushare,
+            engine=engine,
+            market_observation_date=report_date,
+            aux_report_date=report_date,
             aux_report_type="evening_long",   # use today's evening aux for cross-validation
             end_bjt=to_bjt(data_cutoff_at),
             on_log=on_log,

@@ -176,20 +176,52 @@ def prefetch_market_data(
     *,
     tushare: TuShareClient,
     engine: Engine,
-    on_date: dt.date,
+    market_observation_date: dt.date,
+    aux_report_date: dt.date,
     aux_report_type: str = "morning_long",
     end_bjt: dt.datetime,
     on_log: Callable[[str], None],
     slot: str = "morning",
 ) -> dict[str, Any]:
-    on_log(f"fetching index family + history (slot={slot}, on_date={on_date})…")
-    indices = mdata.fetch_index_family(tushare, on_date=on_date, history_days=10, slot=slot)
+    """Prefetch Market report inputs with explicit date semantics.
+
+    `market_observation_date` drives the actual A-share market snapshot being
+    observed. `aux_report_date` drives which Macro / Asset / Tech report assets
+    Market reads from `report_runs`/`report_sections`. Morning intentionally
+    splits these dates: market observations use the previous trading day, while
+    aux morning summaries stay pinned to the report's own Beijing date.
+    """
+    on_log(
+        "fetching index family + history "
+        f"(slot={slot}, market_observation_date={market_observation_date})…"
+    )
+    indices = mdata.fetch_index_family(
+        tushare,
+        on_date=market_observation_date,
+        history_days=10,
+        slot=slot,
+    )
     on_log("computing whole-A breadth + 涨跌停 + 连板高度…")
-    breadth = mdata.fetch_breadth(tushare, on_date=on_date, slot=slot, engine=engine)
+    breadth = mdata.fetch_breadth(
+        tushare,
+        on_date=market_observation_date,
+        slot=slot,
+        engine=engine,
+    )
     on_log("fetching SW industry rotation (slot-aware)…")
-    sw_rotation = mdata.fetch_sw_rotation(tushare, on_date=on_date, slot=slot, engine=engine)
+    sw_rotation = mdata.fetch_sw_rotation(
+        tushare,
+        on_date=market_observation_date,
+        slot=slot,
+        engine=engine,
+    )
     on_log("fetching main-line candidates (SW L2 dynamic)…")
-    main_lines = mdata.fetch_main_lines(engine, on_date=on_date, client=tushare, slot=slot)
+    main_lines = mdata.fetch_main_lines(
+        engine,
+        on_date=market_observation_date,
+        client=tushare,
+        slot=slot,
+    )
 
     # Slot-aware fetches:
     # - fund_flow_top / dragon_tiger: only evening uses these (consume EOD
@@ -199,24 +231,41 @@ def prefetch_market_data(
     #   blob. Only noon skips (noon doesn't depend on T-1 capital flows).
     if slot in ("evening",):
         on_log("fetching top fund-flow stocks…")
-        fund_top = mdata.fetch_fund_flow_top(tushare, on_date=on_date, top_n=20)
+        fund_top = mdata.fetch_fund_flow_top(tushare, on_date=market_observation_date, top_n=20)
         on_log("fetching dragon-tiger list…")
-        dragon_tiger = mdata.fetch_dragon_tiger(tushare, on_date=on_date, top_n=15)
-        mdata.enrich_stocks(tushare, on_date=on_date, stocks=fund_top + dragon_tiger)
+        dragon_tiger = mdata.fetch_dragon_tiger(tushare, on_date=market_observation_date, top_n=15)
+        mdata.enrich_stocks(
+            tushare,
+            on_date=market_observation_date,
+            stocks=fund_top + dragon_tiger,
+        )
     else:
         on_log(f"skipping fund_flow_top + dragon_tiger (not used in {slot} report)")
         fund_top = []
         dragon_tiger = []
     if slot in ("morning", "evening"):
         on_log("fetching north/south + margin flows…")
-        flows = mdata.fetch_flows(tushare, on_date=on_date)
+        flows = mdata.fetch_flows(tushare, on_date=market_observation_date)
     else:
         on_log(f"skipping flows (not used in {slot} report)")
         flows = mdata.FlowsSnap(north_money=None, south_money=None, hsgt_date=None,
                                   margin_total=None, margin_change=None, margin_date=None)
-    on_log(f"reading three-aux summary for {on_date} ({aux_report_type})…")
-    aux_summaries = mdata.fetch_three_aux_summaries(engine, report_date=on_date,
-                                                      report_type=aux_report_type)
+    on_log(
+        "reading three-aux summary "
+        f"(aux_report_date={aux_report_date}, report_type={aux_report_type}, slot={slot})…"
+    )
+    aux_result = mdata.fetch_three_aux_summaries(
+        engine,
+        report_date=aux_report_date,
+        report_type=aux_report_type,
+    )
+    if aux_result.missing_families:
+        on_log(
+            "three-aux soft dependency missing "
+            f"for aux_report_date={aux_report_date} ({aux_report_type}): "
+            + ", ".join(aux_result.missing_families)
+        )
+    aux_summaries = aux_result.summaries
     on_log("filtering market news (last 24h)…")
     news_df = mdata.fetch_market_news(tushare, end_bjt=end_bjt, lookback_hours=24, max_keep=30)
     return {

@@ -316,7 +316,10 @@ def run_market_noon(
     try:
         # For noon report, use TODAY's data (best-effort intraday)
         prefetched = prefetch_market_data(
-            tushare=tushare, engine=engine, on_date=report_date,
+            tushare=tushare,
+            engine=engine,
+            market_observation_date=report_date,
+            aux_report_date=report_date,
             aux_report_type="morning_long",
             end_bjt=to_bjt(data_cutoff_at),
             on_log=on_log,

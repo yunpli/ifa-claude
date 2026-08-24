@@ -6,6 +6,18 @@ All notable changes to iFA China Market Report System.
 
 ---
 
+## [Unreleased]
+
+### Fixed — Market main × three-aux date contract
+
+- `ifa.families.market._common.prefetch_market_data(...)` now separates `market_observation_date` from `aux_report_date` with explicit keyword semantics instead of overloading one date for both.
+- `market morning` now reads previous-trading-day market observations while still loading same-day `macro/asset/tech morning_long` summaries; `market noon` and `market evening` keep same-day behavior.
+- Three-aux loading remains a soft dependency when same-day aux runs do not yet exist, and logs now include the exact requested aux date plus missing families.
+- Added a publication guard: if a requested same-day aux run already succeeded but its expected `s1` payload is missing the producer-required headline or a usable three-item `top3`, publication fails clearly instead of silently emitting a misleading partial summary; optional `summary` / `tone` / `tech_state` fields still normalize through fallbacks.
+- Added focused Market tests covering Monday and post-holiday morning date splits, soft-missing aux behavior, inconsistent succeeded-run failures, and unchanged noon/evening semantics.
+
+---
+
 ## [2.2.2] — 2026-05-07 — SME MVP1 production release
 
 ### Added — Smart Money Enhanced (SME)
