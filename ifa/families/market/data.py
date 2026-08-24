@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Engine
 
 from ifa.core.report.timezones import BJT
@@ -1143,46 +1143,204 @@ class AuxReportSummary:
     template_version: str | None = None
 
 
-def fetch_three_aux_summaries(engine: Engine, *, report_date: dt.date,
-                               report_type: str = "morning_long") -> dict[str, AuxReportSummary]:
-    """Read the latest succeeded morning-report's tone/headline section per family."""
-    sql = text("""
-        SELECT r.report_family, r.template_version, s.section_key, s.content_json
-          FROM report_sections s
-          JOIN report_runs r ON r.report_run_id = s.report_run_id
-         WHERE r.report_family IN ('macro', 'asset', 'tech')
-           AND r.report_type = :rt
-           AND r.report_date = :rd
-           AND r.status = 'succeeded'
-           AND (s.section_key LIKE '%.s1_tone' OR s.section_key LIKE '%.s1_headline')
-         ORDER BY r.completed_at DESC
-    """)
-    out: dict[str, AuxReportSummary] = {}
-    seen: set[str] = set()
-    with engine.connect() as conn:
-        for r in conn.execute(sql, {"rt": report_type, "rd": report_date}).all():
-            family = r.report_family
-            if family in seen:
-                continue
-            seen.add(family)
-            cj = r.content_json or {}
-            if isinstance(cj, str):
-                try:
-                    cj = json.loads(cj)
-                except Exception:
-                    cj = {}
-            tone = cj.get("tone") or cj.get("tech_state") or cj.get("label") or None
-            headline = cj.get("headline") or cj.get("label") or ""
-            summary = cj.get("summary") or cj.get("text") or cj.get("review_summary") or ""
-            out[family] = AuxReportSummary(
-                family=family,
-                headline=headline,
-                tone_or_state=tone,
-                summary=summary,
-                bullets=cj.get("bullets") or cj.get("validation_points") or [],
-                template_version=r.template_version,
-            )
+@dataclass
+class AuxSummaryFetchResult:
+    summaries: dict[str, AuxReportSummary]
+    requested_report_date: dt.date
+    report_type: str
+    missing_families: list[str] = field(default_factory=list)
+
+
+_AUX_FAMILIES = ("macro", "asset", "tech")
+
+
+def _coerce_section_json(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _normalize_aux_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def _normalize_aux_top3(content_json: dict[str, Any]) -> list[str]:
+    raw = content_json.get("top3")
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        text = _normalize_aux_text(item)
+        if text:
+            out.append(text)
     return out
+
+
+def _normalize_aux_summary(content_json: dict[str, Any], *, headline: str | None) -> str | None:
+    explicit_summary = (
+        _normalize_aux_text(content_json.get("summary"))
+        or _normalize_aux_text(content_json.get("text"))
+        or _normalize_aux_text(content_json.get("review_summary"))
+    )
+    if explicit_summary:
+        return explicit_summary
+    top3 = _normalize_aux_top3(content_json)
+    if top3:
+        return "；".join(top3[:3])
+    return headline
+
+
+def _normalize_aux_bullets(content_json: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = content_json.get("bullets") or content_json.get("validation_points")
+    if isinstance(raw, list) and raw:
+        out: list[dict[str, Any]] = []
+        for item in raw:
+            if isinstance(item, dict):
+                out.append(item)
+            else:
+                text = _normalize_aux_text(item)
+                if text:
+                    out.append({"text": text})
+        if out:
+            return out
+    return [{"text": item} for item in _normalize_aux_top3(content_json)]
+
+
+def _extract_aux_summary_fields(content_json: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    tone = (
+        _normalize_aux_text(content_json.get("tone"))
+        or _normalize_aux_text(content_json.get("tech_state"))
+        or _normalize_aux_text(content_json.get("label"))
+    )
+    headline = _normalize_aux_text(content_json.get("headline")) or _normalize_aux_text(content_json.get("label"))
+    summary = _normalize_aux_summary(content_json, headline=headline)
+    return tone, headline, summary
+
+
+def _expected_aux_section_suffix(report_type: str) -> str:
+    if report_type == "morning_long":
+        return ".s1_tone"
+    if report_type == "evening_long":
+        return ".s1_headline"
+    raise ValueError(f"Unsupported aux report_type={report_type!r}; expected 'morning_long' or 'evening_long'.")
+
+
+def _validate_aux_section(
+    *,
+    content_json: dict[str, Any],
+) -> list[str]:
+    _, headline, _ = _extract_aux_summary_fields(content_json)
+    missing_fields: list[str] = []
+    if not headline:
+        missing_fields.append("headline")
+    if len(_normalize_aux_top3(content_json)) < 3:
+        missing_fields.append("top3")
+    return missing_fields
+
+
+def fetch_three_aux_summaries(engine: Engine, *, report_date: dt.date,
+                               report_type: str = "morning_long") -> AuxSummaryFetchResult:
+    """Read latest succeeded aux summaries for one exact report date.
+
+    Missing families remain a soft dependency: they are returned via
+    `missing_families` and the caller decides whether to log or surface them.
+    But if a family already has a *succeeded* run for the requested
+    `report_date`/`report_type`, the expected section must exist and contain the
+    actual s1 builder contract (`headline` + usable `top3`). Optional
+    `summary`/`tone`/`tech_state` fields must not trigger false failures;
+    instead Market normalizes a summary via safe fallbacks where needed.
+    """
+    runs_sql = text("""
+        SELECT report_run_id, report_family, template_version, completed_at
+          FROM report_runs
+         WHERE report_family IN ('macro', 'asset', 'tech')
+           AND report_type = :rt
+           AND report_date = :rd
+           AND status = 'succeeded'
+         ORDER BY report_family, completed_at DESC, report_run_id DESC
+    """)
+    sections_sql = text("""
+        SELECT report_run_id, section_key, content_json
+          FROM report_sections
+         WHERE report_run_id IN :run_ids
+    """).bindparams(bindparam("run_ids", expanding=True))
+
+    latest_runs: dict[str, Any] = {}
+    with engine.connect() as conn:
+        for row in conn.execute(runs_sql, {"rt": report_type, "rd": report_date}).all():
+            if row.report_family not in latest_runs:
+                latest_runs[row.report_family] = row
+
+        section_rows_by_run: dict[str, list[Any]] = defaultdict(list)
+        if latest_runs:
+            run_ids = [row.report_run_id for row in latest_runs.values()]
+            for row in conn.execute(sections_sql, {"run_ids": run_ids}).all():
+                section_rows_by_run[str(row.report_run_id)].append(row)
+
+    out: dict[str, AuxReportSummary] = {}
+    inconsistencies: list[str] = []
+    section_suffix = _expected_aux_section_suffix(report_type)
+    for family in _AUX_FAMILIES:
+        run_row = latest_runs.get(family)
+        if run_row is None:
+            continue
+
+        run_id = str(run_row.report_run_id)
+        matching_section = next(
+            (row for row in section_rows_by_run.get(run_id, []) if str(row.section_key).endswith(section_suffix)),
+            None,
+        )
+        if matching_section is None:
+            inconsistencies.append(
+                f"{family} has succeeded {report_type} run {run_id} for aux_report_date={report_date} "
+                f"but is missing expected section '*{section_suffix}'"
+            )
+            continue
+
+        content_json = _coerce_section_json(matching_section.content_json)
+        missing_fields = _validate_aux_section(
+            content_json=content_json,
+        )
+        if missing_fields:
+            inconsistencies.append(
+                f"{family} has succeeded {report_type} run {run_id} for aux_report_date={report_date} "
+                f"but section {matching_section.section_key} is incomplete: {', '.join(missing_fields)}"
+            )
+            continue
+
+        tone, headline, summary = _extract_aux_summary_fields(content_json)
+        out[family] = AuxReportSummary(
+            family=family,
+            headline=headline,
+            tone_or_state=tone,
+            summary=summary,
+            bullets=_normalize_aux_bullets(content_json),
+            template_version=run_row.template_version,
+        )
+
+    if inconsistencies:
+        raise ValueError(
+            "Three-aux publication guard failed for "
+            f"aux_report_date={report_date} report_type={report_type}: "
+            + "; ".join(inconsistencies)
+        )
+
+    missing_families = [family for family in _AUX_FAMILIES if family not in out]
+    return AuxSummaryFetchResult(
+        summaries=out,
+        requested_report_date=report_date,
+        report_type=report_type,
+        missing_families=missing_families,
+    )
 
 
 # ─── News (broad market) ─────────────────────────────────────────────────

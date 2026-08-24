@@ -335,7 +335,10 @@ def run_market_morning(
         for line in preflight_freshness_check(engine, family="market", expected_date=prev, slot="morning"):
             on_log(f"[freshness] ⚠ {line}")
         prefetched = prefetch_market_data(
-            tushare=tushare, engine=engine, on_date=prev,
+            tushare=tushare,
+            engine=engine,
+            market_observation_date=prev,
+            aux_report_date=report_date,
             aux_report_type="morning_long",
             end_bjt=to_bjt(data_cutoff_at),
             on_log=on_log,
