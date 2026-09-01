@@ -8,8 +8,8 @@ Sections (matches mainreport.txt §5.2):
   S5  index_panel (flows-only)        资金结构与实时流动性
   S6  sentiment_grid                  市场情绪 · 午间状态
   S7  category_strength (main_line)   重点关注板块午间更新
-  S8  focus_deep                      重点关注股票午间更新 (10)
-  S9  focus_brief                     普通关注股票午间简表 (20)
+  S8  focus_deep                      市场重点观察午间更新 (≤10)
+  S9  focus_brief                     市场跟踪观察午间更新 (≤20)
   S10 scenario_plans                  午后情景计划
   S11 commentary (review hooks)       晚报需要重点 Review 的问题
   S12 disclaimer
@@ -60,7 +60,7 @@ from ._common import (
     prefetch_market_data,
 )
 
-TEMPLATE_VERSION = "market_noon_v2.1.0"
+TEMPLATE_VERSION = "market_noon_v2.2.0"
 REPORT_FAMILY = "main"
 REPORT_TYPE = "midday_long"
 SLOT = "noon"
@@ -325,7 +325,7 @@ def run_market_noon(
             on_log=on_log,
             slot="noon",
         )
-        on_log("enriching focus stocks (10 + 20)…")
+        on_log("enriching dynamic market focus stocks (≤10 + ≤20)…")
         imp_data, reg_data = enrich_market_focus(
             tushare=tushare, on_date=report_date,
             important=prefetched["important_focus"], regular=prefetched["regular_focus"],
@@ -354,10 +354,10 @@ def run_market_noon(
                                        title="市场情绪 · 午间状态",
                                        key="market_noon.s5_sentiment")),
             ("N6 focus deep",   lambda: build_focus_deep_section(ctx, order=6,
-                                       title="重点关注股票午间更新 (10)",
+                                       title="市场重点观察 · 午间重排 (最多10只)",
                                        key="market_noon.s6_focus_deep")),
             ("N7 focus brief",  lambda: build_focus_brief_section(ctx, order=7,
-                                       title="普通关注股票午间简表 (20)",
+                                       title="市场跟踪观察 · 午间重排 (最多20只)",
                                        key="market_noon.s7_focus_brief")),
             ("N10 scenarios",   lambda: _build_n10_scenarios(ctx, sections)),
             ("N11 review hooks",lambda: _build_n11_review_hooks(ctx, sections)),
@@ -407,7 +407,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
     generated_bjt_str = fmt_bjt(utc_now(), "%Y-%m-%d %H:%M")
     report = {
         "title": f"中国 A 股中盘报告 · {run.report_date.strftime('%Y年%m月%d日')}",
-        "subtitle_en": f"China A-Share Market Midday Report — Lindenwood Management LLC · @{user}",
+        "subtitle_en": "China A-Share Market Midday Report — Lindenwood Management LLC",
         "report_date_bjt": run.report_date.strftime("%Y-%m-%d"),
         "data_cutoff_bjt": cutoff_bjt_str,
         "generated_at_bjt": generated_bjt_str,

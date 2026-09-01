@@ -15,7 +15,7 @@ Strict rules (enforced in every prompt):
   - 输出必须是严格 JSON，不输出 JSON 之外的散文或 markdown 围栏。
 """
 
-PROMPT_BUNDLE_VERSION = "market_prompts_v0.1"
+PROMPT_BUNDLE_VERSION = "market_prompts_v0.2"
 
 SYSTEM_PERSONA = (
     "你是一位经验丰富的中国 A 股市场总策略师，"
@@ -136,7 +136,7 @@ MAIN_LINE_SCHEMA = """{
   "directions":[{"direction":"...","logic":"...","trigger_factors":["..."],"validation_today":"...","failure_condition":"...","signal_strength":"medium"}]
 }"""
 
-FOCUS_DEEP_INSTRUCTIONS = """对用户重点关注 10 只标的做深度观察。
+FOCUS_DEEP_INSTRUCTIONS = """对系统按当期市场状态选出的重点观察标的做深度观察。
 
 要求：
 1. 输出 results 数组，按 candidate_index 对齐输入。
@@ -147,7 +147,7 @@ FOCUS_DEEP_SCHEMA = """{
   "results":[{"candidate_index":0,"status":"...","today_observation":"...","scenario_plans":[{"label":"bullish","condition":"...","outlook":"..."},{"label":"base","condition":"...","outlook":"..."},{"label":"failure","condition":"...","outlook":"..."}],"risk_note":"..."}]
 }"""
 
-FOCUS_BRIEF_INSTRUCTIONS = """对用户普通关注 20 只标的逐个一句话简评。
+FOCUS_BRIEF_INSTRUCTIONS = """对系统按当期市场状态选出的跟踪观察标的逐个一句话简评。
 
 要求：
 1. 输出 results 数组，按 candidate_index 对齐。

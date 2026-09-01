@@ -9,8 +9,8 @@ Sections per tech.txt §八:
   S6  mapping_table       今日可能活跃的科技方向
   S7  leader_table        科技龙头与核心票观察
   S8  candidate_pool      潜在蓄势待发标的池
-  S9  focus_deep          用户重点关注科技股深度观察
-  S10 focus_brief         用户普通关注科技股简要观察
+  S9  focus_deep          科技重点观察（≤5）
+  S10 focus_brief         科技跟踪观察（≤10）
   S11 hypotheses_list     今日需要验证的 Tech 假设
   S12 disclaimer          完整免责声明
 """
@@ -47,6 +47,7 @@ from ifa.core.report.run import (
 )
 from ifa.core.tushare import TuShareClient
 from ifa.families.macro.morning import _persist_model_output, _safe_chat_json
+from ifa.families._shared.focus_selection import select_tech_focus
 
 from . import data, prompts
 from .data import (
@@ -56,10 +57,9 @@ from .data import (
     StockMover,
     USStockSnap,
 )
-from .focus import FocusStock, get_focus_for, tech_only
 from .universe import AI_LAYERS, layer_by_id
 
-TEMPLATE_VERSION = "tech_morning_v2.1.0"
+TEMPLATE_VERSION = "tech_morning_v2.2.0"
 REPORT_FAMILY = "tech"
 REPORT_TYPE = "morning_long"
 SLOT = "morning"
@@ -83,6 +83,7 @@ class TechCtx:
     sw_sectors: list[SectorBar]
     important_focus: list[FocusStockSnap]
     regular_focus: list[FocusStockSnap]
+    focus_audit: dict[str, Any]
     on_log: Callable[[str], None]
 
 
@@ -560,9 +561,9 @@ def _build_s9_focus_deep(ctx: TechCtx) -> dict:
     tech_imp = [s for s in ctx.important_focus if s.spec.layer != "non_tech"][:5]
     if not tech_imp:
         return {
-            "key": "tech_morning.s9_focus_deep", "title": "用户重点关注科技股深度观察",
+            "key": "tech_morning.s9_focus_deep", "title": "科技重点观察",
             "order": 9, "type": "focus_deep",
-            "content_json": {"rows": [], "fallback_text": "用户重点关注池中无 Tech 标的。"},
+            "content_json": {"rows": [], "fallback_text": "当前没有达到重点观察门槛的科技标的。", "selection_audit": ctx.focus_audit},
         }
     bulk = []
     for i, snap in enumerate(tech_imp):
@@ -572,6 +573,7 @@ def _build_s9_focus_deep(ctx: TechCtx) -> dict:
             "stock_name": snap.spec.display_name,
             "layer_id": snap.spec.layer,
             "sub_theme": snap.spec.sub_theme,
+            "selection_reason": snap.spec.note,
             "close": snap.close, "pct_change": snap.pct_change,
             "turnover_rate": snap.turnover_rate, "pe": snap.pe, "pb": snap.pb,
             "moneyflow_net": snap.moneyflow_net,
@@ -579,7 +581,7 @@ def _build_s9_focus_deep(ctx: TechCtx) -> dict:
             "data_status": snap.data_status,
         })
     user = f"""
-=== 用户重点关注 Tech 标的 ({len(bulk)} 只) ===
+=== 系统动态科技重点观察 ({len(bulk)} 只) ===
 {json.dumps(bulk, ensure_ascii=False, indent=2)}
 
 === 任务 ===
@@ -621,9 +623,9 @@ def _build_s9_focus_deep(ctx: TechCtx) -> dict:
         })
     return {
         "key": "tech_morning.s9_focus_deep",
-        "title": f"用户重点关注科技股深度观察 · @{ctx.user}",
+        "title": "科技重点观察",
         "order": 9, "type": "focus_deep",
-        "content_json": {"rows": rows},
+        "content_json": {"rows": rows, "selection_audit": ctx.focus_audit},
         "prompt_name": "tech_morning.s9_focus_deep", "model_output_id": moid,
     }
 
@@ -634,9 +636,9 @@ def _build_s10_focus_brief(ctx: TechCtx) -> dict:
     tech_reg = [s for s in ctx.regular_focus if s.spec.layer != "non_tech"][:10]
     if not tech_reg:
         return {
-            "key": "tech_morning.s10_focus_brief", "title": "用户普通关注科技股简要观察",
+            "key": "tech_morning.s10_focus_brief", "title": "科技跟踪观察",
             "order": 10, "type": "focus_brief",
-            "content_json": {"rows": [], "fallback_text": "用户普通关注池中无 Tech 标的。"},
+            "content_json": {"rows": [], "fallback_text": "当前没有达到跟踪观察门槛的科技标的。", "selection_audit": ctx.focus_audit},
         }
     bulk = []
     for i, snap in enumerate(tech_reg):
@@ -644,12 +646,13 @@ def _build_s10_focus_brief(ctx: TechCtx) -> dict:
             "candidate_index": i,
             "stock_code": snap.spec.ts_code, "stock_name": snap.spec.display_name,
             "layer_id": snap.spec.layer, "sub_theme": snap.spec.sub_theme,
+            "selection_reason": snap.spec.note,
             "pct_change": snap.pct_change, "turnover_rate": snap.turnover_rate,
             "moneyflow_net": snap.moneyflow_net,
             "history_close": snap.history_close[-5:],
         })
     user = f"""
-=== 用户普通关注 Tech 标的 ({len(bulk)} 只) ===
+=== 系统动态科技跟踪观察 ({len(bulk)} 只) ===
 {json.dumps(bulk, ensure_ascii=False, indent=2)}
 
 === 任务 ===
@@ -688,9 +691,9 @@ def _build_s10_focus_brief(ctx: TechCtx) -> dict:
         })
     return {
         "key": "tech_morning.s10_focus_brief",
-        "title": f"用户普通关注科技股简要观察 · @{ctx.user}",
+        "title": "科技跟踪观察",
         "order": 10, "type": "focus_brief",
-        "content_json": {"rows": rows},
+        "content_json": {"rows": rows, "selection_audit": ctx.focus_audit},
         "prompt_name": "tech_morning.s10_focus_brief", "model_output_id": moid,
     }
 
@@ -805,11 +808,25 @@ def run_tech_morning(
         on_log(f"  {len(news_df)} news after filter")
         on_log("fetching SW tech sector indexes…")
         sw_sectors = data.fetch_tech_sw_sectors(tushare, on_date=prev_day, slot="morning")
-        on_log(f"loading user '{user}' focus list and enriching…")
-        important_focus_specs, regular_focus_specs = get_focus_for(user)
+        on_log("selecting dynamic Tech focus (sector-first, stock-second)…")
+        focus = select_tech_focus(
+            engine=engine,
+            client=tushare,
+            on_date=prev_day,
+            slot="morning",
+            boards_by_layer=boards_by_layer,
+            tech_members=tech_members,
+            limit_up=limit_up,
+            top_movers=top_movers,
+            moneyflow_by_code=mf_by_code,
+        )
+        on_log(
+            f"  dynamic focus important={len(focus.important)} "
+            f"regular={len(focus.regular)} quality={focus.audit.get('quality_flag')}"
+        )
         important_focus, regular_focus = data.enrich_focus(
             tushare, on_date=prev_day,
-            important=important_focus_specs, regular=regular_focus_specs,
+            important=focus.important, regular=focus.regular,
         )
 
         ctx = TechCtx(
@@ -819,6 +836,7 @@ def run_tech_morning(
             moneyflow_by_code=mf_by_code, us_stocks=us_stocks,
             news_df=news_df, sw_sectors=sw_sectors,
             important_focus=important_focus, regular_focus=regular_focus,
+            focus_audit=focus.audit,
             on_log=on_log,
         )
 
@@ -874,7 +892,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
     generated_bjt_str = fmt_bjt(utc_now(), "%Y-%m-%d %H:%M")
     report = {
         "title": f"中国科技 / AI 早盘报告 · {run.report_date.strftime('%Y年%m月%d日')}",
-        "subtitle_en": f"China Tech / AI Equity Pre-Open Briefing — Lindenwood Management LLC · @{user}",
+        "subtitle_en": "China Tech / AI Equity Pre-Open Briefing — Lindenwood Management LLC",
         "report_date_bjt": run.report_date.strftime("%Y-%m-%d"),
         "data_cutoff_bjt": cutoff_bjt_str,
         "generated_at_bjt": generated_bjt_str,
@@ -887,7 +905,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
     from ifa.core.report.output import output_dir_for_run
     out_root = output_dir_for_run(settings, run)
     bjt_now = to_bjt(utc_now())
-    fname = f"CN_tech_morning_{user}_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
+    fname = f"CN_tech_morning_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
     out_path = out_root / fname
     out_path.write_text(html, encoding="utf-8")
     return out_path

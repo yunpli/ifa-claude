@@ -9,8 +9,8 @@ Sections (matches mainreport.txt §4.2):
   S6  dragon_tiger                     龙虎榜与机构 / 游资
   S7  news_list                        新闻 / 公告 / 政策
   S8  category_strength (main_line)    今日重点关注方向
-  S9  focus_deep                       重点关注股票 (10)
-  S10 focus_brief                      普通关注股票 (20)
+  S9  focus_deep                       市场重点观察 (≤10)
+  S10 focus_brief                      市场跟踪观察 (≤20)
   S11 risk_list                        今日风险清单
   S12 hypotheses_list                  今日待验证主报告假设
   S13 disclaimer
@@ -61,7 +61,7 @@ from ._common import (
     prefetch_market_data,
 )
 
-TEMPLATE_VERSION = "market_morning_v2.1.0"
+TEMPLATE_VERSION = "market_morning_v2.2.0"
 REPORT_FAMILY = "main"
 REPORT_TYPE = "morning_long"
 SLOT = "morning"
@@ -344,7 +344,7 @@ def run_market_morning(
             on_log=on_log,
             slot="morning",
         )
-        on_log("enriching focus stocks (10 + 20)…")
+        on_log("enriching dynamic market focus stocks (≤10 + ≤20)…")
         imp_data, reg_data = enrich_market_focus(
             tushare=tushare, on_date=prev,
             important=prefetched["important_focus"], regular=prefetched["regular_focus"],
@@ -379,10 +379,10 @@ def run_market_morning(
                                        key="market_morning.s7_news")),
             ("S8 main-line",     lambda: _build_s8_main_line(ctx)),
             ("S9 focus deep",    lambda: build_focus_deep_section(ctx, order=9,
-                                       title="重点关注股票深度观察 (10)",
+                                       title="市场重点观察 · 盘前清单 (最多10只)",
                                        key="market_morning.s9_focus_deep")),
             ("S10 focus brief",  lambda: build_focus_brief_section(ctx, order=10,
-                                       title="普通关注股票简要观察 (20)",
+                                       title="市场跟踪观察 · 盘前清单 (最多20只)",
                                        key="market_morning.s10_focus_brief")),
             ("S11 risks",        lambda: _build_s11_risk(ctx, sections)),
             ("S12 hypotheses",   lambda: _build_s12_hypotheses(ctx, sections)),
@@ -431,7 +431,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
     generated_bjt_str = fmt_bjt(utc_now(), "%Y-%m-%d %H:%M")
     report = {
         "title": f"中国 A 股早盘报告 · {run.report_date.strftime('%Y年%m月%d日')}",
-        "subtitle_en": f"China A-Share Market Morning Report — Lindenwood Management LLC · @{user}",
+        "subtitle_en": "China A-Share Market Morning Report — Lindenwood Management LLC",
         "report_date_bjt": run.report_date.strftime("%Y-%m-%d"),
         "data_cutoff_bjt": cutoff_bjt_str,
         "generated_at_bjt": generated_bjt_str,

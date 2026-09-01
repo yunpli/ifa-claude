@@ -7,7 +7,7 @@ buy/sell instructions, only observation conditions / risk levels / failure
 conditions.
 """
 
-PROMPT_BUNDLE_VERSION = "tech_prompts_v0.1"
+PROMPT_BUNDLE_VERSION = "tech_prompts_v0.2"
 
 SYSTEM_PERSONA = (
     "你是一位资深 A 股科技板块策略与产业链研究专家，"
@@ -131,8 +131,8 @@ CANDIDATE_SCHEMA = """{
   "candidates":[{"stock_code":"...","stock_name":"...","layer_id":"chips","setup_logic":"...","trigger_condition":"...","failure_condition":"...","risk_note":"...","signal_strength":"medium"}]
 }"""
 
-# ─── S8 / S9: 用户关注 ────────────────────────────────────────────────────
-FOCUS_DEEP_INSTRUCTIONS = """对用户重点关注的 tech 标的（最多 5 只），逐个生成深度观察对象。
+# ─── S8 / S9: 系统动态观察 ────────────────────────────────────────────────
+FOCUS_DEEP_INSTRUCTIONS = """对系统按当期科技板块状态选出的重点观察标的（最多 5 只），逐个生成深度观察对象。
 
 要求：
 1. 输出 results 数组，按 candidate_index 与输入对齐。
@@ -143,7 +143,7 @@ FOCUS_DEEP_SCHEMA = """{
   "results":[{"candidate_index":0,"status":"趋势中军","today_observation":"...","scenario_plans":[{"label":"bullish","condition":"放量站上 60 日线","outlook":"延续扩散"},{"label":"base","condition":"区间震荡","outlook":"维持观察"},{"label":"failure","condition":"跌破 20 日线","outlook":"进入退潮观察"}],"risk_note":"..."}]
 }"""
 
-FOCUS_BRIEF_INSTRUCTIONS = """对用户普通关注的 tech 标的（最多 10 只），每只一句话简评。
+FOCUS_BRIEF_INSTRUCTIONS = """对系统按当期科技板块状态选出的跟踪观察标的（最多 10 只），每只一句话简评。
 
 要求：
 1. 输出 results 数组，按 candidate_index 对齐。

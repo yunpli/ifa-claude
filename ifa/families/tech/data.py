@@ -20,7 +20,7 @@ from sqlalchemy.engine import Engine
 from ifa.core.report.timezones import BJT
 from ifa.core.tushare import TuShareClient
 
-from .focus import FocusStock, get_focus_for, tech_only
+from .focus import FocusStock
 from .universe import (
     AI_LAYERS,
     all_tech_sector_codes,
@@ -448,7 +448,7 @@ def fetch_tech_news(
     return out.head(max_keep).reset_index(drop=True)
 
 
-# ─── User focus enrichment ────────────────────────────────────────────────
+# ─── System-selected focus enrichment ────────────────────────────────────
 
 @dataclass
 class FocusStockSnap:

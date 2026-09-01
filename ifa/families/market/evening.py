@@ -9,8 +9,8 @@ Sections (matches mainreport.txt §6.2):
   S6  three_aux_summary        三辅报告验证汇总
   S7  review_table             早报主报告假设 Review
   S8  review_table             中报判断 Review
-  S9  focus_deep               重点关注股票复盘 (10)
-  S10 focus_brief              普通关注股票复盘 (20)
+  S9  focus_deep               市场重点观察收盘确认 (≤10)
+  S10 focus_brief              市场跟踪观察收盘更新 (≤20)
   S11 attribution              今日 A 股驱动归因
   S12 hypotheses_list          今日可沉淀判断资产 / 明日待验证
   S13 watchlist                明日市场观察清单
@@ -63,7 +63,7 @@ from ._common import (
     prefetch_market_data,
 )
 
-TEMPLATE_VERSION = "market_evening_v2.1.0"
+TEMPLATE_VERSION = "market_evening_v2.2.0"
 REPORT_FAMILY = "main"
 REPORT_TYPE = "evening_long"
 SLOT = "evening"
@@ -413,7 +413,7 @@ def run_market_evening(
             on_log=on_log,
             slot="evening",
         )
-        on_log("enriching focus stocks (10 + 20)…")
+        on_log("enriching dynamic market focus stocks (≤10 + ≤20)…")
         imp_data, reg_data = enrich_market_focus(
             tushare=tushare, on_date=report_date,
             important=prefetched["important_focus"], regular=prefetched["regular_focus"],
@@ -454,10 +454,10 @@ def run_market_evening(
                                        order=8, title="中报判断 Review",
                                        key="market_evening.s8_noon_review")),
             ("E9 focus deep",   lambda: build_focus_deep_section(ctx, order=9,
-                                       title="重点关注股票复盘 (10)",
+                                       title="市场重点观察 · 收盘确认 (最多10只)",
                                        key="market_evening.s9_focus_deep")),
             ("E10 focus brief", lambda: build_focus_brief_section(ctx, order=10,
-                                       title="普通关注股票复盘 (20)",
+                                       title="市场跟踪观察 · 收盘更新 (最多20只)",
                                        key="market_evening.s10_focus_brief")),
             ("E11 attribution", lambda: _build_e11_attribution(ctx)),
             ("E12 sticky",      lambda: _build_e12_sticky(ctx, sections)),
@@ -506,7 +506,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
     generated_bjt_str = fmt_bjt(utc_now(), "%Y-%m-%d %H:%M")
     report = {
         "title": f"中国 A 股晚盘报告 · {run.report_date.strftime('%Y年%m月%d日')}",
-        "subtitle_en": f"China A-Share Market Evening Report — Lindenwood Management LLC · @{user}",
+        "subtitle_en": "China A-Share Market Evening Report — Lindenwood Management LLC",
         "report_date_bjt": run.report_date.strftime("%Y-%m-%d"),
         "data_cutoff_bjt": cutoff_bjt_str,
         "generated_at_bjt": generated_bjt_str,

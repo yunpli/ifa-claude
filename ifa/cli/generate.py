@@ -67,7 +67,11 @@ def macro(
 def tech(
     slot: str = typer.Option(..., "--slot", help="morning | evening"),
     report_date: str = typer.Option(..., "--report-date", help="YYYY-MM-DD (Beijing date)"),
-    user: str = typer.Option("default", "--user", help="user identifier; v1 only supports 'default'"),
+    user: str = typer.Option(
+        "default", "--user",
+        help="Deprecated compatibility label; does not change system-selected focus stocks.",
+        hidden=True,
+    ),
     cutoff_time: str | None = typer.Option(
         None, "--cutoff-time",
         help="HH:MM Beijing time. Default 09:10 for morning, 18:00 for evening."),
@@ -111,7 +115,11 @@ def tech(
 def market(
     slot: str = typer.Option(..., "--slot", help="morning | noon | evening"),
     report_date: str = typer.Option(..., "--report-date", help="YYYY-MM-DD (Beijing date)"),
-    user: str = typer.Option("default", "--user"),
+    user: str = typer.Option(
+        "default", "--user",
+        help="Deprecated compatibility label; does not change system-selected focus stocks.",
+        hidden=True,
+    ),
     cutoff_time: str | None = typer.Option(
         None, "--cutoff-time",
         help="HH:MM Beijing time. Default 09:10 (morning) / 12:15 (noon) / 18:00 (evening)."),

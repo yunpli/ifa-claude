@@ -7,8 +7,8 @@ Sections per tech.txt §九:
   S4  review_table         早报 Tech 假设 Review
   S5  leader_table         科技龙头与高标复盘
   S6  candidate_pool       潜在蓄势池表现复盘 (review-flavored)
-  S7  focus_deep           用户重点关注科技股复盘
-  S8  focus_brief          用户普通关注科技股复盘
+  S7  focus_deep           科技重点观察收盘确认（≤5）
+  S8  focus_brief          科技跟踪观察收盘更新（≤10）
   S9  news_list            全球科技新闻 / 产业事件复盘
   S10 watchlist            明日 Tech 观察清单
   S11 hypotheses_list      可沉淀的 Tech 判断资产
@@ -48,9 +48,9 @@ from ifa.core.report.run import (
 )
 from ifa.core.tushare import TuShareClient
 from ifa.families.macro.morning import _persist_model_output, _safe_chat_json
+from ifa.families._shared.focus_selection import select_tech_focus
 
 from . import data, prompts
-from .focus import get_focus_for
 from .morning import (
     TechCtx,
     _build_s2_layer_map,
@@ -66,7 +66,7 @@ from .morning import (
     _fmt_pct,
 )
 
-TEMPLATE_VERSION = "tech_evening_v2.1.0"
+TEMPLATE_VERSION = "tech_evening_v2.2.0"
 REPORT_FAMILY = "tech"
 REPORT_TYPE = "evening_long"
 SLOT = "evening"
@@ -300,13 +300,13 @@ def _build_e6_candidates(ctx: TechCtx) -> dict:
 def _build_e7_focus_deep(ctx: TechCtx) -> dict:
     sec = _build_s9_focus_deep(ctx)
     return _retag(sec, key="tech_evening.s7_focus_deep",
-                  title=f"用户重点关注科技股复盘 · @{ctx.user}", order=7)
+                  title="科技重点观察 · 收盘确认", order=7)
 
 
 def _build_e8_focus_brief(ctx: TechCtx) -> dict:
     sec = _build_s10_focus_brief(ctx)
     return _retag(sec, key="tech_evening.s8_focus_brief",
-                  title=f"用户普通关注科技股复盘 · @{ctx.user}", order=8)
+                  title="科技跟踪观察 · 收盘更新", order=8)
 
 
 def _build_e9_news(ctx: TechCtx) -> dict:
@@ -449,11 +449,25 @@ def run_tech_evening(
         news_df = data.fetch_tech_news(tushare, end_bjt=to_bjt(data_cutoff_at), lookback_hours=24)
         on_log("fetching SW TMT sectors…")
         sw_sectors = data.fetch_tech_sw_sectors(tushare, on_date=report_date, slot="evening", engine=engine)
-        on_log(f"loading user '{user}' focus list and enriching…")
-        important_focus_specs, regular_focus_specs = get_focus_for(user)
+        on_log("selecting dynamic Tech focus (sector-first, stock-second)…")
+        focus = select_tech_focus(
+            engine=engine,
+            client=tushare,
+            on_date=report_date,
+            slot="evening",
+            boards_by_layer=boards_by_layer,
+            tech_members=tech_members,
+            limit_up=limit_up,
+            top_movers=top_movers,
+            moneyflow_by_code=mf_by_code,
+        )
+        on_log(
+            f"  dynamic focus important={len(focus.important)} "
+            f"regular={len(focus.regular)} quality={focus.audit.get('quality_flag')}"
+        )
         important_focus, regular_focus = data.enrich_focus(
             tushare, on_date=report_date,
-            important=important_focus_specs, regular=regular_focus_specs,
+            important=focus.important, regular=focus.regular,
         )
         on_log("loading this morning's Tech hypotheses…")
         morning_hyps = _load_morning_hypotheses(engine, report_date=report_date)
@@ -464,6 +478,7 @@ def run_tech_evening(
             limit_up=limit_up, top_movers=top_movers, moneyflow_by_code=mf_by_code,
             us_stocks=us_stocks, news_df=news_df, sw_sectors=sw_sectors,
             important_focus=important_focus, regular_focus=regular_focus,
+            focus_audit=focus.audit,
             on_log=on_log,
         )
 
@@ -526,7 +541,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
     generated_bjt_str = fmt_bjt(utc_now(), "%Y-%m-%d %H:%M")
     report = {
         "title": f"中国科技 / AI 晚盘报告 · {run.report_date.strftime('%Y年%m月%d日')}",
-        "subtitle_en": f"China Tech / AI Equity Post-Close Briefing — Lindenwood Management LLC · @{user}",
+        "subtitle_en": "China Tech / AI Equity Post-Close Briefing — Lindenwood Management LLC",
         "report_date_bjt": run.report_date.strftime("%Y-%m-%d"),
         "data_cutoff_bjt": cutoff_bjt_str,
         "generated_at_bjt": generated_bjt_str,
@@ -540,7 +555,7 @@ def _render_and_save(run: ReportRun, sections: list[dict], settings, *, user: st
     from ifa.core.report.output import output_dir_for_run
     out_root = output_dir_for_run(settings, run)
     bjt_now = to_bjt(utc_now())
-    fname = f"CN_tech_evening_{user}_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
+    fname = f"CN_tech_evening_{run.report_date.strftime('%Y%m%d')}_{bjt_now.strftime('%H%M')}.html"
     out_path = out_root / fname
     out_path.write_text(html, encoding="utf-8")
     return out_path

@@ -623,3 +623,14 @@ ifa/families/ta/
 
 alembic/versions/c1d2e3f4g5h6_ta_event_signal_daily.py  ← 当前 head
 ```
+
+---
+
+## Market / Tech 动态观察名单（Codex 2026-09-01）
+
+- 用户已取消客户端“个人关注股票 / watchlist”产品能力。Market 早/午/晚与 Tech 早/晚的两档股票现在定义为系统市场注意力清单：`重点观察` 与 `跟踪观察`，不是用户持仓、自选或个性化推荐。
+- 旧 `ifa/families/tech/focus.py` hard-coded 10+20 ticker 已删除。统一确定性引擎在 `ifa/families/_shared/focus_selection.py`，logic version `dynamic_focus_v1_0`；Market 上限 10+20，Tech 上限 5+10，两档互斥且不强制填满。
+- 算法坚持 sector-first / stock-second：PIT SW L2 成分 → 当期动态主线/Tech 五层活跃行业 → 正式龙头角色 + SME 资金/状态/扩散 + 量价/流动性 + 时点事件确认。LLM 只解释已选 ticker，不得新增、删除或改排。
+- 时点硬规则：早报读上一交易日闭市；Market 午报只允许 `trade_date < on_date` 的底层特征再叠加当日上午 `rt_k`，禁止当日 EOD 泄漏；晚报读当日闭市，EOD 延迟才用当天实时行情覆盖。
+- 每个 focus section 的 `content_json.selection_audit` 保存逻辑版本、观察/底层日期、活跃板块、候选/入选数、逐股分数/确认项/原因/来源、质量标志，并显式记录 `personalization=disabled`、`uses_hardcoded_tickers=false`。
+- 没有固定 ticker fallback。动态源缺失时少选/空选并标记 degraded/empty。此次不新增 DB 表、不改 ETL、不需历史重算；旧报告不变，新报告从 Market/Tech template `v2.2.0` 与 prompts `v0.2` 生效。完整契约见 `docs/dynamic-focus-selection.md`。

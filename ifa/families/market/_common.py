@@ -20,11 +20,7 @@ from ifa.core.report.run import (
 from ifa.core.report.timezones import BJT, fmt_bjt, to_bjt
 from ifa.core.tushare import TuShareClient
 from ifa.families.macro.morning import _safe_chat_json
-from ifa.families.tech.focus import (
-    DEFAULT_IMPORTANT,
-    DEFAULT_REGULAR,
-    FocusStock,
-)
+from ifa.families._shared.focus_selection import FocusStock, select_market_focus
 
 from . import data as mdata
 from . import prompts
@@ -50,6 +46,7 @@ class MarketCtx:
     regular_focus: list[FocusStock]
     important_focus_data: dict[str, dict[str, Any]] = field(default_factory=dict)
     regular_focus_data: dict[str, dict[str, Any]] = field(default_factory=dict)
+    focus_audit: dict[str, Any] = field(default_factory=dict)
     morning_hypotheses: list[dict] = field(default_factory=list)
     noon_hypotheses: list[dict] = field(default_factory=list)
     on_log: Callable[[str], None] = lambda m: None
@@ -268,13 +265,29 @@ def prefetch_market_data(
     aux_summaries = aux_result.summaries
     on_log("filtering market news (last 24h)…")
     news_df = mdata.fetch_market_news(tushare, end_bjt=end_bjt, lookback_hours=24, max_keep=30)
+    on_log("selecting dynamic market focus (sector-first, stock-second)…")
+    focus = select_market_focus(
+        engine=engine,
+        client=tushare,
+        on_date=market_observation_date,
+        slot=slot,
+        main_lines=main_lines,
+        fund_top=fund_top,
+        dragon_tiger=dragon_tiger,
+    )
+    on_log(
+        "  dynamic focus "
+        f"important={len(focus.important)} regular={len(focus.regular)} "
+        f"quality={focus.audit.get('quality_flag')}"
+    )
     return {
         "indices": indices, "breadth": breadth, "flows": flows,
         "sw_rotation": sw_rotation, "main_lines": main_lines,
         "fund_top": fund_top, "dragon_tiger": dragon_tiger,
         "news_df": news_df, "aux_summaries": aux_summaries,
-        "important_focus": list(DEFAULT_IMPORTANT),
-        "regular_focus": list(DEFAULT_REGULAR),
+        "important_focus": focus.important,
+        "regular_focus": focus.regular,
+        "focus_audit": focus.audit,
     }
 
 
@@ -943,13 +956,15 @@ def build_focus_deep_section(ctx: MarketCtx, *, order: int, title: str, key: str
     items = ctx.important_focus[:10]
     if not items:
         return {"key": key, "title": title, "order": order, "type": "focus_deep",
-                "content_json": {"rows": [], "fallback_text": "重点关注池为空。"}}
+                "content_json": {"rows": [], "fallback_text": "当前没有达到重点观察门槛的标的。",
+                                 "selection_audit": ctx.focus_audit}}
     bulk = []
     for i, spec in enumerate(items):
         d = ctx.important_focus_data.get(spec.ts_code, {})
         bulk.append({
             "candidate_index": i, "stock_code": spec.ts_code, "stock_name": spec.display_name,
             "layer": spec.layer, "sub_theme": spec.sub_theme,
+            "selection_reason": spec.note,
             "close": d.get("close"), "pct_change": d.get("pct_change"),
             "amount": d.get("amount"), "volume": d.get("volume"),
             "moneyflow_net": d.get("moneyflow_net"),
@@ -957,7 +972,7 @@ def build_focus_deep_section(ctx: MarketCtx, *, order: int, title: str, key: str
             "history_close": (d.get("history_close") or [])[-5:],
         })
     user = f"""
-=== 用户重点关注 ({len(bulk)} 只，全市场 — 不限于 Tech) ===
+=== 系统动态重点观察 ({len(bulk)} 只，全市场) ===
 {json.dumps(bulk, ensure_ascii=False, indent=2)}
 
 === 任务 ===
@@ -999,9 +1014,9 @@ def build_focus_deep_section(ctx: MarketCtx, *, order: int, title: str, key: str
             "risk_note": info.get("risk_note") or "",
         })
     return {
-        "key": key, "title": f"{title} · @{ctx.user}",
+        "key": key, "title": title,
         "order": order, "type": "focus_deep",
-        "content_json": {"rows": rows},
+        "content_json": {"rows": rows, "selection_audit": ctx.focus_audit},
         "prompt_name": key, "model_output_id": moid,
     }
 
@@ -1010,20 +1025,22 @@ def build_focus_brief_section(ctx: MarketCtx, *, order: int, title: str, key: st
     items = ctx.regular_focus[:20]
     if not items:
         return {"key": key, "title": title, "order": order, "type": "focus_brief",
-                "content_json": {"rows": [], "fallback_text": "普通关注池为空。"}}
+                "content_json": {"rows": [], "fallback_text": "当前没有达到跟踪观察门槛的标的。",
+                                 "selection_audit": ctx.focus_audit}}
     bulk = []
     for i, spec in enumerate(items):
         d = ctx.regular_focus_data.get(spec.ts_code, {})
         bulk.append({
             "candidate_index": i, "stock_code": spec.ts_code, "stock_name": spec.display_name,
             "layer": spec.layer, "sub_theme": spec.sub_theme,
+            "selection_reason": spec.note,
             "pct_change": d.get("pct_change"),
             "amount": d.get("amount"), "volume": d.get("volume"),
             "moneyflow_net": d.get("moneyflow_net"),
             "moneyflow_status": d.get("moneyflow_status"),
         })
     user = f"""
-=== 用户普通关注 ({len(bulk)} 只) ===
+=== 系统动态跟踪观察 ({len(bulk)} 只) ===
 {json.dumps(bulk, ensure_ascii=False, indent=2)}
 
 === 任务 ===
@@ -1061,8 +1078,8 @@ def build_focus_brief_section(ctx: MarketCtx, *, order: int, title: str, key: st
             "today_hint": info.get("today_hint") or None,
         })
     return {
-        "key": key, "title": f"{title} · @{ctx.user}",
+        "key": key, "title": title,
         "order": order, "type": "focus_brief",
-        "content_json": {"rows": rows},
+        "content_json": {"rows": rows, "selection_audit": ctx.focus_audit},
         "prompt_name": key, "model_output_id": moid,
     }
